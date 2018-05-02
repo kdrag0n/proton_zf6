@@ -46,6 +46,7 @@ config ARM64
 	select ARCH_SUPPORTS_MEMORY_FAILURE
 	select ARCH_SUPPORTS_LTO_CLANG
 	select ARCH_SUPPORTS_THINLTO
+	select ARCH_SUPPORTS_SHADOW_CALL_STACK if CC_HAVE_SHADOW_CALL_STACK
 	select ARCH_SUPPORTS_ATOMIC_RMW
 	select ARCH_SUPPORTS_NUMA_BALANCING
 	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION
@@ -893,6 +894,10 @@ endif
 config ARCH_MEMORY_PROBE
 	def_bool y
 	depends on MEMORY_HOTPLUG
+
+# Supported by clang >= 7.0
+config CC_HAVE_SHADOW_CALL_STACK
+	def_bool y if CLANG_VERSION >= 70000
 
 config SECCOMP
 	bool "Enable seccomp to safely compute untrusted bytecode"
