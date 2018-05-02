@@ -92,6 +92,7 @@
 #include <linux/thread_info.h>
 #include <linux/cpufreq_times.h>
 #include <linux/simple_lmk.h>
+#include <linux/scs.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -369,6 +370,7 @@ void put_task_stack(struct task_struct *tsk)
 void free_task(struct task_struct *tsk)
 {
 	cpufreq_task_times_exit(tsk);
+	scs_release(tsk);
 
 #ifndef CONFIG_THREAD_INFO_IN_TASK
 	/*
@@ -494,6 +496,8 @@ void __init fork_init(void)
 			  NULL, free_vm_stack_cache);
 #endif
 
+	scs_init();
+
 	lockdep_init_task(&init_task);
 }
 
@@ -546,6 +550,10 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	atomic_set(&tsk->stack_refcount, 1);
 #endif
 
+	if (err)
+		goto free_stack;
+
+	err = scs_prepare(tsk, node);
 	if (err)
 		goto free_stack;
 
