@@ -298,6 +298,7 @@ int dev_pm_opp_of_cpumask_add_table(const struct cpumask *cpumask);
 void dev_pm_opp_of_cpumask_remove_table(const struct cpumask *cpumask);
 int dev_pm_opp_of_get_sharing_cpus(struct device *cpu_dev, struct cpumask *cpumask);
 struct device_node *dev_pm_opp_of_get_opp_desc_node(struct device *dev);
+int of_dev_pm_opp_get_cpu_power(unsigned long *mW, unsigned long *KHz, int cpu);
 #else
 static inline int dev_pm_opp_of_add_table(struct device *dev)
 {
@@ -325,6 +326,10 @@ static inline int dev_pm_opp_of_get_sharing_cpus(struct device *cpu_dev, struct 
 static inline struct device_node *dev_pm_opp_of_get_opp_desc_node(struct device *dev)
 {
 	return NULL;
+}
+static inline int of_dev_pm_opp_get_cpu_power(unsigned long *mW, unsigned long *KHz, int cpu)
+{
+	return -ENOTSUPP;
 }
 #endif
 
