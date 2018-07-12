@@ -221,4 +221,6 @@ source "drivers/sensors/Kconfig"
 
 source "drivers/esoc/Kconfig"
 
+source "drivers/energy_model/Kconfig"
+
 endmenu
