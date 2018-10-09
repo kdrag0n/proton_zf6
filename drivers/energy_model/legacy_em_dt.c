@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 
 static cpumask_var_t cpus_to_visit;
+static bool freq_power_tuples;
 
 static DEFINE_PER_CPU(unsigned long, nr_states) = 0;
 
@@ -62,7 +63,7 @@ static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 			       void *data)
 {
 	struct em_data_callback em_cb = EM_DATA_CB(get_power);
-	unsigned long nstates, scale_cpu, max_freq;
+	unsigned long nstates, scale_cpu, max_freq, prune = 0;
 	struct cpufreq_policy *policy = data;
 	const struct property *prop;
 	struct device_node *cn, *cp;
@@ -114,6 +115,23 @@ static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 	}
 
 	nstates = (prop->length / sizeof(u32)) / 2;
+
+	/*
+	 * Check if the energy model contains frequency/power instead of
+	 * capacity/power tuples.
+	 */
+	if (!of_find_property(cn, "freq-energy-model", NULL))
+		goto copy;
+
+	freq_power_tuples = true;
+
+	/* Remove tuples for which frequency is higher than max frequency. */
+	for (i = 0, tmp = prop->value; i < nstates; i++, tmp += 2)
+		if (max_freq < be32_to_cpup(tmp))
+			prune++;
+
+	nstates -= prune;
+copy:
 	em = kcalloc(nstates, sizeof(struct em_cap_state), GFP_KERNEL);
 	if (!em) {
 		ret = -ENOMEM;
@@ -122,9 +140,15 @@ static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 
 	/* Copy the capacity and power cost to the table. */
 	for (i = 0, tmp = prop->value; i < nstates; i++) {
-		em[i].capacity = be32_to_cpup(tmp++);
+		if (freq_power_tuples)
+			em[i].frequency = be32_to_cpup(tmp++);
+		else
+			em[i].capacity = be32_to_cpup(tmp++);
 		em[i].power = be32_to_cpup(tmp++);
 	}
+
+	if (freq_power_tuples)
+		goto assign;
 
 	/* Get the CPU capacity (according to the EM) */
 	scale_cpu = em[nstates - 1].capacity;
@@ -138,7 +162,7 @@ static int init_em_dt_callback(struct notifier_block *nb, unsigned long val,
 	/* Re-compute the intermediate frequencies based on the EM. */
 	for (i = 0; i < nstates; i++)
 		em[i].frequency = em[i].capacity * max_freq / scale_cpu;
-
+assign:
 	/* Assign the table to all CPUs of this policy. */
 	for_each_cpu(i, policy->cpus) {
 		per_cpu(nr_states, i) = nstates;
