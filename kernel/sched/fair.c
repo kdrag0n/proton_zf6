@@ -6488,6 +6488,10 @@ static void dump_eenv_debug(struct energy_env *eenv)
 #else
 #define dump_eenv_debug(a) {}
 #endif /* DEBUG_EENV_DECISIONS */
+
+static long compute_energy_simplified(struct task_struct *p, int dst_cpu,
+							struct perf_domain *pd);
+
 /*
  * select_energy_cpu_idx(): estimate the energy impact of changing the
  * utilization distribution.
@@ -6520,6 +6524,7 @@ static inline int select_energy_cpu_idx(struct energy_env *eenv)
 	int last_cpu_idx = eenv->max_cpu_count - 1;
 	struct sched_domain *sd;
 	struct sched_group *sg;
+	struct perf_domain *pd;
 	int sd_cpu = -1;
 	int cpu_idx;
 	int margin;
@@ -6529,6 +6534,8 @@ static inline int select_energy_cpu_idx(struct energy_env *eenv)
 	if (!sd)
 		return -1;
 
+	pd = rcu_dereference(cpu_rq(sd_cpu)->rd->pd);
+
 	cpumask_clear(&eenv->cpus_mask);
 	for (cpu_idx = EAS_CPU_PRV; cpu_idx < eenv->max_cpu_count; ++cpu_idx) {
 		int cpu = eenv->cpu[cpu_idx].cpu_id;
@@ -6536,19 +6543,24 @@ static inline int select_energy_cpu_idx(struct energy_env *eenv)
 		if (cpu < 0)
 			continue;
 		cpumask_set_cpu(cpu, &eenv->cpus_mask);
+
+		if (sched_feat(EAS_SIMPLIFIED_EM) && pd)
+			eenv->cpu[cpu_idx].energy = compute_energy_simplified(eenv->p, cpu, pd);
 	}
 
-	sg = sd->groups;
-	do {
-		/* Skip SGs which do not contains a candidate CPU */
-		if (!cpumask_intersects(&eenv->cpus_mask, sched_group_span(sg)))
-			continue;
+	if (!sched_feat(EAS_SIMPLIFIED_EM)) {
+		sg = sd->groups;
+		do {
+			/* Skip SGs which do not contains a candidate CPU */
+			if (!cpumask_intersects(&eenv->cpus_mask, sched_group_span(sg)))
+				continue;
 
-		eenv->sg_top = sg;
-		if (compute_energy(eenv) == -EINVAL)
-			return EAS_CPU_PRV;
-	} while (sg = sg->next, sg != sd->groups);
-	/* remember - eenv energy values are unscaled */
+			eenv->sg_top = sg;
+			if (compute_energy(eenv) == -EINVAL)
+				return EAS_CPU_PRV;
+		} while (sg = sg->next, sg != sd->groups);
+		/* remember - eenv energy values are unscaled */
+	}
 
 	/*
 	 * Compute the dead-zone margin used to prevent too many task
