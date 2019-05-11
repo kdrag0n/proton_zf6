@@ -257,9 +257,11 @@ struct sde_kms {
 	int wb_display_count;
 	void **wb_displays;
 #endif
+#ifdef CONFIG_DRM_MSM_DP
 	int dp_display_count;
 	void **dp_displays;
 	int dp_stream_count;
+#endif
 
 	bool has_danger_ctrl;
 
