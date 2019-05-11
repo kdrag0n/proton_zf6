@@ -1292,6 +1292,7 @@ static int _sde_kms_get_displays(struct sde_kms *sde_kms)
 #endif
 
 	/* dp */
+#ifdef CONFIG_DRM_MSM_DP
 	sde_kms->dp_displays = NULL;
 	sde_kms->dp_display_count = dp_display_get_num_of_displays();
 	if (sde_kms->dp_display_count) {
@@ -1307,13 +1308,16 @@ static int _sde_kms_get_displays(struct sde_kms *sde_kms)
 
 		sde_kms->dp_stream_count = dp_display_get_num_of_streams();
 	}
+#endif
 	return 0;
 
+#ifdef CONFIG_DRM_MSM_DP
 exit_deinit_dp:
 	kfree(sde_kms->dp_displays);
 	sde_kms->dp_stream_count = 0;
 	sde_kms->dp_display_count = 0;
 	sde_kms->dp_displays = NULL;
+#endif
 
 #ifdef CONFIG_DRM_SDE_WB
 exit_deinit_wb:
@@ -1401,6 +1405,7 @@ static int _sde_kms_setup_displays(struct drm_device *dev,
 		.get_panel_vfp = NULL,
 	};
 #endif
+#ifdef CONFIG_DRM_MSM_DP
 	static const struct sde_connector_ops dp_ops = {
 		.post_init  = dp_connector_post_init,
 		.detect     = dp_connector_detect,
@@ -1416,6 +1421,7 @@ static int _sde_kms_setup_displays(struct drm_device *dev,
 		.get_panel_vfp = NULL,
 		.update_pps = dp_connector_update_pps,
 	};
+#endif
 	struct msm_display_info info;
 	struct drm_encoder *encoder;
 	void *display, *connector;
@@ -1427,10 +1433,12 @@ static int _sde_kms_setup_displays(struct drm_device *dev,
 		return -EINVAL;
 	}
 
-	max_encoders = sde_kms->dsi_display_count + sde_kms->dp_display_count +
-				sde_kms->dp_stream_count;
+	max_encoders = sde_kms->dsi_display_count;
 #ifdef CONFIG_DRM_SDE_WB
 	max_encoders += sde_kms->wb_display_count;
+#endif
+#ifdef CONFIG_DRM_MSM_DP
+	max_encoders += sde_kms->dp_display_count + sde_kms->dp_stream_count;
 #endif
 	if (max_encoders > ARRAY_SIZE(priv->encoders)) {
 		max_encoders = ARRAY_SIZE(priv->encoders);
@@ -1524,6 +1532,7 @@ static int _sde_kms_setup_displays(struct drm_device *dev,
 		}
 	}
 #endif
+#ifdef CONFIG_DRM_MSM_DP
 	/* dp */
 	for (i = 0; i < sde_kms->dp_display_count &&
 			priv->num_encoders < max_encoders; ++i) {
@@ -1588,6 +1597,7 @@ static int _sde_kms_setup_displays(struct drm_device *dev,
 			priv->encoders[priv->num_encoders++] = encoder;
 		}
 	}
+#endif
 
 	return 0;
 }
