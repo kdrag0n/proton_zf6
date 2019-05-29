@@ -1157,12 +1157,12 @@ int ipa3_add_flt_rule_usr(struct ipa_ioc_add_flt_rule *rules, bool user_only)
 			 */
 			if (ipa3_ctx->ipa_fltrt_not_hashable)
 				rules->rules[i].rule.hashable = false;
-				result = __ipa_add_ep_flt_rule(rules->ip,
-					rules->ep,
-					&rules->rules[i].rule,
-					rules->rules[i].at_rear,
-					&rules->rules[i].flt_rule_hdl,
-					user_only);
+			result = __ipa_add_ep_flt_rule(rules->ip,
+				rules->ep,
+				&rules->rules[i].rule,
+				rules->rules[i].at_rear,
+				&rules->rules[i].flt_rule_hdl,
+				user_only);
 			} else
 				result = -1;
 
