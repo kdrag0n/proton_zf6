@@ -1569,7 +1569,7 @@ ifeq ($(CONFIG_LITHIUM), y)
 OBJS +=		$(DP_OBJS)
 endif
 
-ccflags-y += $(INCS)
+ccflags-y += $(INCS) $(call cc-disable-warning, unused-function,) -Os
 
 cppflags-y +=	-DANI_OS_TYPE_ANDROID=6 \
 		-Wall\
