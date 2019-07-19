@@ -1,11 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-dtb-$(CONFIG_ARCH_QCOM)	+= apq8016-sbc.dtb
-dtb-$(CONFIG_ARCH_QCOM)	+= apq8096-db820c.dtb
-dtb-$(CONFIG_ARCH_QCOM)	+= ipq8074-hk01.dtb
-dtb-$(CONFIG_ARCH_QCOM)	+= msm8916-mtp.dtb
-dtb-$(CONFIG_ARCH_QCOM)	+= msm8992-bullhead-rev-101.dtb
-dtb-$(CONFIG_ARCH_QCOM)	+= msm8994-angler-rev-101.dtb
-dtb-$(CONFIG_ARCH_QCOM)	+= msm8996-mtp.dtb
+
 ifeq ($(CONFIG_ARM64),y)
 dtb-$(CONFIG_ARCH_QCS405) += qcs405-rumi.dtb \
 		qcs405-iot-sku1.dtb \
@@ -27,6 +21,7 @@ dtb-$(CONFIG_ARCH_QCS405) += qcs403-iot-sku1.dtb \
 endif
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
+dtb-$(CONFIG_ARCH_SM8150) += sm8150-v2.dtb
 dtbo-$(CONFIG_ARCH_SM8150) += ZS630KL-MP-overlay.dtbo
 
 ZS630KL-MP-overlay.dtbo-base := sm8150-v2.dtb
@@ -165,7 +160,6 @@ dtb-$(CONFIG_ARCH_SDXPRAIRIE) += sdxprairie-rumi.dtb \
 
 ifeq ($(CONFIG_ARM64),y)
 always		:= $(dtb-y)
-subdir-y	:= $(dts-dirs)
 else
 targets += dtbs
 targets += $(addprefix ../, $(dtb-y))
