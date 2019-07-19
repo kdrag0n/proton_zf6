@@ -19,13 +19,33 @@
 # export
 # INCS    +=  -include $(AUDIO_ROOT)/config/sdm855autoconf.h
 
+# We can build either as part of a standalone Kernel build or as
+# an external module.  Determine which mechanism is being used
+ifeq ($(MODNAME),)
+	KERNEL_BUILD := 1
+else
+	KERNEL_BUILD := 0
+endif
 
-ifeq ($(CONFIG_ARCH_SM8150), y)
+ifeq ($(KERNEL_BUILD), 1)
+	# These are configurable via Kconfig for kernel-based builds
+	# Need to explicitly configure for Android-based builds
+	AUDIO_BLD_DIR := $(srctree)
+	AUDIO_ROOT := $(AUDIO_BLD_DIR)/techpack/audio
+endif
 
-include $(AUDIO_ROOT)/config/sm8150auto.conf
-export
-INCS    +=  -include $(AUDIO_ROOT)/config/sm8150autoconf.h
+ifeq ($(KERNEL_BUILD), 0)
+	ifeq ($(CONFIG_ARCH_SM8150), y)
+		include $(AUDIO_ROOT)/config/sm8150auto.conf
+		export
+		INCS    +=  -include $(AUDIO_ROOT)/config/sm8150autoconf.h
+	endif
 
+	ifeq ($(CONFIG_ARCH_SDMSHRIKE), y)
+		include $(AUDIO_ROOT)/config/sm8150auto.conf
+		export
+		INCS    +=  -include $(AUDIO_ROOT)/config/sm8150autoconf.h
+	endif
 endif
 
 TFA_INC := $(AUDIO_ROOT)/asoc/codecs/tfa9872/inc
@@ -43,8 +63,6 @@ TFA_INC := $(AUDIO_ROOT)/asoc/codecs/tfa9872/inc
 EXTRA_CFLAGS += -DDEBUG -DTFA9874_NONDSP_STEREO
 
 EXTRA_CFLAGS += -I$(TFA_INC)
-
-$(info cextra_flag ${EXTRA_CFLAGS})
 
 TFA9872_OBJS += tfa98xx.o
 TFA9872_OBJS += tfa_container.o
