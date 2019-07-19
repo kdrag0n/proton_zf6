@@ -28,7 +28,6 @@ endif
 EXTRA_CFLAGS += -DDEBUG
 
 EXTRA_CFLAGS += -I$(src)/inc
-EXTRA_CFLAGS += -Werror
 
 snd-soc-tfa9872-objs += tfa98xx.o
 snd-soc-tfa9872-objs += tfa_container.o
