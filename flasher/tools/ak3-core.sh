@@ -11,6 +11,8 @@ patch=$home/patch;
 ramdisk=$home/ramdisk;
 split_img=$home/split_img;
 
+$BOOTMODE && cpio=$bin/cpio || cpio=cpio
+
 ### output/testing functions:
 # ui_print "<text>" [...]
 ui_print() {
@@ -151,7 +153,7 @@ unpack_ramdisk() {
   chmod 755 $ramdisk;
 
   cd $ramdisk;
-  EXTRACT_UNSAFE_SYMLINKS=1 cpio -d -F $split_img/ramdisk.cpio -i;
+  EXTRACT_UNSAFE_SYMLINKS=1 $cpio -d -F $split_img/ramdisk.cpio -i;
   if [ $? != 0 -o ! "$(ls)" ]; then
     abort "Unpacking ramdisk failed"
   fi;
@@ -188,7 +190,7 @@ repack_ramdisk() {
     $bin/mkbootfs $ramdisk > ramdisk-new.cpio;
   else
     cd $ramdisk;
-    find . | cpio -H newc -o > $home/ramdisk-new.cpio;
+    find . | $cpio -H newc -o > $home/ramdisk-new.cpio;
   fi;
   test $? != 0 && packfail=1;
 
