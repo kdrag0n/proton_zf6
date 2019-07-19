@@ -5,8 +5,7 @@
 OUTFD=/proc/self/fd/$2;
 ZIPFILE="$3";
 
-ps | grep zygote | grep -v grep >/dev/null && BOOTMODE=true || BOOTMODE=false;
-$BOOTMODE || ps -A 2>/dev/null | grep zygote | grep -v grep >/dev/null && BOOTMODE=true;
+pgrep gatekeeperd >/dev/null && BOOTMODE=true || BOOTMODE=false;
 
 $BOOTMODE && DIR=/sdcard || DIR=$(dirname "$ZIPFILE");
 
