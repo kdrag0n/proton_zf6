@@ -10,14 +10,19 @@ pgrep gatekeeperd >/dev/null && BOOTMODE=true || BOOTMODE=false;
 $BOOTMODE && DIR=/sdcard || DIR=$(dirname "$ZIPFILE");
 
 test "$home" || home=/tmp/kflash;
+$BOOTMODE && home=/data/local$home
 
 ui_print() {
   until [ ! "$1" ]; do
-    echo -e "ui_print $1\nui_print" > $OUTFD;
+    if $BOOTMODE; then
+      echo "$1";
+    else
+      echo -e "ui_print $1\nui_print" > $OUTFD;
+    fi;
     shift;
   done;
 }
-show_progress() { echo "progress $1 $2" > $OUTFD; }
+show_progress() { $BOOTMODE || echo "progress $1 $2" > $OUTFD; }
 file_getprop() { $bb grep "^$2=" "$1" | $bb cut -d= -f2-; }
 int2ver() {
   if [ "$1" -eq "$1" ] 2>/dev/null; then 
@@ -57,7 +62,7 @@ abort() {
   if [ ! -f anykernel.sh -o "$(file_getprop anykernel.sh do.cleanuponabort 2>/dev/null)" == 1 ]; then
     cleanup;
   fi;
-  unmount_all;
+  $BOOTMODE || unmount_all;
   exit 1;
 }
 
@@ -101,19 +106,22 @@ if [ -f version ]; then
   done < version;
 fi;
 
-unmount_all;
-if ! is_mounted /system; then
-  $bb mount -o ro -t auto /system;
+if ! $BOOTMODE; then
+  unmount_all;
+  if ! is_mounted /system; then
+    $bb mount -o ro -t auto /system;
+  fi;
+  ($bb mount -o ro -t auto /vendor;
+  $bb mount /data) 2>/dev/null;
+  if [ -f /system/system/build.prop ]; then
+    $bb umount /system;
+    ($bb umount /system;
+    mkdir /system_root) 2>/dev/null;
+    $bb mount -o ro -t auto /dev/block/bootdevice/by-name/system /system_root;
+    $bb mount -o bind /system_root/system /system;
+  fi;
 fi;
-($bb mount -o ro -t auto /vendor;
-$bb mount /data) 2>/dev/null;
-if [ -f /system/system/build.prop ]; then
-  $bb umount /system;
-  ($bb umount /system;
-  mkdir /system_root) 2>/dev/null;
-  $bb mount -o ro -t auto /dev/block/bootdevice/by-name/system /system_root;
-  $bb mount -o bind /system_root/system /system;
-fi;
+
 savedpath="$LD_LIBRARY_PATH";
 savedpre="$LD_PRELOAD";
 unset LD_LIBRARY_PATH;
@@ -172,7 +180,7 @@ fi;
 ui_print "  • Installing kernel";
 core=$($bb grep -oE 'ak.*core.sh' anykernel.sh);
 test -f tools/$core || $bb ln -s $home/tools/ak*-core.sh $home/tools/$core;
-PATH="$home/bin:$PATH" home=$home $bb ash anykernel.sh $2;
+PATH="$home/bin:$PATH" BOOTMODE=$BOOTMODE home=$home $bb ash anykernel.sh $2;
 if [ $? != 0 ]; then
   abort "Failed to execute installer";
 fi;
@@ -218,6 +226,6 @@ fi;
 test "$savedpath" && export LD_LIBRARY_PATH="$savedpath";
 test "$savedpre" && export LD_PRELOAD="$savedpre";
 
-unmount_all;
+$BOOTMODE || unmount_all;
 
 ui_print "  • Done!";
