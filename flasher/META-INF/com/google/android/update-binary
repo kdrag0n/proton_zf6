@@ -10,7 +10,7 @@ $BOOTMODE || ps -A 2>/dev/null | grep zygote | grep -v grep >/dev/null && BOOTMO
 
 $BOOTMODE && DIR=/sdcard || DIR=$(dirname "$ZIPFILE");
 
-test "$home" || home=/tmp/anykernel;
+test "$home" || home=/tmp/kflash;
 
 ui_print() {
   until [ ! "$1" ]; do
