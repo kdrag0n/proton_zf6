@@ -2467,7 +2467,7 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 	int rc;
 	int effective_fv_uv;
 	u8 stat;
-	u8 chg_stat,vbus_stat;
+	//u8 chg_stat,vbus_stat;
 
 	rc = smblib_read(chg, BATTERY_CHARGER_STATUS_2_REG, &stat);
 	if (rc < 0) {
@@ -2510,7 +2510,7 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 		val->intval = POWER_SUPPLY_HEALTH_COOL;
 	else if (stat & BAT_TEMP_STATUS_HOT_SOFT_BIT) {
 		val->intval = POWER_SUPPLY_HEALTH_WARM;
-		
+/*
 		//WeiYu ++ modify for jeita icon issue
 		rc = smblib_read(smbchg_dev, USBIN_BASE + INT_RT_STS_OFFSET, &vbus_stat);	
 		rc = smblib_read(smbchg_dev, CHARGING_ENABLE_CMD_REG, &chg_stat);	
@@ -2523,7 +2523,7 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 				val->intval = POWER_SUPPLY_HEALTH_OVERHEAT;
 			}
 		}
-
+*/
 	}
 	else
 		val->intval = POWER_SUPPLY_HEALTH_GOOD;

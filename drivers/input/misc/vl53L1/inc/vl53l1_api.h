@@ -222,17 +222,17 @@ VL53L1_Error VL53L1_SetDeviceAddress(VL53L1_DEV Dev,
  *
  * @brief One time device initialization
  *
- * To be called once and only once after device is brought out of reset
- * (Chip enable) and booted see @a VL53L1_WaitDeviceBooted()
+ * To be called after device has been powered on and booted
+ * see @a VL53L1_WaitDeviceBooted()
  *
  * @par Function Description
- * When not used after a fresh device "power up" or reset, it may return
+ * When not used after a fresh device "power up", it may return
  * @a #VL53L1_ERROR_CALIBRATION_WARNING meaning wrong calibration data
  * may have been fetched from device that can result in ranging offset error\n
- * If application cannot execute device reset or need to run VL53L1_DataInit
- * multiple time then it  must ensure proper offset calibration saving and
- * restore on its own by using @a VL53L1_GetOffsetCalibrationData() on first
- * power up and then @a VL53L1_SetOffsetCalibrationData() in all subsequent init
+ * If VL53L1_DataInit is called several times then the application must restore
+ * calibration calling @a VL53L1_SetOffsetCalibrationData()
+ * It implies application has gathered calibration data thanks to
+ * @a VL53L1_GetOffsetCalibrationData() after an initial calibration stage.
  * This function will change the VL53L1_State from VL53L1_STATE_POWERDOWN to
  * VL53L1_STATE_WAIT_STATICINIT.
  *
@@ -1048,8 +1048,8 @@ VL53L1_Error VL53L1_GetMultiRangingData(VL53L1_DEV Dev,
  * VL53L1_ClearInterruptAndStartMeasurement(). Depending on the PresetMode
  * currently set parts of the returned data structure may be not relevant.
  *
- * @param   Dev                          Device Handle
- * @param   VL53L1_AdditionalData_t      Pointer to Additional data
+ * @param   Dev                      Device Handle
+ * @param   pAdditionalData          Pointer to Additional data
  * @return  VL53L1_ERROR_NONE        Success
  * @return  "Other error code"       See ::VL53L1_Error
  */
@@ -1181,9 +1181,6 @@ VL53L1_Error VL53L1_GetXTalkCompensationEnable(VL53L1_DEV Dev,
  *
  * @param   Dev                  Device Handle
  * @param   CalibrationOption    Select the Calibration to be run :
- * @param                        VL53L1_XTALKCALIBRATIONMODE_NO_TARGET the
- * calibration works on its own and changes the current preset mode so user
- * must call again @a VL53L1_SetPresetMode() after the calibration
  * @param                        CalibrationOption
  * @li VL53L1_XTALKCALIBRATIONMODE_SINGLE_TARGET the calibration uses current
  * preset and distance mode without altering them.<br>
@@ -1221,11 +1218,7 @@ VL53L1_Error VL53L1_PerformXTalkCalibration(VL53L1_DEV Dev,
  * @param   OffsetCalibrationMode     Offset Calibration Mode valid values are:
  * @li                                VL53L1_OFFSETCALIBRATIONMODE_STANDARD
  * @li                                VL53L1_OFFSETCALIBRATIONMODE_PRERANGE_ONLY
- */
-/**
  * @li                                VL53L1_OFFSETCALIBRATIONMODE_MULTI_ZONE
- */
-/**
  *
  * @return  VL53L1_ERROR_NONE         Success
  * @return  "Other error code"        See ::VL53L1_Error
@@ -1386,9 +1379,9 @@ VL53L1_Error VL53L1_GetZoneCalibrationData(VL53L1_DEV Dev,
  * @note This function doesn't Accesses the device
  *
  * @param   Dev                          Device Handle
- * @param   *pOpticalCentreX             pointer to the X position of center
+ * @param   pOpticalCenterX              pointer to the X position of center
  * in 16.16 fix point
- * @param   *pOpticalCentreY             pointer to the Y position of center
+ * @param   pOpticalCenterY              pointer to the Y position of center
  * in 16.16 fix point
  * @return  VL53L1_ERROR_NONE            Success
  * @return  "Other error code"           See ::VL53L1_Error

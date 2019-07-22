@@ -143,13 +143,6 @@
 #error Must define at least 5 zones in MAX_USER_ZONES constant
 #endif
 
-
-#ifdef VL53L1_NOCALIB
-#endif
-
-#ifndef VL53L1_NOCALIB
-#endif
-
 #define LOG_FUNCTION_START(fmt, ...) \
 	_LOG_FUNCTION_START(VL53L1_TRACE_MODULE_API, fmt, ##__VA_ARGS__)
 #define LOG_FUNCTION_END(status, ...) \
@@ -524,6 +517,12 @@ VL53L1_Error VL53L1_GetDeviceInfo(VL53L1_DEV Dev,
 	strncpy(pVL53L1_DeviceInfo->Type,
 			VL53L1_STRING_DEVICE_INFO_TYPE,
 			VL53L1_DEVINFO_STRLEN-1);
+
+
+	if (pVL53L1_DeviceInfo->ProductType == 0xAA) {
+		pVL53L1_DeviceInfo->Name[5] = '3';
+		pVL53L1_DeviceInfo->Type[5] = '3';
+	}
 #else
 	pVL53L1_DeviceInfo->Name[0] = 0;
 	pVL53L1_DeviceInfo->Type[0] = 0;
@@ -655,6 +654,16 @@ VL53L1_Error VL53L1_DataInit(VL53L1_DEV Dev)
 
 
 	}
+
+
+
+
+	if (Status == VL53L1_ERROR_NONE) {
+		Status = VL53L1_set_dmax_mode(Dev,
+				VL53L1_DEVICEDMAXMODE__CUST_CAL_DATA);
+	}
+
+
 
 	LOG_FUNCTION_END(Status);
 	return Status;
@@ -2075,7 +2084,7 @@ static void CheckAndChangeDistanceMode(VL53L1_DEV Dev,
 
 	DmaxValid = 1;
 	tmpint32 = pdev->hist_data.VL53L1_p_004;
-	if (tmpint32 < MinAmbient)
+	if ((tmpint32 < MinAmbient) || (Ambient100DmaxMm == 0))
 		DmaxValid = 0;
 
 	DistanceMode = VL53L1DevDataGet(Dev,
@@ -2425,6 +2434,18 @@ static VL53L1_Error SetTargetData(VL53L1_DEV Dev,
 		break;
 	default:
 		pRangeData->RangeStatus = VL53L1_RANGESTATUS_RANGE_VALID;
+	}
+
+
+
+	if ((pRangeData->RangeStatus == VL53L1_RANGESTATUS_RANGE_VALID) &&
+		(active_results == 0)) {
+		pRangeData->RangeStatus = VL53L1_RANGESTATUS_NONE;
+		pRangeData->SignalRateRtnMegaCps = 0;
+		pRangeData->SigmaMilliMeter = 0;
+		pRangeData->RangeMilliMeter = 8191;
+		pRangeData->RangeMaxMilliMeter = 8191;
+		pRangeData->RangeMinMilliMeter = 8191;
 	}
 
 
@@ -3113,54 +3134,6 @@ VL53L1_Error VL53L1_PerformOffsetCalibration(VL53L1_DEV Dev,
 	LOG_FUNCTION_END(Status);
 	return Status;
 }
-#ifdef OFFSET_CALIB
-VL53L1_Error VL53L1_PerformOffsetCalibration(VL53L1_DEV Dev,
-	int32_t CalDistanceMilliMeter)
-{
-	VL53L1_Error Status = VL53L1_ERROR_NONE;
-	VL53L1_Error UnfilteredStatus;
-	VL53L1_OffsetCalibrationMode   offset_cal_mode;
-
-	LOG_FUNCTION_START("");
-
-	if (Status == VL53L1_ERROR_NONE)
-		Status =  VL53L1_get_offset_calibration_mode(Dev,
-				&offset_cal_mode);
-
-	if (Status != VL53L1_ERROR_NONE) {
-		LOG_FUNCTION_END(Status);
-		return Status;
-	}
-
-	if ((offset_cal_mode ==
-		VL53L1_OFFSETCALIBRATIONMODE__MM1_MM2__STANDARD) ||
-		(offset_cal_mode ==
-		VL53L1_OFFSETCALIBRATIONMODE__MM1_MM2__STANDARD_PRE_RANGE_ONLY
-		)) {
-		if (Status == VL53L1_ERROR_NONE)
-			Status = VL53L1_run_offset_calibration(
-				Dev,
-				(int16_t)CalDistanceMilliMeter,
-				&UnfilteredStatus);
-	} else {
-		Status = VL53L1_ERROR_INVALID_PARAMS;
-	}
-	LOG_FUNCTION_END(Status);
-	return Status;
-}
-#endif
-#ifdef OFFSET_CALIB_EMPTY
-VL53L1_Error VL53L1_PerformOffsetCalibration(VL53L1_DEV Dev,
-	int32_t CalDistanceMilliMeter)
-{
-	VL53L1_Error Status = VL53L1_ERROR_NOT_SUPPORTED;
-
-	SUPPRESS_UNUSED_WARNING(Dev);
-	SUPPRESS_UNUSED_WARNING(CalDistanceMilliMeter);
-
-	return Status;
-}
-#endif
 
 VL53L1_Error VL53L1_PerformOffsetSimpleCalibration(VL53L1_DEV Dev,
 	int32_t CalDistanceMilliMeter)
@@ -3204,13 +3177,11 @@ VL53L1_Error VL53L1_PerformOffsetSimpleCalibration(VL53L1_DEV Dev,
 		Status = VL53L1_StartMeasurement(Dev);
 
 
-		if (Status == VL53L1_ERROR_NONE)
-			Status = VL53L1_WaitMeasurementDataReady(Dev);
-		if (Status == VL53L1_ERROR_NONE)
-			Status = VL53L1_GetRangingMeasurementData(Dev,
-						&RangingMeasurementData);
-		if (Status == VL53L1_ERROR_NONE)
-			Status = VL53L1_ClearInterruptAndStartMeasurement(Dev);
+		if (Status == VL53L1_ERROR_NONE) {
+			VL53L1_WaitMeasurementDataReady(Dev);
+			VL53L1_GetRangingMeasurementData(Dev, &RangingMeasurementData);
+			VL53L1_ClearInterruptAndStartMeasurement(Dev);
+		}
 
 
 		inloopcount = 0;

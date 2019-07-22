@@ -504,7 +504,7 @@ static int stmvl53l1_remove(struct i2c_client *client)
 
 	return 0;
 }
-#if 0
+
 #ifdef CONFIG_PM_SLEEP
 static int stmvl53l1_suspend(struct device *dev)
 {
@@ -544,8 +544,8 @@ static int stmvl53l1_resume(struct device *dev)
 }
 #endif
 
+
 static SIMPLE_DEV_PM_OPS(stmvl53l1_pm_ops, stmvl53l1_suspend, stmvl53l1_resume);
-#endif
 
 static const struct i2c_device_id stmvl53l1_id[] = {
 	{ STMVL53L1_DRV_NAME, 0 },
@@ -563,9 +563,7 @@ static struct i2c_driver stmvl53l1_driver = {
 		.name	= STMVL53L1_DRV_NAME,
 		.owner	= THIS_MODULE,
 		.of_match_table = st_stmvl53l1_dt_match,
-#if 0
 		.pm	= &stmvl53l1_pm_ops,
-#endif
 	},
 	.probe	= stmvl53l1_probe,
 	.remove	= stmvl53l1_remove,

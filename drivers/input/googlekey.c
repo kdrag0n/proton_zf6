@@ -153,6 +153,17 @@ static irqreturn_t googlekey_interrupt_handler(int irq, void *dev_id)
 	//printk("[keypad] googlekey_interrupt_handler\n");
 	WARN_ONCE(irq != ddata->irq, "googlekey_interrupt failed\n");
 
+	if(g_googlekey_enable == 0)
+	{
+		ddata->sendVirtualPress = false;
+		ddata->oldGpioValue = 2;
+		ddata->keyState = 0;
+		ddata->key_press_queued = false;
+		ddata->key_release_queued = false;
+		printk("[keypad] googlekey is disabled\n");
+		return IRQ_HANDLED;
+	}
+
 #ifdef GOOGLE_KEY_AVOID_GLITCH
 	//while( retry <= GLITCH_RETRY_COUNT ) { // try tree times for stable
 		gpiovalue = gpio_get_value(ddata->gpio);
@@ -242,11 +253,11 @@ static void googlekey_report_function(struct work_struct *work)
 	//int value;
 	unsigned long flags;
 
-	if(g_googlekey_enable == 0)
+/*	if(g_googlekey_enable == 0)
 	{
 		printk("[keypad] googlekey is disabled\n");
 		return;
-	}
+	}*/
 
 #ifdef GOOGLE_KEY_AVOID_GLITCH
 	spin_lock_irqsave(&googlekey_slock, flags);

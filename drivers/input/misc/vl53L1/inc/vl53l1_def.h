@@ -85,11 +85,11 @@ extern "C" {
 /** VL53L1 IMPLEMENTATION major version */
 #define VL53L1_IMPLEMENTATION_VER_MAJOR       6
 /** VL53L1 IMPLEMENTATION minor version */
-#define VL53L1_IMPLEMENTATION_VER_MINOR       0
+#define VL53L1_IMPLEMENTATION_VER_MINOR       1
 /** VL53L1 IMPLEMENTATION sub version */
 #define VL53L1_IMPLEMENTATION_VER_SUB         1
 /** VL53L1 IMPLEMENTATION sub version */
-#define VL53L1_IMPLEMENTATION_VER_REVISION  2003
+#define VL53L1_IMPLEMENTATION_VER_REVISION  2129
 
 /****************************************
  * PRIVATE define do not edit
@@ -111,7 +111,7 @@ typedef struct {
  */
 typedef struct {
 	char Name[VL53L1_DEVINFO_STRLEN];
-		/*!< Name of the Device e.g. Left_Distance */
+		/*!< Full Name of the Device e.g. VL53L1 cut1.1 */
 	char Type[VL53L1_DEVINFO_STRLEN];
 		/*!< Type of the Device e.g VL53L1 */
 	char ProductId[VL53L1_DEVINFO_STRLEN];
@@ -119,7 +119,9 @@ typedef struct {
 		 * @warning Not yet implemented
 		 */
 	uint8_t ProductType;
-		/*!< Product Type, VL53L1 = 1, VL53L1 = 2*/
+		/*!< Product Type, VL53L1 = 0xCC, VL53L3 = 0xAA
+		 * Stands as module_type in the datasheet
+		 */
 	uint8_t ProductRevisionMajor;
 		/*!< Product revision major */
 	uint8_t ProductRevisionMinor;

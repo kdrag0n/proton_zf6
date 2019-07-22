@@ -71,7 +71,9 @@
 /**
  * Configure the Netlink-id use
  */
-#define STMVL531_CFG_NETLINK_USER   8
+#ifndef STMVL531_CFG_NETLINK_USER
+#define STMVL531_CFG_NETLINK_USER 29
+#endif
 
 #define STMVL53L1_MAX_CCI_XFER_SZ	256
 #define STMVL53L1_DRV_NAME	"stmvl53l1"
@@ -83,7 +85,7 @@
  */
 /* define CFG_STMVL53L1_HAVE_REGULATOR */
 
-#define DRIVER_VERSION		"13.0.1"
+#define DRIVER_VERSION		"13.1.1"
 
 /** @ingroup vl53l1_config
  * @{

@@ -101,6 +101,17 @@ enum __stmv53l1_parameter_name_e {
 	VL53L1_TIMINGBUDGET_PAR = 11,
 	/*!< VL53L1_TIMINGBUDGET_PAR
 	 * @ref stmvl53l1_parameter.value field is timing budget in micro second
+	 *
+	 * @note Please refer to VL53L1 user manual for minimum timing budget according to the selected mode
+	 *
+	 * Mode / timing budget                  | Min   | Typical
+	 * ------------------------------------- | ----- | -------
+	 * VL53L1_PRESETMODE_RANGING             |  8 ms | 16 ms
+	 * VL53L1_PRESETMODE_MULTIZONES_SCANNING |  8 ms | 16 ms
+	 * VL53L1_PRESETMODE_AUTONOMOUS          | 41 ms | 76 ms
+	 * VL53L1_PRESETMODE_LITE_RANGING        | 17 ms | 66 ms
+	 * VL53L1_PRESETMODE_LOWPOWER_AUTONOMOUS | 20 ms | 20 ms
+	 *
 	 */
 
 	VL53L1_DISTANCEMODE_PAR = 12,
@@ -390,6 +401,7 @@ struct stmvl53l1_autonomous_config_t {
 	VL53L1_DetectionConfig_t config;
 	/*!< [int/out] autonomous mode configuration structure */
 };
+
 /*
  * IOCTL definitions
  */

@@ -3254,6 +3254,9 @@ static int ctrl_perform_calibration_crosstalk_lock(struct stmvl53l1_data *data,
 {
 	int rc = 0;
 
+	/* Set the preset mode passed on param2 */
+	data->preset_mode = (VL53L1_PresetModes)(calib->param2);
+
 	rc = stmvl53l1_sendparams(data);
 	if (rc)
 		goto done;
@@ -3675,14 +3678,6 @@ static void stmvl53l1_on_newdata_event(struct stmvl53l1_data *data)
 	case VL53L1_PRESETMODE_LOWPOWER_AUTONOMOUS:
 		rc = VL53L1_GetRangingMeasurementData(&data->stdev,
 			pmsinglerange);
-		/* In case of VL53L1_RANGESTATUS_NONE we prefer to return
-		 * the previous ranging values along that error status
-		 */
-		if (pmsinglerange->RangeStatus == VL53L1_RANGESTATUS_NONE)  {
-			memcpy(pmsinglerange, &singledata,
-				sizeof(VL53L1_RangingMeasurementData_t));
-			pmsinglerange->RangeStatus = VL53L1_RANGESTATUS_NONE;
-		}
 	break;
 	case VL53L1_PRESETMODE_RANGING:
 	case VL53L1_PRESETMODE_MULTIZONES_SCANNING:
@@ -3705,19 +3700,6 @@ static void stmvl53l1_on_newdata_event(struct stmvl53l1_data *data)
 						VL53L1_RANGESTATUS_NONE;
 
 		memcpy(pmrange, tmprange, sizeof(VL53L1_MultiRangingData_t));
-
-		/* In case of VL53L1_RANGESTATUS_NONE we prefer to return
-		 * the previous ranging values along that error status
-		 */
-		for (i = 0; i < VL53L1_MAX_RANGE_RESULTS; i++) {
-			if (pmrange->RangeData[i].RangeStatus ==
-					VL53L1_RANGESTATUS_NONE) {
-				memcpy(&pmrange->RangeData[i], &RangeData[i],
-					sizeof(VL53L1_TargetRangeData_t));
-				pmrange->RangeData[i].RangeStatus =
-						VL53L1_RANGESTATUS_NONE;
-			}
-		}
 
 		/* got histogram debug data in case user want it later on */
 		if (!rc)
@@ -4003,35 +3985,41 @@ static void stmvl53l1_input_push_data_multiobject(struct stmvl53l1_data *data)
 	input_report_abs(input, ABS_HAT0Y, tv.tv_usec);
 	vl53l1_dbgmsg("ABS_HAT0Y : %ld\n", tv.tv_usec);
 
-	if (mmeas->NumberOfObjectsFound == 0) {
-		//ABS_TILT_X	XtalkChange(8) :StreamCount(8) :
-		//Number of Objects(2) : RoiNumber(4) : RoiStatus(2)
-		input_report_abs(input, ABS_TILT_X,
-				(mmeas->HasXtalkValueChanged << 16)
-				|  (mmeas->StreamCount << 8)
-				| ((mmeas->NumberOfObjectsFound & 0x3) << 6)
-				| ((mmeas->RoiNumber & 0xF) << 2)
-				| (mmeas->RoiStatus & 0x3));
-		vl53l1_dbgmsg("ABS_TILT_X :(%d):(%d):(%d):(%d):(%d)\n\n",
-						mmeas->HasXtalkValueChanged,
-						mmeas->StreamCount,
-						mmeas->NumberOfObjectsFound,
-						mmeas->RoiNumber,
-						mmeas->RoiStatus
-						);
+	//ABS_WHEEL - AmbientRate(32)
+	input_report_abs(input, ABS_WHEEL,
+		meas_array[0]->AmbientRateRtnMegaCps);
+	vl53l1_dbgmsg("ABS_WHEEL : AmbRate = %d\n",
+		meas_array[0]->AmbientRateRtnMegaCps);
+
+	//ABS_TILT_X	XtalkChange(8) :StreamCount(8) :
+	//Number of Objects(2) : RoiNumber(4) : RoiStatus(2)
+	input_report_abs(input, ABS_TILT_X,
+			(mmeas->HasXtalkValueChanged << 16)
+			|  (mmeas->StreamCount << 8)
+			| ((mmeas->NumberOfObjectsFound & 0x3) << 6)
+			| ((mmeas->RoiNumber & 0xF) << 2)
+			| (mmeas->RoiStatus & 0x3));
+	vl53l1_dbgmsg("ABS_TILT_X :(%d):(%d):(%d):(%d):(%d)\n\n",
+					mmeas->HasXtalkValueChanged,
+					mmeas->StreamCount,
+					mmeas->NumberOfObjectsFound,
+					mmeas->RoiNumber,
+					mmeas->RoiStatus
+					);
 
 
-		//ABS_TILT_Y	DMAX
-		input_report_abs(input, ABS_TILT_Y,   mmeas->DmaxMilliMeter);
-		vl53l1_dbgmsg("ABS_TILT_Y DMAX = %d\n", mmeas->DmaxMilliMeter);
+	//ABS_TILT_Y	DMAX
+	input_report_abs(input, ABS_TILT_Y,   mmeas->DmaxMilliMeter);
+	vl53l1_dbgmsg("ABS_TILT_Y DMAX = %d\n", mmeas->DmaxMilliMeter);
 
-		//ABS_TOOL_WIDTH
-		input_report_abs(input, ABS_TOOL_WIDTH,
+	//ABS_TOOL_WIDTH
+	input_report_abs(input, ABS_TOOL_WIDTH,
 calibration_data.customer.algo__crosstalk_compensation_plane_offset_kcps);
 		vl53l1_dbgmsg("ABS_TOOL_WIDTH Xtalk = %d\n",
 calibration_data.customer.algo__crosstalk_compensation_plane_offset_kcps);
 
 
+	if (mmeas->NumberOfObjectsFound == 0) {
 		input_sync(input);
 		return;
 	}
@@ -4092,12 +4080,6 @@ calibration_data.customer.algo__crosstalk_compensation_plane_offset_kcps);
 		vl53l1_dbgmsg("ABS_HAT3Y : SignalRateRtnMegaCps_1(%d)\n",
 			meas_array[1]->SignalRateRtnMegaCps);
 	}
-	//ABS_WHEEL  - AmbientRate(32)
-	input_report_abs(input, ABS_WHEEL,
-		meas_array[0]->AmbientRateRtnMegaCps);
-	vl53l1_dbgmsg("ABS_WHEEL : AmbRate = %d\n",
-		meas_array[0]->AmbientRateRtnMegaCps);
-
 
 	//ABS_BRAKE  -	EffectiveSpadRtnCount(16):RangeStatus_3(1):
 	//Range_status_2(0)
@@ -4115,32 +4097,6 @@ calibration_data.customer.algo__crosstalk_compensation_plane_offset_kcps);
 			(mmeas->EffectiveSpadRtnCount & 0xFFFF) << 16
 			| ((meas_array[1]->RangeStatus) << 8)
 			| meas_array[0]->RangeStatus);
-	//ABS_TILT_X	XtalkChange(8) :StreamCount(8) :
-	//Number of Objects(2) : RoiNumber(4) : RoiStatus(2)
-	//On maint2 driver, the max possible range status value is 14.
-	//Revisit If this changes in future
-	input_report_abs(input, ABS_TILT_X,
-				(mmeas->HasXtalkValueChanged << 16)
-			|  (mmeas->StreamCount << 8)
-			| ((mmeas->NumberOfObjectsFound & 0x3) << 6)
-			| ((mmeas->RoiNumber & 0xF) << 2)
-			| (mmeas->RoiStatus & 0x3));
-	vl53l1_dbgmsg("ABS_TILT_X :(%d):(%d):(%d):(%d):(%d)\n",
-			mmeas->HasXtalkValueChanged,
-			mmeas->StreamCount,
-			mmeas->NumberOfObjectsFound,
-			mmeas->RoiNumber,
-			mmeas->RoiStatus
-			);
-	//ABS_TILT_Y	DMAX
-	input_report_abs(input, ABS_TILT_Y,   mmeas->DmaxMilliMeter);
-	vl53l1_dbgmsg("ABS_TILT_Y DMAX = %d\n", mmeas->DmaxMilliMeter);
-
-	//ABS_TOOL_WIDTH
-	input_report_abs(input, ABS_TOOL_WIDTH,
-calibration_data.customer.algo__crosstalk_compensation_plane_offset_kcps);
-	vl53l1_dbgmsg("ABS_TOOL_WIDTH Xtalk = %d\n\n",
-calibration_data.customer.algo__crosstalk_compensation_plane_offset_kcps);
 
 
 	input_sync(input);
@@ -4379,7 +4335,7 @@ int stmvl53l1_setup(struct stmvl53l1_data *data)
 		vl53l1_errmsg("VL53L1_GetDmaxReflectance %d\n", rc);
 		goto exit_unregister_dev_ps;
 	}
-	data->dmax_reflectance = STMVL53L1_DEFAULT_DEMAX_REFLECTANCE; //ASUS_BSP Byron set defalut value
+	//data->dmax_reflectance = STMVL53L1_DEFAULT_DEMAX_REFLECTANCE; //ASUS_BSP Byron set defalut value
 
 	rc = VL53L1_GetOpticalCenter(&data->stdev, &data->optical_offset_x,
 		&data->optical_offset_y);
@@ -4395,6 +4351,20 @@ int stmvl53l1_setup(struct stmvl53l1_data *data)
 		goto exit_unregister_dev_ps;
 	}
 
+	/* Set special parameters for VL53L3 (ticket 513812) */
+	if (dev_info.ProductType == 0xAA)
+	{
+		data->timing_budget = 30000;
+		data->crosstalk_enable = 1;
+		data->dmax_mode = VL53L1_DMAXMODE_CUSTCAL_DATA;
+		data->smudge_correction_mode = VL53L1_SMUDGE_CORRECTION_CONTINUOUS;
+		data->dmax_reflectance = (5 << 16);
+	}
+	/* End of Set special parameters for VL53L3 (ticket 513812) */
+		data->smudge_correction_mode =
+		STMVL53L1_CFG_DEFAULT_SMUDGE_CORRECTION_MODE;
+data->dmax_mode = STMVL53L1_CFG_DEFAULT_DMAX_MODE;
+	data->dmax_reflectance = STMVL53L1_DEFAULT_DEMAX_REFLECTANCE; //ASUS_BSP Byron set defalut value
 	/* if working in interrupt ask intr to enable and hook the handler */
 	data->poll_mode = 0;
 	rc = stmvl53l1_module_func_tbl.start_intr(data->client_object,
