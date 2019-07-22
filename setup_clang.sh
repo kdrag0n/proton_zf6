@@ -7,13 +7,13 @@
 #
 
 # Path to executables in Clang toolchain
-clang_bin="$HOME/toolchains/aosp-clang-9.0.3/bin"
+clang_bin="$HOME/toolchains/proton-clang-10.0.0-20190723/bin"
 
 # 64-bit GCC toolchain prefix
-gcc_prefix64="$HOME/toolchains/aosp-gcc-4.9/bin/aarch64-linux-android-"
+gcc_prefix64="$HOME/toolchains/proton-clang-10.0.0-20190723/bin/aarch64-linux-gnu-"
 
 # 32-bit GCC toolchain prefix
-gcc_prefix32="$HOME/toolchains/aosp-gcc32-4.9/bin/arm-linux-androideabi-"
+gcc_prefix32="$HOME/toolchains/proton-clang-10.0.0-20190723/bin/arm-linux-gnueabi-"
 
 # Number of parallel jobs to run
 # Do not remove; set to 1 for no parallelism.
@@ -25,6 +25,7 @@ jobs=$(nproc)
 # Load the shared helpers
 source helpers.sh
 
+export LD_LIBRARY_PATH="$clang_bin/../lib:$PATH"
 export PATH="$clang_bin:$PATH"
 
 kmake_flags+=(
