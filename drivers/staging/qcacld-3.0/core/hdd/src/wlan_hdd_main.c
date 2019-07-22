@@ -12672,10 +12672,6 @@ int hdd_init(void)
 	QDF_STATUS status;
 	int ret = 0;
 
-	//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-	ASUSEvtlog("[wlan]: hdd_driver_init +.\n");
-	//ASUS_BSP--- "for /data/log/ASUSEvtlog"
-
 	status = cds_init();
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_err("Failed to allocate CDS context");
@@ -12968,18 +12964,12 @@ static int hdd_driver_load(void)
 	errno = hdd_init();
 	if (errno) {
 		hdd_fln("Failed to init HDD; errno:%d", errno);
-		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: Failed to init HDD.\n");
-		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		goto exit;
 	}
 
 	status = hdd_component_init();
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_fln("Failed to init components; status:%u", status);
-		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: Failed to init components.\n");
-		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		errno = qdf_status_to_os_return(status);
 		goto hdd_deinit;
 	}
@@ -12987,9 +12977,6 @@ static int hdd_driver_load(void)
 	status = qdf_wake_lock_create(&wlan_wake_lock, "wlan");
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_fln("Failed to create wake lock; status:%u", status);
-		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: Failed to create wake lock.\n");
-		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		errno = qdf_status_to_os_return(status);
 		goto comp_deinit;
 	}
@@ -12999,34 +12986,22 @@ static int hdd_driver_load(void)
 	errno = wlan_hdd_state_ctrl_param_create();
 	if (errno) {
 		hdd_fln("Failed to create ctrl param; errno:%d", errno);
-		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: Failed to create ctrl param.\n");
-		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		goto wakelock_destroy;
 	}
 
 	errno = pld_init();
 	if (errno) {
 		hdd_fln("Failed to init PLD; errno:%d", errno);
-		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: Failed to init PLD.\n");
-		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		goto param_destroy;
 	}
 
 	errno = wlan_hdd_register_driver();
 	if (errno) {
 		hdd_fln("Failed to register driver; errno:%d", errno);
-		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: Failed to register driver.\n");
-		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		goto pld_deinit;
 	}
 
 	pr_info("%s: driver loaded\n", WLAN_MODULE_NAME);
-	//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-	ASUSEvtlog("[wlan]: hdd_driver_init -.\n");
-	//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 
 	return 0;
 
@@ -13059,10 +13034,6 @@ static void hdd_driver_unload(void)
 	pr_info("%s: Unloading driver v%s\n", WLAN_MODULE_NAME,
 		QWLAN_VERSIONSTR);
 
-	//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-	ASUSEvtlog("[wlan]: hdd_driver_unload +.\n");
-	//ASUS_BSP--- "for /data/log/ASUSEvtlog"
-
 	if (!hdd_wait_for_recovery_completion())
 		return;
 
@@ -13083,9 +13054,6 @@ static void hdd_driver_unload(void)
 	qdf_wake_lock_destroy(&wlan_wake_lock);
 	hdd_component_deinit();
 	hdd_deinit();
-	//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-	ASUSEvtlog("[wlan]: hdd_driver_unload.\n");
-	//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 }
 
 /**
