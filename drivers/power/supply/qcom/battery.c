@@ -1084,6 +1084,7 @@ static bool is_batt_available(struct pl_data *chip)
 	return true;
 }
 
+extern bool get_asus_chg_ws_disable(void);
 static int pl_disable_vote_callback(struct votable *votable,
 		void *data, int pl_disable, const char *client)
 {
@@ -1135,7 +1136,8 @@ static int pl_disable_vote_callback(struct votable *votable,
 	if (chip->pl_mode != POWER_SUPPLY_PL_NONE && !pl_disable) {
 		/* keep system awake to talk to slave charger through i2c */
 		cancel_delayed_work_sync(&chip->pl_awake_work);
-		vote(chip->pl_awake_votable, PL_VOTER, true, 0);
+		if (!get_asus_chg_ws_disable())
+			vote(chip->pl_awake_votable, PL_VOTER, true, 0);
 
 		rc = validate_parallel_icl(chip, &disable);
 		if (rc < 0)
@@ -1258,8 +1260,8 @@ static int pl_disable_vote_callback(struct votable *votable,
 				&& !chip->taper_work_running) {
 				pl_dbg(chip, PR_PARALLEL,
 					"pl enabled in Taper scheduing work\n");
-				vote(chip->pl_awake_votable, TAPER_END_VOTER,
-						true, 0);
+				if (!get_asus_chg_ws_disable())
+					vote(chip->pl_awake_votable, TAPER_END_VOTER, true, 0);
 				queue_work(system_long_wq,
 						&chip->pl_taper_work);
 			}
@@ -1448,7 +1450,8 @@ static void handle_main_charge_type(struct pl_data *chip)
 		chip->charge_type = pval.intval;
 		if (!chip->taper_work_running) {
 			pl_dbg(chip, PR_PARALLEL, "taper entry scheduling work\n");
-			vote(chip->pl_awake_votable, TAPER_END_VOTER, true, 0);
+			if (!get_asus_chg_ws_disable())
+				vote(chip->pl_awake_votable, TAPER_END_VOTER, true, 0);
 			queue_work(system_long_wq, &chip->pl_taper_work);
 		}
 		return;
