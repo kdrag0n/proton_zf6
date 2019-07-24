@@ -254,6 +254,7 @@ enum dsi_dfps_type {
 enum dsi_cmd_set_type {
 	DSI_CMD_SET_PRE_ON = 0,
 	DSI_CMD_SET_ON,
+	DSI_CMD_SET_DIM_ON,
 	DSI_CMD_SET_POST_ON,
 	DSI_CMD_SET_PRE_OFF,
 	DSI_CMD_SET_OFF,

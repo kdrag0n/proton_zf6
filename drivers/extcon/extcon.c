@@ -621,6 +621,139 @@ int extcon_set_state_sync(struct extcon_dev *edev, unsigned int id, bool state)
 }
 EXPORT_SYMBOL_GPL(extcon_set_state_sync);
 
+//[+++]ASUS BSP charger
+int asus_extcon_get_state(struct extcon_dev *edev)
+{
+	int state = edev->state;
+
+	if (!edev)
+		return -EINVAL;
+
+	return state;
+}
+EXPORT_SYMBOL_GPL(asus_extcon_get_state);
+
+void asus_extcon_set_fnode_name(struct extcon_dev *edev, const char *fname)
+{
+	if (!edev)
+		return;
+
+	edev->fnode_name = fname;
+}
+EXPORT_SYMBOL_GPL(asus_extcon_set_fnode_name);
+
+static bool asus_is_extcon_changed(struct extcon_dev *edev, int new_state)
+{
+	int state = edev->state;
+	return (state != new_state);
+}
+
+int asus_extcon_sync(struct extcon_dev *edev)
+{
+	char name_buf[120];
+	char state_buf[120];
+	char *prop_buf;
+	char *envp[3];
+	int env_offset = 0;
+	int length;
+	unsigned long flags;
+
+	if (!edev)
+		return -EINVAL;
+
+	spin_lock_irqsave(&edev->lock, flags);
+
+	/* This could be in interrupt handler */
+	prop_buf = (char *)get_zeroed_page(GFP_ATOMIC);
+	if (!prop_buf) {
+		/* Unlock early before uevent */
+		spin_unlock_irqrestore(&edev->lock, flags);
+
+		dev_err(&edev->dev, "out of memory in extcon_set_state\n");
+		kobject_uevent(&edev->dev.kobj, KOBJ_CHANGE);
+
+		return -ENOMEM;
+	}
+
+	length = name_show(&edev->dev, NULL, prop_buf);
+	if (length > 0) {
+		if (prop_buf[length - 1] == '\n')
+			prop_buf[length - 1] = 0;
+		snprintf(name_buf, sizeof(name_buf), "NAME=%s", prop_buf);
+		envp[env_offset++] = name_buf;
+	}
+
+	length = state_show(&edev->dev, NULL, prop_buf);
+	if (length > 0) {
+		if (prop_buf[length - 1] == '\n')
+			prop_buf[length - 1] = 0;
+		snprintf(state_buf, sizeof(state_buf), "STATE=%s", prop_buf);
+		envp[env_offset++] = state_buf;
+	}
+	envp[env_offset] = NULL;
+
+	/* Unlock early before uevent */
+	spin_unlock_irqrestore(&edev->lock, flags);
+	kobject_uevent_env(&edev->dev.kobj, KOBJ_CHANGE, envp);
+	free_page((unsigned long)prop_buf);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(asus_extcon_sync);
+
+int asus_extcon_set_state(struct extcon_dev *edev, int cable_state)
+{
+	unsigned long flags;
+
+	if (!edev)
+		return -EINVAL;
+
+	spin_lock_irqsave(&edev->lock, flags);
+
+	/* Check whether the external connector's state is changed. */
+	if (!asus_is_extcon_changed(edev, cable_state))
+		goto out;
+
+	/* Don't check mutual exclusiveness & property since the state no longer represents multi-cable. */
+	/* Update the state for a external connector. */
+	edev->state = cable_state;
+out:
+	spin_unlock_irqrestore(&edev->lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(asus_extcon_set_state);
+
+int asus_extcon_set_state_sync(struct extcon_dev *edev, int cable_state)
+{
+	int ret;
+	unsigned long flags;
+
+	/* Check whether the external connector's state is changed. */
+	spin_lock_irqsave(&edev->lock, flags);
+	ret = asus_is_extcon_changed(edev, cable_state);
+	spin_unlock_irqrestore(&edev->lock, flags);
+	if (!ret)
+		return 0;
+
+	ret = asus_extcon_set_state(edev, cable_state);
+	if (ret < 0)
+		return ret;
+
+	return asus_extcon_sync(edev);
+}
+EXPORT_SYMBOL_GPL(asus_extcon_set_state_sync);
+
+void asus_extcon_set_name(struct extcon_dev *edev, const char *name)
+{
+	if (!edev)
+		return;
+
+	edev->name = name;
+}
+EXPORT_SYMBOL_GPL(asus_extcon_set_name);
+//[---]ASUS BSP charger
+
 /**
  * extcon_get_property() - Get the property value of an external connector.
  * @edev:	the extcon device
@@ -1171,14 +1304,20 @@ int extcon_dev_register(struct extcon_dev *edev)
 	edev->dev.class = extcon_class;
 	edev->dev.release = extcon_dev_release;
 
-	edev->name = dev_name(edev->dev.parent);
-	if (IS_ERR_OR_NULL(edev->name)) {
-		dev_err(&edev->dev,
-			"extcon device name is null\n");
-		return -EINVAL;
-	}
-	dev_set_name(&edev->dev, "extcon%lu",
+	if (edev->fnode_name != NULL) {
+		edev->name = edev->fnode_name;
+		dev_set_name(&edev->dev, edev->fnode_name,
 			(unsigned long)atomic_inc_return(&edev_no));
+	} else {
+		edev->name = dev_name(edev->dev.parent);
+		if (IS_ERR_OR_NULL(edev->name)) {
+			dev_err(&edev->dev,
+				"extcon device name is null\n");
+			return -EINVAL;
+		}
+		dev_set_name(&edev->dev, "extcon%lu",
+			(unsigned long)atomic_inc_return(&edev_no));
+	}
 
 	if (edev->max_supported) {
 		char buf[10];
