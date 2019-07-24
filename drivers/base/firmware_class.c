@@ -405,6 +405,7 @@ fw_get_filesystem_firmware(struct device *device, struct firmware_buf *buf)
 	char *path;
 	enum kernel_read_file_id id = READING_FIRMWARE;
 	size_t msize = INT_MAX;
+	char fw_name[5];
 
 	/* Already populated data member means we're loading into a buffer */
 	if (buf->data) {
@@ -421,12 +422,26 @@ fw_get_filesystem_firmware(struct device *device, struct firmware_buf *buf)
 		if (!fw_path[i][0])
 			continue;
 
-		len = snprintf(path, PATH_MAX, "%s/%s",
-			       fw_path[i], buf->fw_id);
+		if (!strncmp(buf->fw_id, "adsp", 4) || !strncmp(buf->fw_id, "slpi", 4) || !strncmp(buf->fw_id, "tfa98xx", 7)
+		 || !strncmp(buf->fw_id, "spss", 4) || strstr(buf->fw_id, "p.sig") || strstr(buf->fw_id, "t.sig")
+		 || strstr(buf->fw_id, "d.sig" )|| !strncmp(buf->fw_id, "npu", 3) || !strncmp(buf->fw_id, "venus", 5)
+		 || !strncmp(buf->fw_id, "cdsp", 4) || !strncmp(buf->fw_id, "widevine", 8)|| !strncmp(buf->fw_id, "cppf", 4))
+			len = snprintf(path, PATH_MAX, "%s/%s",
+				       "vendor/firmware", buf->fw_id);
+		else
+			len = snprintf(path, PATH_MAX, "%s/%s",
+				       fw_path[i], buf->fw_id);
 		if (len >= PATH_MAX) {
 			rc = -ENAMETOOLONG;
 			break;
 		}
+
+		snprintf(fw_name, 5, "%s", buf->fw_id);
+		if (!strcmp(fw_name, "adsp"))
+			snprintf(path, PATH_MAX, "%s/%s", "/system/vendor/firmware/q6_sm8150_image", buf->fw_id);
+
+		if (!strcmp(fw_name, "cpe_"))
+			snprintf(path, PATH_MAX, "%s/%s", "/system/vendor/firmware/cpe_sm8150_image", buf->fw_id);
 
 		buf->size = 0;
 		rc = kernel_read_file_from_path(path, &buf->data, &size, msize,
