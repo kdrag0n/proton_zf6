@@ -31,6 +31,10 @@
 #include <linux/leds-qpnp-flash.h>
 #include "../../leds/leds.h"
 
+#include <linux/proc_fs.h>
+#include <linux/string.h>
+#include <linux/syscalls.h>
+
 /* General definitions */
 #define WLED_DEFAULT_BRIGHTNESS		2048
 #define  WLED_MAX_BRIGHTNESS_12B	4095
@@ -100,6 +104,9 @@
 
 #define WLED_SINK_BRIGHT_LSB_REG(n)	(0x57 + (n * 0x10))
 #define WLED_SINK_BRIGHT_MSB_REG(n)	(0x58 + (n * 0x10))
+
+#define WLED_SINK_HYBRID_DIMMING_TRESH		0x4B
+#define  WLED_SINK_HYBRID_DIM_THR_MASK		GENMASK(2, 0)
 
 /* WLED5 specific control registers */
 #define WLED5_CTRL_STATUS		0x07
@@ -180,6 +187,11 @@
 #define   WLED5_FLASH_SAFETY_TIME	GENMASK(2, 0)
 
 #define  WLED5_SINK_FLASH_SHDN_CLR_REG	0xb6
+
+extern bool is_kirin_panel;
+int hbm_mode = 1;
+int hyb_thre = 0x02;  //0(0.78 %), 1(1.56 %), 2(3.13 %), 3(6.25%), 4(12.5 %), 5(25 %), 6(50 %), 7(100%)
+struct wled *g_wled;
 
 enum wled_version {
 	WLED_PMI8998 = 4,
@@ -1348,11 +1360,11 @@ static const struct wled_config wled4_config_defaults = {
 };
 
 static const struct wled_config wled5_config_defaults = {
-	.boost_i_limit = 5,
-	.fs_current = 10,	/* 25 mA */
+	.boost_i_limit = 2,
+	.fs_current = 8,	/* 20 mA */
 	.ovp = 4,
 	.switch_freq = -EINVAL,
-	.string_cfg = 0xf,
+	.string_cfg = 0x3,
 	.mod_sel = 0,
 	.cabc_sel = 0,
 	.en_cabc = 0,
@@ -1709,6 +1721,8 @@ static int wled_flash_set_fsc(struct wled *wled, enum led_brightness brightness,
 	if (fs_current > fs_current_max)
 		fs_current = fs_current_max;
 
+	printk("[Display] Wled set fsc to %d / max: %d \n", fs_current, fs_current_max);
+
 	/* Each LSB is 5 mA */
 	val = DIV_ROUND_CLOSEST(fs_current, 5);
 	rc = regmap_update_bits(wled->regmap,
@@ -1909,8 +1923,10 @@ static int wled_flash_configure(struct wled *wled)
 			 * As per the hardware recommendation, FS current should
 			 * be limited to 20 mA for PM8150L v1.0.
 			 */
-			if (wled->pmic_rev_id->rev4 == PM8150L_V1P0_REV4)
+			if (wled->pmic_rev_id->rev4 == PM8150L_V1P0_REV4) {
+				printk("[Display] chip is PM8150L_V1P0_REV4, fs curent is set to 20mA\n");
 				wled->fparams.fs_current = 20;
+			}
 
 			/* Value read in us */
 			wled->fparams.step_delay = 200;
@@ -2223,6 +2239,7 @@ static int wled_configure(struct wled *wled, struct device *dev)
 	for (i = 0; i < size; ++i) {
 		rc = of_property_read_u32(dev->of_node, u32_opts[i].name, &val);
 		if (rc == -EINVAL) {
+			printk("[Display] wled property %s does not declare\n", u32_opts[i].name);
 			continue;
 		} else if (rc < 0) {
 			pr_err("error reading '%s'\n", u32_opts[i].name);
@@ -2244,11 +2261,16 @@ static int wled_configure(struct wled *wled, struct device *dev)
 
 		pr_debug("'%s' = %u\n", u32_opts[i].name, c);
 		*u32_opts[i].val_ptr = j;
+		if (!strcmp(u32_opts[i].name, "qcom,cabc-sel") && !is_kirin_panel)
+			*u32_opts[i].val_ptr = 0;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(bool_opts); ++i) {
-		if (of_property_read_bool(dev->of_node, bool_opts[i].name))
+		if (of_property_read_bool(dev->of_node, bool_opts[i].name)) {
 			*bool_opts[i].val_ptr = true;
+			if (!strcmp(bool_opts[i].name, "qcom,en-cabc") && !is_kirin_panel)
+				*bool_opts[i].val_ptr = false;
+		}
 	}
 
 	wled->sc_irq = platform_get_irq_byname(wled->pdev, "sc-irq");
@@ -2274,6 +2296,271 @@ static int wled_configure(struct wled *wled, struct device *dev)
 static const struct backlight_ops wled_ops = {
 	.update_status = wled_update_status,
 	.get_brightness = wled_get_brightness,
+};
+
+static int wled5_set_hybrid_thres(struct wled *wled, int thres)
+{
+	int rc = 0;
+	u16 addr;
+	//u8 sink_en = 0;
+
+	if (!wled) {
+		printk("[Display] broken wled structure.\n");
+		return -1;
+	}
+
+	printk("[Display] WLED hybrid threshold is set to %d\n", thres);
+
+	addr = wled->sink_addr + WLED_SINK_HYBRID_DIMMING_TRESH;
+	rc = regmap_update_bits(wled->regmap, addr, WLED_SINK_HYBRID_DIM_THR_MASK, thres);
+	if (rc < 0) {
+		printk("[Display] update WLED5_SINK_FS_CURR_REG failed: %d\n", rc);
+		return rc;
+	}
+
+	/*rc = regmap_update_bits(wled->regmap,
+			wled->sink_addr + WLED_SINK_CURR_SINK_EN,
+			WLED_SINK_CURR_SINK_MASK, sink_en);
+	if (rc < 0) {
+		printk("[Display] update WLED_SINK_CURR_SINK_EN failed: %d\n", rc);
+		return rc;
+	}*/
+
+	rc = wled_sync_toggle(wled);
+	if (rc < 0) {
+		printk("[Display] update wled_sync_toggle failed: %d\n", rc);
+		return rc;
+	}
+
+	return rc;
+}
+
+static int wled5_set_fsc(struct wled *wled, int level)
+{
+	int rc = 0, i, temp;
+	u16 addr;
+	u8 string_cfg;
+	u8 sink_en = 0;
+
+	if (!wled) {
+		printk("[Display] broken wled structure.\n");
+		return -1;
+	}
+
+	string_cfg = wled->cfg.string_cfg;
+	wled->cfg.fs_current = level;
+	printk("[Display] WLED fsc is set to %d\n", level);
+
+	for (i = 0; (string_cfg >> i) != 0; i++) {
+		if (string_cfg & BIT(i)) {
+			addr = wled->sink_addr +
+					WLED5_SINK_FS_CURR_REG(i);
+			rc = regmap_update_bits(wled->regmap, addr,
+					WLED_SINK_FS_MASK,
+					wled->cfg.fs_current);
+			if (rc < 0) {
+				printk("[Display] update WLED5_SINK_FS_CURR_REG failed: %d\n", rc);
+				return rc;
+			}
+
+			temp = i + WLED_SINK_CURR_SINK_SHFT;
+			sink_en |= 1 << temp;
+		}
+	}
+
+	rc = regmap_update_bits(wled->regmap,
+			wled->sink_addr + WLED_SINK_CURR_SINK_EN,
+			WLED_SINK_CURR_SINK_MASK, sink_en);
+	if (rc < 0) {
+		printk("[Display] update WLED_SINK_CURR_SINK_EN failed: %d\n", rc);
+		return rc;
+	}
+
+	rc = wled_sync_toggle(wled);
+	if (rc < 0) {
+		printk("[Display] update wled_sync_toggle failed: %d\n", rc);
+		return rc;
+	}
+
+	return rc;
+}
+
+static ssize_t asus_wled_fsc_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	int level = 8;
+	int ret = 0;
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	if(strncmp(messages, "8", 1) == 0)
+		level = 8;
+	else if(strncmp(messages, "9", 1) == 0)
+		level = 9;
+	else if(strncmp(messages, "10", 2) == 0)
+		level = 10;
+	else if(strncmp(messages, "11", 2) == 0)
+		level = 11;
+	else if(strncmp(messages, "12", 2) == 0)
+		level = 12;
+	else if(strncmp(messages, "13", 2) == 0)
+		level = 13;
+	else if(strncmp(messages, "7", 1) == 0)
+		level = 7;
+	else if(strncmp(messages, "6", 1) == 0)
+		level = 6;
+	else if(strncmp(messages, "5", 1) == 0)
+		level = 5;
+	else if(strncmp(messages, "4", 1) == 0)
+		level = 4;
+	else if(strncmp(messages, "3", 1) == 0)
+		level = 3;
+	else if(strncmp(messages, "2", 1) == 0)
+		level = 2;
+	else if(strncmp(messages, "1", 1) == 0)
+		level = 1;
+
+	ret = wled5_set_fsc(g_wled, level);
+
+	if (ret) {
+		printk("[Display] Setting WLED fs-current failed: %d\n", ret);
+	} else {
+		printk("[Display] write fsc: %d\n", level);
+	}
+
+	return len;
+}
+
+static struct file_operations asus_wled_fsc_proc_ops = {
+	.write = asus_wled_fsc_proc_write,
+};
+
+static ssize_t asus_wled_hyb_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	int level = 3;
+	int ret = 0;
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	else if(strncmp(messages, "7", 1) == 0)
+		level = 7;
+	else if(strncmp(messages, "6", 1) == 0)
+		level = 6;
+	else if(strncmp(messages, "5", 1) == 0)
+		level = 5;
+	else if(strncmp(messages, "4", 1) == 0)
+		level = 4;
+	else if(strncmp(messages, "3", 1) == 0)
+		level = 3;
+	else if(strncmp(messages, "2", 1) == 0)
+		level = 2;
+	else if(strncmp(messages, "1", 1) == 0)
+		level = 1;
+	else if(strncmp(messages, "0", 1) == 0)
+		level = 0;
+
+	ret = wled5_set_hybrid_thres(g_wled, level);
+
+	if (ret) {
+		printk("[Display] Setting WLED hybrid threshold failed: %d\n", ret);
+	} else {
+		printk("[Display] write WLED hybrid threshold: %d\n", level);
+	}
+
+	return len;
+}
+
+static struct file_operations asus_wled_hyb_proc_ops = {
+	.write = asus_wled_hyb_proc_write,
+};
+
+void asus_wled_fsc_validate(void)
+{
+	int ret = 0;
+	if (g_wled) {
+		printk("[Display] asus_wled_fsc_validate to set correct wled fs-current\n");
+
+		ret = wled5_set_hybrid_thres(g_wled, hyb_thre);
+		if (ret) {
+			printk("[Display] Setting WLED hybrid threshold failed: %d\n", ret);
+		}
+
+		ret = wled5_set_fsc(g_wled, (hbm_mode ? 9 : 8));
+		if (ret) {
+			printk("[Display] Setting WLED fs-current failed: %d\n", ret);
+		}
+	}
+}
+EXPORT_SYMBOL(asus_wled_fsc_validate);
+
+static ssize_t asus_wled_hbm_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	int ret = 0;
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	if(strncmp(messages, "0", 1) == 0)
+		hbm_mode = 0;
+	else if(strncmp(messages, "1", 1) == 0)
+		hbm_mode = 1;
+	else
+		printk("[Display] HBM mode unrecognized.\n");
+
+	printk("[Display] HBM mode is set to %d\n", hbm_mode);
+	ret = wled5_set_fsc(g_wled, (hbm_mode ? 9 : 8));
+	if (ret) {
+		printk("[Display] Setting WLED fs-current failed: %d\n", ret);
+	}
+
+	return len;
+}
+
+static ssize_t asus_wled_hbm_proc_read(struct file *file, char __user *buf,
+                    size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+
+	buff = kmalloc(100, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += sprintf(buff, "%d\n", hbm_mode);
+
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_wled_hbm_proc_ops = {
+	.read = asus_wled_hbm_proc_read,
+};
+
+static struct file_operations asus_wled_hbm_override_proc_ops = {
+	.write = asus_wled_hbm_proc_write,
+	.read = asus_wled_hbm_proc_read,
 };
 
 static int wled_probe(struct platform_device *pdev)
@@ -2326,10 +2613,18 @@ static int wled_probe(struct platform_device *pdev)
 	of_property_read_u32(pdev->dev.of_node, "max-brightness", &val);
 	wled->max_brightness = val;
 
-	/* For WLED5, when CABC is enabled, max brightness is 4095. */
-	if (is_wled5(wled) && wled->cfg.cabc_sel)
-		wled->max_brightness = WLED_MAX_BRIGHTNESS_12B;
+	rc = of_property_read_u32(pdev->dev.of_node, "qcom,fs-current", &val);
+	if (rc < 0) {
+		pr_err("[Display] WLED: qcom,fs-current is not set, set it to 8(20mA)\n");
+		val = 8;
+	}
+	wled->cfg.fs_current = val;
 
+	pr_err("%s: cabc_sel is %d, cabc_en is %d\n", __func__, wled->cfg.cabc_sel, wled->cfg.en_cabc);
+	/* For WLED5, when CABC is enabled, max brightness is 4095. */
+	if (is_wled5(wled) && wled->cfg.cabc_sel) {
+		wled->max_brightness = WLED_MAX_BRIGHTNESS_12B;
+	}
 	/*
 	 * As per the hardware recommendation, FS current should
 	 * be limited to 20 mA for PM8150L v1.0.
@@ -2338,10 +2633,12 @@ static int wled_probe(struct platform_device *pdev)
 		wled->cfg.fs_current > 8)
 		wled->cfg.fs_current = 8;
 
+	printk("[Display] WLED fs_current is set to %d\n", wled->cfg.fs_current);
+
 	if (is_wled4(wled))
 		rc = wled4_setup(wled);
 	else
-		rc = wled5_setup(wled);
+		rc = wled5_setup(wled); //kirin
 	if (rc < 0) {
 		dev_err(&pdev->dev, "wled setup failed rc:%d\n", rc);
 		return rc;
@@ -2370,6 +2667,13 @@ static int wled_probe(struct platform_device *pdev)
 			rc);
 		return rc;
 	}
+
+	// ASUS bsp for dynamic control wled fs-current
+	proc_create("driver/wled_fs_curr", 0777, NULL, &asus_wled_fsc_proc_ops);
+	proc_create("driver/wled_hyb_thres", 0777, NULL, &asus_wled_hyb_proc_ops);
+	proc_create("hbm_mode", 0444, NULL, &asus_wled_hbm_proc_ops);
+	proc_create("hbm_mode_override", 0666, NULL, &asus_wled_hbm_override_proc_ops);
+	g_wled = wled;
 
 	return rc;
 }
