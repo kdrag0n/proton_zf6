@@ -87,6 +87,7 @@ obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
 obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
 obj-$(CONFIG_INPUT_STMVL53L1)        += vl53L1/
+obj-$(CONFIG_SENSORS_ICM206XX)		+= icm206xx.o
 
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_utils
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_cpas/include
