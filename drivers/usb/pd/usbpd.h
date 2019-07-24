@@ -61,6 +61,14 @@ enum pd_spec_rev {
 #define FRAME_FILTER_EN_SOPI		BIT(1)
 #define FRAME_FILTER_EN_HARD_RESET	BIT(5)
 
+#ifdef CONFIG_ASUS_PD_CHARGER
+#define PD_MAX_DATA_OBJ		7
+#define PD_SRC_PDO_FIXED_VOLTAGE(pdo)		(((pdo) >> 10) & 0x3FF)
+#define PD_SRC_PDO_FIXED_MAX_CURR(pdo)		((pdo) & 0x3FF)
+#define PD_SRC_PDO_TYPE(pdo)		(((pdo) >> 30) & 3)
+#define PD_SRC_PDO_TYPE_FIXED		0
+#endif
+
 struct pd_phy_params {
 	void		(*signal_cb)(struct usbpd *pd, enum pd_sig_type sig);
 	void		(*msg_rx_cb)(struct usbpd *pd, enum pd_sop_type sop,
