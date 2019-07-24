@@ -34,4 +34,6 @@ obj-$(CONFIG_INPUT_HALLSENSOR2)	+= lid_2.o
 
 obj-$(CONFIG_RMI4_CORE)		+= rmi4/
 
+obj-$(CONFIG_GOODIX_FINGERPRINT) += fingerprint/
+
 obj-$(CONFIG_INPUT_GOOGLEKEY) += googlekey.o
