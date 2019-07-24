@@ -693,3 +693,24 @@ void destroy_votable(struct votable *votable)
 	kfree(votable->name);
 	kfree(votable);
 }
+
+//[+++]ASUS : For setting ICL
+int asus_exclusive_vote(struct votable *votable, const char *client_str, bool enabled, int val)
+{
+	int i;
+	int rc = 0;
+
+	lock_votable(votable);
+	for (i = 0; i < votable->num_clients; i++) {
+		if (votable->client_strs[i]) {
+			votable->votes[i].enabled = false;
+			votable->votes[i].value = 0;
+		}
+	}
+	unlock_votable(votable);
+
+	rc = vote(votable, client_str, enabled, val);
+
+	return rc;
+}
+//[---]ASUS : For setting ICL
