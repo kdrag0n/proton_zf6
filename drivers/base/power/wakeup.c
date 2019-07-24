@@ -917,6 +917,7 @@ void pm_wakeup_clear(bool reset)
 		atomic_set(&pm_abort_suspend, 0);
 }
 
+extern bool display_early_on;
 void pm_system_irq_wakeup(unsigned int irq_number)
 {
 	struct irq_desc *desc;
@@ -929,6 +930,10 @@ void pm_system_irq_wakeup(unsigned int irq_number)
 				name = "stray irq";
 			else if (desc->action && desc->action->name)
 				name = desc->action->name;
+			display_early_on = false;
+			if (!strcmp(name, "gf") || !strcmp(name, "fts_ts")
+					|| !strcmp(name, "pon_kpdpwr_status"))
+				display_early_on = true;
 
 			pr_warn("%s: %d triggered %s\n", __func__,
 					irq_number, name);
