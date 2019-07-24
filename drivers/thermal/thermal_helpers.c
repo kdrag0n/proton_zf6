@@ -153,9 +153,16 @@ void thermal_zone_set_trips(struct thermal_zone_device *tz)
 	 * Set a temperature window. When this window is left the driver
 	 * must inform the thermal core via thermal_zone_device_update.
 	 */
+	 /* Skip lmh-dcvs-00 & 01 since these nodes are not monitor on-die sensor */
+	if(!strcmp(tz->type, "lmh-dcvs-00")){
+		dev_dbg(&tz->device, "Thermal: Skip set_trip!!!");
+	}else if(!strcmp(tz->type, "lmh-dcvs-01")){
+		dev_dbg(&tz->device, "Thermal: Skip set_trip!!!");
+	}else{
 	ret = tz->ops->set_trips(tz, low, high);
 	if (ret)
 		dev_err(&tz->device, "Failed to set trips: %d\n", ret);
+	}
 	trace_thermal_set_trip(tz);
 
 exit:

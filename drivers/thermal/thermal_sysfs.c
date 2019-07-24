@@ -24,13 +24,50 @@
 #include "thermal_core.h"
 
 /* sys I/F for thermal zone */
-
 static ssize_t
 type_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 
 	return sprintf(buf, "%s\n", tz->type);
+}
+
+extern int G_pa_therm1_temp;
+extern int G_skin_therm_temp;
+extern int G_virtual_therm_temp;
+extern int G_virtual_therm_temp_prev;
+bool G_use_pa_flag = true;
+int smooth_virtual_therm_temp(int temp){
+	int cur_shift_temp = 200;
+	/* G_virtual_therm_temp will be 0 by default (1st) */
+	if(G_virtual_therm_temp == 0){
+		return temp;
+	}
+	if((temp - G_virtual_therm_temp_prev) >= cur_shift_temp){
+		return G_virtual_therm_temp_prev + cur_shift_temp;
+	}else if ((temp - G_virtual_therm_temp_prev) <= -cur_shift_temp){
+		return G_virtual_therm_temp_prev - cur_shift_temp;
+	} else {
+		return temp;
+	}
+}
+
+int check_pa_temp(void){
+  int result = 0;
+  bool cur_use_pa_status = 0;
+  cur_use_pa_status = G_use_pa_flag;
+	if(G_pa_therm1_temp < 30000){
+		result = (G_pa_therm1_temp - 1000);
+	}
+	//if(G_pa_therm1_temp > 35000){
+	if(G_pa_therm1_temp > (G_skin_therm_temp - 3000)){
+		result = (G_skin_therm_temp - 10000);
+		G_use_pa_flag = false;
+	} else {
+		result = (G_pa_therm1_temp - 1000);
+		G_use_pa_flag = true;
+	}
+	return result;
 }
 
 static ssize_t
@@ -43,8 +80,15 @@ temp_show(struct device *dev, struct device_attribute *attr, char *buf)
 
 	if (ret)
 		return ret;
-
-	return sprintf(buf, "%d\n", temperature);
+	
+	if(tz->id == 72){
+		G_virtual_therm_temp_prev = G_virtual_therm_temp;
+		temperature = check_pa_temp();
+		G_virtual_therm_temp = smooth_virtual_therm_temp(temperature);
+		return sprintf(buf, "%d\n", G_virtual_therm_temp);
+	}else{
+		return sprintf(buf, "%d\n", temperature);
+	}
 }
 
 static ssize_t
