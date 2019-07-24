@@ -1,0 +1,17 @@
+Laser Sensor Device Tree Bindings.
+========================================
+
+Boards with the Laser Sensor connected to CCI shall have the following
+properties:
+
+Required node properties:
+	- cell-index: cci hardware core index
+	- compatible:
+		- "st,stmvl53l1" : STMiecroelectronics VL53L1 Laser sensor.
+	- reg : offset and length of the register set for the device
+	- cci-master: cci master the sensor connected to
+	- cci-device: cci device the sensor connected to
+	- cci-supply : cci voltage regulator used
+	- laser-supply: laser sensor voltage regulator
+	- intr-gpio: irq gpio which is to provide interrupts to host
+	- xsdn-gpio: laser sensor shutdown gpio
