@@ -27,6 +27,31 @@
 #include "step-chg-jeita.h"
 #include "storm-watch.h"
 #include "schgm-flash.h"
+//[+++]ASUS : Add include files
+#include "fg-core.h"
+#include "fg-reg.h"
+#include "fg-alg.h"
+#include "battery.h"
+#include <linux/gpio.h>
+#include <linux/alarmtimer.h>
+#include <linux/atomic.h>
+//[---]ASUS : Add include files
+
+#include "../../../usb/pd/usbpd.h"
+
+#ifdef CONFIG_ASUS_PD_CHARGER
+#define ASUS_PD_INPUT_VOL_CFG_9V 9000000	// 9V
+#define ASUS_PD_INPUT_VOL_CFG_7_5V 7500000	// 7.5V
+#define ASUS_PD_INPUT_VOL_CFG_5V 5000000	// 5V
+#define ASUS_PD_ICL_CUR_CFG_3A 3000000		// 3A
+#define ASUS_PD_ICL_CUR_CFG_2A 2000000		// 2A
+#define ASUS_PD_ICL_CUR_CFG_1_7A 1700000	// 1.7A
+#define ASUS_PD_ICL_CUR_CFG_1_5A 1500000	// 1.5A
+
+u32 default_src_caps[] = { 0x360190c8 };  /* VSafe5V @ 2A */
+int default_src_caps_size = ARRAY_SIZE(default_src_caps);
+int min_sink_current = 500;
+#endif
 
 #define smblib_err(chg, fmt, ...)		\
 	pr_err("%s: %s: " fmt, chg->name,	\
@@ -46,6 +71,250 @@
 	((typec_mode == POWER_SUPPLY_TYPEC_SOURCE_MEDIUM	\
 	|| typec_mode == POWER_SUPPLY_TYPEC_SOURCE_HIGH)	\
 	&& !chg->typec_legacy)
+
+//[+++]ASUS : Add delayed works
+#define ICL_500mA	0x0A
+extern struct smb_charger *smbchg_dev;  //global smb_charger
+extern struct gpio_control *global_gpio;  //global gpio_control
+extern struct timespec last_jeita_time;
+static struct alarm bat_alarm;
+//[---]ASUS : Add delayed works
+
+//[+++]ASUS : Add variables
+static int ASUS_ADAPTER_ID = 0;
+static int HVDCP_FLAG = 0;
+static int UFP_FLAG = 0;
+static int LEGACY_CABLE_FLAG = 2; // 0: non-legacy, 1: noncomp-legacy, 2: legacy
+static bool asus_flow_processing = 0;
+volatile bool asus_adapter_detecting_flag = 0;
+bool asus_flow_done_flag = 0;
+int asus_CHG_TYPE = 0;
+extern int charger_limit_value;
+extern int charger_limit_enable_flag;
+extern bool no_input_suspend_flag;
+extern bool g_Charger_mode;
+int vbus_rising_count = 0;
+u8 asus_set_icl = ICL_500mA;
+static int Total_FCC_Value = 1750000;  //Add the interface for charging debug apk
+extern bool g_usb_water_enable;
+extern bool g_usb_thermal_enable;
+extern int g_usb_thermal_debug;
+extern bool demo_app_status_flag;
+static atomic_t feature_stop_need_release = ATOMIC_INIT(0);
+extern bool ultra_bat_life_flag;
+extern bool smartchg_stop_flag;
+bool qc_stat_registed = false;
+static bool usb_thermal_once_flag = false;  //In both MOS and COS when conn_temp >= 700, do not resume charging unless user unplugs and conn_temp <= 500 simultaneously
+int g_usb_otg = 0;
+
+//ASUS_BSP battery safety upgrade +++
+int FV_JEITA_uV = 4360000;
+//ASUS_BSP battery safety upgrade ---
+//[---]ASUS : Add variables
+
+//[+++]ASUS BSP gauge
+extern struct fg_gen4_chip *g_fgChip;
+extern struct fg_dev *g_fg;
+extern int fg_get_msoc(struct fg_dev *fg, int *msoc);
+//[---]ASUS BSP gauge
+
+int asus_get_prop_batt_temp(struct smb_charger *chg);
+int asus_get_prop_batt_volt(struct smb_charger *chg);
+int asus_get_prop_batt_current(struct smb_charger *chg);
+int asus_get_prop_batt_capacity(struct smb_charger *chg);
+int asus_get_prop_batt_health(struct smb_charger *chg);
+int asus_get_prop_usb_present(struct smb_charger *chg);
+//[+++]ASUS : Add the interface for charging debug apk
+int asus_get_prop_adapter_id(void);
+int asus_get_prop_is_legacy_cable(void);
+int asus_get_prop_total_fcc(void);
+int asus_get_apsd_result_by_bit(void);
+//[---]ASUS : Add the interface for charging debug apk
+extern void asus_extcon_set_fnode_name(struct extcon_dev *edev, const char *fname);
+extern int asus_extcon_set_state_sync(struct extcon_dev *edev, int cable_state);
+
+enum ADAPTER_ID {
+	NONE = 0,
+	ASUS_750K,
+	ASUS_200K,
+	PB,
+	OTHERS,
+	ADC_NOT_READY,
+};
+
+static char *asus_id[] = {
+	"NONE",
+	"ASUS_750K",
+	"ASUS_200K",
+	"PB",
+	"OTHERS",
+	"ADC_NOT_READY"
+};
+
+char *ufp_type[] = {
+	"NONE",
+	"DEFAULT",
+	"MEDIUM",
+	"HIGH",
+	"OTHERS"
+};
+
+char *health_type[] = {
+	"GOOD",
+	"COLD",
+	"COOL",
+	"WARM",
+	"OVERHEAT",
+	"OVERVOLT",
+	"OTHERS"
+};
+
+char *bat_status_text[] = {
+	"Unknown",
+	"Charging",
+	"Discharging",
+	"Not charging",
+	"Full",
+	"Quick charging",
+	"Quick charging plus",
+	"Thermal alert"
+};
+
+char *chg_status_text[] = {
+	"Inhibit",
+	"Trickle",
+	"Precharge",
+	"Fullon",
+	"Taper",
+	"Terminate",
+	"Pause",
+	"Disable"
+};
+
+struct wakeup_source asus_chg_ws;
+static bool create_asus_chg_ws = false;
+extern bool asus_chg_ws_disable;
+
+#ifdef CONFIG_ASUS_PD_CHARGER
+static final_pd_mw = 5000;
+int * chg_eval_src_caps_asus(int src_cap_cnt, u32 *received_pdos)
+{
+	int i = 0, index = 0;
+	int cur_mw = 0, cur_uv = 0, cur_ua = 0;
+	int pre_mw = 0, pre_uv = 0, pre_ua = 0;
+	int pdo_candidate = 0, pdo_candidate_9v = 0;
+	static int chg_rdo[3];
+	for (i = 0; i < src_cap_cnt; i++) {
+		if (PD_SRC_PDO_TYPE(received_pdos[i]) != PD_SRC_PDO_TYPE_FIXED) {
+			pr_info("[CHG][PD] src_cap %d invalid! %08x\n", i, received_pdos[i]);
+			continue;
+		}
+
+		cur_uv = PD_SRC_PDO_FIXED_VOLTAGE(received_pdos[i]) * 50 * 1000;
+		cur_ua = PD_SRC_PDO_FIXED_MAX_CURR(received_pdos[i]) * 10 * 1000;
+
+		if (ASUS_PD_INPUT_VOL_CFG_5V == cur_uv) {
+			cur_ua = (cur_ua > ASUS_PD_ICL_CUR_CFG_3A) ? ASUS_PD_ICL_CUR_CFG_3A : cur_ua;
+		} else if (cur_uv > ASUS_PD_INPUT_VOL_CFG_5V && cur_uv <= ASUS_PD_INPUT_VOL_CFG_7_5V) {
+			cur_ua = (cur_ua > ASUS_PD_ICL_CUR_CFG_2A) ? ASUS_PD_ICL_CUR_CFG_2A : cur_ua;
+		} else if (cur_uv > ASUS_PD_INPUT_VOL_CFG_7_5V&& cur_uv <= ASUS_PD_INPUT_VOL_CFG_9V) {
+			cur_ua = (cur_ua > ASUS_PD_ICL_CUR_CFG_1_7A) ? ASUS_PD_ICL_CUR_CFG_1_7A : cur_ua;
+		} else {
+			pr_info("[CHG][PD] pdo-%d: uv (%d), ua (%d), out of spec! skip!\n", i, cur_uv, cur_ua);
+			continue;
+		}
+
+		pdo_candidate = 0;
+		cur_mw = (cur_uv / 1000) * (cur_ua / 1000);
+		pr_info("[CHG][PD] pdo-%d: uv (%d), ua (%d), mw (%d) meet spec!\n", i, cur_uv, cur_ua, cur_mw);
+
+		/*
+		  *	Limit Input Current:
+		  *	ICL_CFG Rule: (by PDO Voltage)
+		  *	Vin = 5V			=> Set I Adp_max = min(3A, I PDO )
+		  *	5V < Vin <= 7.5V	=> Set I Adp_max = min(2A, I PDO )
+		  *	7.5V < Vin <= 9V	=> Set I Adp_max = min(1.7A, I PDO )
+		  *	9V < Vin			=> Set I Adp_max = 0A
+		  *
+		  *	PDO Select Condition:
+		  *	1. Max Padp profile, no more than 15W
+		  *	2. If two Padp profiles are the same:
+		  * 	- Selecting the one Vin = 9V
+		  * 	- If there is no pdo with Vin = 9V, selecting the one Vin is smaller.
+		  */
+
+		if (cur_mw > pre_mw) {
+			pdo_candidate = 1;
+			if (ASUS_PD_INPUT_VOL_CFG_9V == cur_uv) {
+				pdo_candidate_9v = 1;
+			} else {
+				pdo_candidate_9v = 0;
+			}
+		} else if (cur_mw == pre_mw && !pdo_candidate_9v) {
+			if (ASUS_PD_INPUT_VOL_CFG_9V == cur_uv) {
+				pdo_candidate = 1;
+				pdo_candidate_9v = 1;
+			} else if (cur_uv <  pre_uv) {
+				pdo_candidate = 1;
+			}
+		}
+
+		if (pdo_candidate) {
+			pre_mw = cur_mw;
+			pre_uv = cur_uv;
+			pre_ua = cur_ua;
+			index = i;
+			pr_info("[CHG][PD] pdo-%d: uv (%d), ua (%d), candidate!\n", i, pre_uv, pre_ua);
+		}
+	}
+
+	/*
+	 * chg_rdo[0] => pdo number
+	 * chg_rdo[1] => request voltage
+	 * chg_rdo[2] => request current
+	 * */
+
+	chg_rdo[0] = index;
+	chg_rdo[1] = pre_uv;
+	chg_rdo[2] = pre_ua;
+
+	final_pd_mw = (pre_uv / 1000) * (pre_ua / 1000);
+	pr_info("[CHG][PD]: uv (%d), ua (%d), mw (%d) final!\n", pre_uv, pre_ua, final_pd_mw);
+	
+	return chg_rdo;
+}
+#endif
+
+void asus_smblib_stay_awake(struct smb_charger *chg)
+{
+	if (asus_chg_ws_disable)
+		return;
+
+	if (create_asus_chg_ws) {
+		CHG_DBG("ASUS set awake\n");
+		__pm_stay_awake(&asus_chg_ws);
+	} else {
+		CHG_DBG_E("ASUS set awake fail, asus_chg_ws not initial\n");
+		wakeup_source_init(&asus_chg_ws, "asus_chg_ws");
+		create_asus_chg_ws = true;
+
+		CHG_DBG("ASUS set awake after asus_chg_ws initial\n");
+		__pm_stay_awake(&asus_chg_ws);
+	}
+}
+
+void asus_smblib_relax(struct smb_charger *chg)
+{
+	if (asus_chg_ws_disable)
+		return;
+
+	if (create_asus_chg_ws) {
+		CHG_DBG("ASUS set relax\n");
+		__pm_relax(&asus_chg_ws);
+	} else {
+		CHG_DBG_E("ASUS set relax fail, asus_chg_ws not initial\n");
+	}
+}
 
 static void update_sw_icl_max(struct smb_charger *chg, int pst);
 
@@ -720,16 +989,29 @@ int smblib_set_charge_param(struct smb_charger *chg,
 
 	smblib_dbg(chg, PR_REGISTER, "%s = %d (0x%02x)\n",
 		   param->name, val_u, val_raw);
+	CHG_DBG("start, %s = %d (0x%02x)\n", param->name, val_u, val_raw);
 
 	return rc;
 }
 
+extern int asus_extcon_get_state(struct extcon_dev *edev);
 int smblib_set_usb_suspend(struct smb_charger *chg, bool suspend)
 {
 	int rc = 0;
 	if (suspend)
 		vote(chg->icl_irq_disable_votable, USB_SUSPEND_VOTER,
 				true, 0);
+
+	if (usb_thermal_once_flag) {
+		CHG_DBG("[usb_thermal] Force to suspend charger input because of conn_temp\n");
+		suspend = 1;
+		//ASUSErclog(ASUS_USB_THERMAL_ALERT, "USB Thermal Alert is triggered");
+	}
+
+	if (no_input_suspend_flag) {
+		CHG_DBG("Start thermal test, unable to suspend input\n");
+		suspend = 0;
+	}
 
 	rc = smblib_masked_write(chg, USBIN_CMD_IL_REG, USBIN_SUSPEND_BIT,
 				 suspend ? USBIN_SUSPEND_BIT : 0);
@@ -989,12 +1271,14 @@ static void smblib_rerun_apsd(struct smb_charger *chg)
 
 	smblib_dbg(chg, PR_MISC, "re-running APSD\n");
 
+	CHG_DBG("Qcom Rerun APSD\n");
 	rc = smblib_masked_write(chg, CMD_APSD_REG,
 				APSD_RERUN_BIT, APSD_RERUN_BIT);
 	if (rc < 0)
 		smblib_err(chg, "Couldn't re-run APSD rc=%d\n", rc);
 }
 
+static bool asus_quick_trigger_hvdcp = false;
 static const struct apsd_result *smblib_update_usb_type(struct smb_charger *chg)
 {
 	const struct apsd_result *apsd_result = smblib_get_apsd_result(chg);
@@ -1002,6 +1286,8 @@ static const struct apsd_result *smblib_update_usb_type(struct smb_charger *chg)
 	/* if PD is active, APSD is disabled so won't have a valid result */
 	if (chg->pd_active) {
 		chg->real_charger_type = POWER_SUPPLY_TYPE_USB_PD;
+	} else if (asus_adapter_detecting_flag && apsd_result->pst == POWER_SUPPLY_TYPE_UNKNOWN) {
+		chg->real_charger_type = POWER_SUPPLY_TYPE_USB_DCP;  //ASUS BSP charger +++
 	} else {
 		/*
 		 * Update real charger type only if its not FLOAT
@@ -1014,6 +1300,18 @@ static const struct apsd_result *smblib_update_usb_type(struct smb_charger *chg)
 
 	smblib_dbg(chg, PR_MISC, "APSD=%s PD=%d\n",
 					apsd_result->name, chg->pd_active);
+	if (chg->asus_print_usb_src_change) {
+		CHG_DBG("FAKE = %d, APSD = %s, PD = %d\n",
+				asus_adapter_detecting_flag, apsd_result->name, chg->pd_active);
+	}
+
+	if (!asus_quick_trigger_hvdcp && asus_adapter_detecting_flag && (apsd_result->pst == POWER_SUPPLY_TYPE_USB_HVDCP_3)) {
+		CHG_DBG("Detect HVDCP3, quick trigger asus_chg_flow\n");
+		asus_quick_trigger_hvdcp = true;
+		if (cancel_delayed_work(&smbchg_dev->asus_chg_flow_work))
+			schedule_delayed_work(&smbchg_dev->asus_chg_flow_work, msecs_to_jiffies(0));
+	}
+
 	return apsd_result;
 }
 
@@ -1142,9 +1440,9 @@ static void smblib_uusb_removal(struct smb_charger *chg)
 
 	/* reconfigure allowed voltage for HVDCP */
 	rc = smblib_set_adapter_allowance(chg,
-			USBIN_ADAPTER_ALLOW_5V_OR_9V_TO_12V);
+			USBIN_ADAPTER_ALLOW_5V_TO_9V);
 	if (rc < 0)
-		smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_OR_9V_TO_12V rc=%d\n",
+		smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_TO_9V rc=%d\n",
 			rc);
 
 	/* reset USBOV votes and cancel work */
@@ -1323,6 +1621,8 @@ int smblib_set_icl_current(struct smb_charger *chg, int icl_ua)
 	/* suspend if 25mA or less is requested */
 	bool suspend = (icl_ua <= USBIN_25MA);
 
+	CHG_DBG("+++\n");
+
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC) {
 		rc = smblib_masked_write(chg, USB_CMD_PULLDOWN_REG,
 				EN_PULLDOWN_USB_IN_BIT,
@@ -1371,6 +1671,8 @@ int smblib_set_icl_current(struct smb_charger *chg, int icl_ua)
 	}
 
 set_mode:
+	CHG_DBG("icl(%d), asus_set_icl(%d), icl_override_mode(%d)\n", icl_ua, (int)asus_set_icl*50000, icl_override);
+
 	rc = smblib_icl_override(chg, icl_override);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't set ICL override rc=%d\n", rc);
@@ -1389,6 +1691,7 @@ unsuspend:
 	if (icl_override != SW_OVERRIDE_HC_MODE)
 		rc = smblib_run_aicl(chg, RERUN_AICL);
 out:
+	CHG_DBG("---\n");
 	return rc;
 }
 
@@ -1735,20 +2038,71 @@ int smblib_vconn_regulator_is_enabled(struct regulator_dev *rdev)
 /*****************
  * OTG REGULATOR *
  *****************/
-
+extern int chg_set_src_cap(void);
+extern int cam_sensor_is_power_up(void);
+extern int cam_flash_battery_low(int enable);
 int smblib_vbus_regulator_enable(struct regulator_dev *rdev)
 {
 	struct smb_charger *chg = rdev_get_drvdata(rdev);
 	int rc;
-
+	int batt_current;
+	int batt_capacity;
+	
 	smblib_dbg(chg, PR_OTG, "enabling OTG\n");
-
-	rc = smblib_masked_write(chg, DCDC_CMD_OTG_REG, OTG_EN_BIT, OTG_EN_BIT);
-	if (rc < 0) {
-		smblib_err(chg, "Couldn't enable OTG rc=%d\n", rc);
-		return rc;
+	CHG_DBG("enabling OTG\n");
+	
+	batt_current = asus_get_prop_batt_current(smbchg_dev);
+	batt_capacity = asus_get_prop_batt_capacity(smbchg_dev);
+	
+	if (batt_current <= 2500000 && batt_capacity > 30 && !cam_sensor_is_power_up()) {
+		//0x1152 = 0x03, OTG_ILIMIT_2000MA
+		rc = smblib_masked_write(smbchg_dev, DCDC_OTG_CURRENT_LIMIT_CFG_REG,
+			DCDC_OTG_CURRENT_LIMIT_MASK, 0x03);
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't set default DCDC_OTG_CURRENT_LIMIT_CFG_REG rc=%d\n", rc);
+		}
+	
+		rc = smblib_masked_write(chg, DCDC_CMD_OTG_REG, OTG_EN_BIT, OTG_EN_BIT);
+		if (rc < 0) {
+			smblib_err(chg, "Couldn't enable OTG rc=%d\n", rc);
+			return rc;
+		}
+	
+		CHG_DBG("set otg current limit to 2A\n");
+		schedule_delayed_work(&smbchg_dev->asus_reverse_charge_work, 0);
 	}
-
+	else {
+		//0x1152 = 0x01, OTG_ILIMIT_1000MA
+		rc = smblib_masked_write(smbchg_dev, DCDC_OTG_CURRENT_LIMIT_CFG_REG,
+			DCDC_OTG_CURRENT_LIMIT_MASK, 0x01);
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't set default DCDC_OTG_CURRENT_LIMIT_CFG_REG rc=%d\n", rc);
+		}
+		
+		rc = smblib_masked_write(chg, DCDC_CMD_OTG_REG, OTG_EN_BIT, OTG_EN_BIT);
+		if (rc < 0) {
+			smblib_err(chg, "Couldn't enable OTG rc=%d\n", rc);
+			return rc;
+		}
+	
+		default_src_caps[0] = 0x36019032;
+		chg_set_src_cap();
+		
+		CHG_DBG("batt_current = %d, batt_capacity = %d, set otg current limit to 1A\n", batt_current, batt_capacity);
+	}
+	
+	if(batt_capacity <= 15){
+		cam_flash_battery_low(1);
+		asus_extcon_set_state_sync(smbchg_dev->reversechg_extcon, 1);
+	}
+	else{
+		cam_flash_battery_low(0);
+		asus_extcon_set_state_sync(smbchg_dev->reversechg_extcon, 0);
+		schedule_delayed_work(&smbchg_dev->asus_reverse_charge_check_camera, 0);
+	}
+	
+	g_usb_otg = 1;
+	
 	return 0;
 }
 
@@ -1758,13 +2112,30 @@ int smblib_vbus_regulator_disable(struct regulator_dev *rdev)
 	int rc;
 
 	smblib_dbg(chg, PR_OTG, "disabling OTG\n");
+	CHG_DBG("disabling OTG\n");
+
+	g_usb_otg = 0;
+	cancel_delayed_work(&smbchg_dev->asus_reverse_charge_work);
+	cancel_delayed_work(&smbchg_dev->asus_reverse_charge_check_camera);
 
 	rc = smblib_masked_write(chg, DCDC_CMD_OTG_REG, OTG_EN_BIT, 0);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't disable OTG regulator rc=%d\n", rc);
 		return rc;
 	}
+	
+	//0x1152 = 0x01, OTG_ILIMIT_1000MA
+	rc = smblib_masked_write(smbchg_dev, DCDC_OTG_CURRENT_LIMIT_CFG_REG,
+		DCDC_OTG_CURRENT_LIMIT_MASK, 0x01);
+	if (rc < 0) {
+		CHG_DBG_E("Couldn't set default DCDC_OTG_CURRENT_LIMIT_CFG_REG rc=%d\n", rc);
+	}
 
+	default_src_caps[0] = 0x360190c8;
+
+	cam_flash_battery_low(0);
+	asus_extcon_set_state_sync(smbchg_dev->reversechg_extcon, 0);
+	
 	return 0;
 }
 
@@ -1786,6 +2157,28 @@ int smblib_vbus_regulator_is_enabled(struct regulator_dev *rdev)
 /********************
  * BATT PSY GETTERS *
  ********************/
+
+int asus_get_batt_status (void)
+{
+	if(smbchg_dev->pd_active){
+		if(final_pd_mw > 10000000)
+			return QC_PLUS;
+		else if(final_pd_mw == 10000000)
+			return QC;
+		else
+			return NORMAL;
+	} 
+	else if (HVDCP_FLAG == 3)
+		return QC_PLUS;
+	else if (ASUS_ADAPTER_ID == OTHERS && UFP_FLAG == 3 && LEGACY_CABLE_FLAG == 0)
+		return QC;
+	else if (HVDCP_FLAG == 0 && ASUS_ADAPTER_ID == PB && UFP_FLAG == 3 && LEGACY_CABLE_FLAG == 0)
+		return QC;
+	else if (HVDCP_FLAG == 0 && (ASUS_ADAPTER_ID == ASUS_750K || ASUS_ADAPTER_ID == PB) && (LEGACY_CABLE_FLAG || UFP_FLAG == 1))
+		return QC;
+	else
+		return NORMAL;
+}
 
 int smblib_get_prop_input_suspend(struct smb_charger *chg,
 				  union power_supply_propval *val)
@@ -1850,6 +2243,16 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 	bool usb_online, dc_online;
 	u8 stat;
 	int rc, suspend = 0;
+	static int now_bat_status = POWER_SUPPLY_STATUS_DISCHARGING, pre_bat_status = POWER_SUPPLY_STATUS_DISCHARGING;
+	static int now_chg_status = 7, pre_chg_status = 7;
+	pre_bat_status = now_bat_status;
+	pre_chg_status = now_chg_status;
+
+	if (usb_thermal_once_flag && g_Charger_mode) {
+		val->intval = POWER_SUPPLY_STATUS_THERMAL_ALERT;
+		printk("[BAT][CHG] Batt_status = %s\n", bat_status_text[val->intval]);
+		return 0;
+	}
 
 	if (chg->dbc_usbov) {
 		rc = smblib_get_prop_usb_present(chg, &pval);
@@ -1918,19 +2321,75 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 	case PRE_CHARGE:
 	case FULLON_CHARGE:
 	case TAPER_CHARGE:
-		val->intval = POWER_SUPPLY_STATUS_CHARGING;
+		if (g_fgChip != NULL && smbchg_dev != NULL) {
+			if (asus_get_prop_batt_capacity(smbchg_dev) == 100) {
+				val->intval = POWER_SUPPLY_STATUS_FULL;
+			} else {
+				if (g_Charger_mode) {
+					if (asus_get_batt_status() == QC_PLUS) {
+						val->intval = POWER_SUPPLY_STATUS_QUICK_CHARGING_PLUS;
+					} else if (asus_get_batt_status() == QC) {
+						val->intval = POWER_SUPPLY_STATUS_QUICK_CHARGING;
+					} else {
+						val->intval = POWER_SUPPLY_STATUS_CHARGING;
+					}
+				} else {
+					val->intval = POWER_SUPPLY_STATUS_CHARGING;
+				}
+			}
+		} else {
+			if (g_Charger_mode) {
+				if (asus_get_batt_status() == QC_PLUS) {
+					val->intval = POWER_SUPPLY_STATUS_QUICK_CHARGING_PLUS;
+				} else if (asus_get_batt_status() == QC) {
+					val->intval = POWER_SUPPLY_STATUS_QUICK_CHARGING;
+				} else {
+					val->intval = POWER_SUPPLY_STATUS_CHARGING;
+				}
+			} else {
+				val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			}
+		}
 		break;
 	case TERMINATE_CHARGE:
 	case INHIBIT_CHARGE:
-		val->intval = POWER_SUPPLY_STATUS_FULL;
+		if (asus_get_prop_batt_capacity(smbchg_dev) != 100) {
+			if (g_Charger_mode) {
+				if (asus_get_batt_status() == QC_PLUS) {
+					val->intval = POWER_SUPPLY_STATUS_QUICK_CHARGING_PLUS;
+				} else if (asus_get_batt_status() == QC) {
+					val->intval = POWER_SUPPLY_STATUS_QUICK_CHARGING;
+				} else {
+					val->intval = POWER_SUPPLY_STATUS_CHARGING;
+				}
+			} else {
+				val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			}
+		} else {
+			val->intval = POWER_SUPPLY_STATUS_FULL;
+		}
 		break;
 	case DISABLE_CHARGE:
 	case PAUSE_CHARGE:
-		val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		if (g_fgChip != NULL && smbchg_dev != NULL) {
+			if (asus_get_prop_batt_capacity(smbchg_dev) == 100) {
+				val->intval = POWER_SUPPLY_STATUS_FULL;
+			} else {
+				val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+			}
+		} else {
+			val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		}
 		break;
 	default:
 		val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
 		break;
+	}
+
+	now_bat_status = val->intval;
+	now_chg_status = stat;
+	if ((now_bat_status != pre_bat_status) || (now_chg_status != pre_chg_status)) {  //Trim the log of status
+		printk("[BAT][CHG] Batt_status = %s, Charger_status = %s\n", bat_status_text[now_bat_status], chg_status_text[now_chg_status]);
 	}
 
 	if (is_charging_paused(chg)) {
@@ -1948,7 +2407,8 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 		return 0;
 	}
 
-	if (val->intval != POWER_SUPPLY_STATUS_CHARGING)
+	if ((val->intval != POWER_SUPPLY_STATUS_CHARGING) || (val->intval != POWER_SUPPLY_STATUS_QUICK_CHARGING) 
+		|| (val->intval != POWER_SUPPLY_STATUS_QUICK_CHARGING_PLUS))
 		return 0;
 
 	if (!usb_online && dc_online
@@ -2011,6 +2471,7 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 	int rc;
 	int effective_fv_uv;
 	u8 stat;
+	u8 chg_stat,vbus_stat;
 
 	rc = smblib_read(chg, BATTERY_CHARGER_STATUS_2_REG, &stat);
 	if (rc < 0) {
@@ -2051,8 +2512,23 @@ int smblib_get_prop_batt_health(struct smb_charger *chg,
 		val->intval = POWER_SUPPLY_HEALTH_OVERHEAT;
 	else if (stat & BAT_TEMP_STATUS_COLD_SOFT_BIT)
 		val->intval = POWER_SUPPLY_HEALTH_COOL;
-	else if (stat & BAT_TEMP_STATUS_HOT_SOFT_BIT)
+	else if (stat & BAT_TEMP_STATUS_HOT_SOFT_BIT) {
 		val->intval = POWER_SUPPLY_HEALTH_WARM;
+		
+		//WeiYu ++ modify for jeita icon issue
+		rc = smblib_read(smbchg_dev, USBIN_BASE + INT_RT_STS_OFFSET, &vbus_stat);	
+		rc = smblib_read(smbchg_dev, CHARGING_ENABLE_CMD_REG, &chg_stat);	
+		if((bool)(vbus_stat & USBIN_PLUGIN_RT_STS_BIT)){
+			if((chg_stat&CHARGING_ENABLE_CMD_BIT) == 1){
+				val->intval = POWER_SUPPLY_HEALTH_GOOD;
+				//CHG_DBG_EVT("Warm-temp but reporting health good due to charging is enabled\n");
+			}
+			else{
+				val->intval = POWER_SUPPLY_HEALTH_OVERHEAT;
+			}
+		}
+
+	}
 	else
 		val->intval = POWER_SUPPLY_HEALTH_GOOD;
 
@@ -2140,6 +2616,21 @@ int smblib_get_prop_batt_iterm(struct smb_charger *chg,
 	return rc;
 }
 
+//[+++]ASUS : Add to get the batt_id
+int smblib_get_prop_batt_id(struct smb_charger *chg,
+			      union power_supply_propval *val)
+{
+	int rc;
+
+	if (!chg->bms_psy)
+		return -EINVAL;
+
+	rc = power_supply_get_property(chg->bms_psy,
+				       POWER_SUPPLY_PROP_RESISTANCE_ID, val);
+	return rc;
+}
+//[---]ASUS : Add to get the batt_id
+
 int smblib_get_prop_batt_charge_done(struct smb_charger *chg,
 					union power_supply_propval *val)
 {
@@ -2213,6 +2704,9 @@ int smblib_set_prop_batt_status(struct smb_charger *chg,
 int smblib_set_prop_system_temp_level(struct smb_charger *chg,
 				const union power_supply_propval *val)
 {
+	CHG_DBG("start, level = %d, use asus settings return this function", val->intval);
+	return 0;
+
 	if (val->intval < 0)
 		return -EINVAL;
 
@@ -2476,11 +2970,13 @@ int smblib_dp_dm(struct smb_charger *chg, int val)
 				target_icl_ua, chg->usb_icl_delta_ua);
 		break;
 	case POWER_SUPPLY_DP_DM_FORCE_5V:
+		smblib_dbg(chg, PR_MISC, "[DBG] Force 5V, qc2_unsupported_voltage(%d)\n", chg->qc2_unsupported_voltage);
 		rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT);
 		if (rc < 0)
 			pr_err("Failed to force 5V\n");
 		break;
 	case POWER_SUPPLY_DP_DM_FORCE_9V:
+		smblib_dbg(chg, PR_MISC, "[DBG] Force 9V, qc2_unsupported_voltage(%d)\n", chg->qc2_unsupported_voltage);
 		if (chg->qc2_unsupported_voltage == QC2_NON_COMPLIANT_9V) {
 			smblib_err(chg, "Couldn't set 9V: unsupported\n");
 			return -EINVAL;
@@ -2506,6 +3002,7 @@ int smblib_dp_dm(struct smb_charger *chg, int val)
 			pr_err("Failed to force 9V\n");
 		break;
 	case POWER_SUPPLY_DP_DM_FORCE_12V:
+		smblib_dbg(chg, PR_MISC, "[DBG] Force 12V, qc2_unsupported_voltage(%d)\n", chg->qc2_unsupported_voltage);
 		if (chg->qc2_unsupported_voltage == QC2_NON_COMPLIANT_12V) {
 			smblib_err(chg, "Couldn't set 12V: unsupported\n");
 			return -EINVAL;
@@ -3068,7 +3565,13 @@ int smblib_get_prop_usb_online(struct smb_charger *chg,
 	}
 	smblib_dbg(chg, PR_REGISTER, "POWER_PATH_STATUS = 0x%02x\n",
 		   stat);
-
+	if (asus_adapter_detecting_flag)
+		val->intval = 1;
+	else if (atomic_read(&feature_stop_need_release) && (stat & USE_USBIN_BIT))
+		val->intval = 1;
+	else if (g_Charger_mode && usb_thermal_once_flag && (stat & USE_USBIN_BIT))
+		val->intval = 1;
+	else
 	val->intval = (stat & USE_USBIN_BIT) &&
 		      (stat & VALID_INPUT_POWER_SOURCE_STS_BIT);
 	return rc;
@@ -3093,7 +3596,7 @@ int smblib_get_prop_usb_voltage_max_design(struct smb_charger *chg,
 		if (chg->smb_version == PMI632_SUBTYPE)
 			val->intval = MICRO_9V;
 		else
-			val->intval = MICRO_12V;
+			val->intval = MICRO_9V;  //ASUS BSP : Kirin only supports adapters max to 9V
 		break;
 	default:
 		val->intval = MICRO_5V;
@@ -3239,11 +3742,15 @@ int smblib_get_prop_vph_voltage_now(struct smb_charger *chg,
 	return 0;
 }
 
+int g_r_sbu1 = 0;
+int g_r_sbu2 = 0;
 bool smblib_rsbux_low(struct smb_charger *chg, int r_thr)
 {
 	int r_sbu1, r_sbu2;
 	bool ret = false;
 	int rc;
+
+	CHG_DBG("[usb_water] +++\n");
 
 	if (!chg->iio.sbux_chan)
 		return false;
@@ -3291,6 +3798,9 @@ bool smblib_rsbux_low(struct smb_charger *chg, int r_thr)
 	if (r_sbu2 < r_thr)
 		ret = true;
 cleanup:
+	CHG_DBG("[usb_water] ret=%d, r_sbu1(%d), r_sbu2(%d), r_thr(%d)\n", ret, r_sbu1, r_sbu2, r_thr);
+	g_r_sbu1 = r_sbu1;
+	g_r_sbu2 = r_sbu2;
 	/* enable crude sensors */
 	rc = smblib_masked_write(chg, TYPE_C_CRUDE_SENSOR_CFG_REG,
 			EN_SRC_CRUDE_SENSOR_BIT | EN_SNK_CRUDE_SENSOR_BIT,
@@ -3303,7 +3813,49 @@ cleanup:
 	if (rc < 0)
 		smblib_err(chg, "Couldn't select SBU1 rc=%d\n", rc);
 
+	CHG_DBG("[usb_water] ---\n");
 	return ret;
+}
+EXPORT_SYMBOL_GPL(smblib_rsbux_low);
+
+int smblib_get_prop_conn_temp(struct smb_charger *chg,
+				 union power_supply_propval *val)
+{
+	union power_supply_propval pval = {0, };
+	bool usb_present, dc_present;
+	int conn_temp, rc;
+
+	rc = smblib_get_prop_usb_present(chg, &pval);
+	if (rc < 0) {
+		pr_err("Couldn't get usb presence status rc=%d\n", rc);
+		return rc;
+	}
+	usb_present = pval.intval;
+
+	rc = smblib_get_prop_dc_present(chg, &pval);
+	if (rc < 0) {
+		pr_err("Couldn't get dc presence status rc=%d\n", rc);
+		return rc;
+	}
+	dc_present = pval.intval;
+
+	if (!usb_present && !dc_present)
+		return -ENODATA;
+
+	if (chg->iio.connector_temp_chan) {
+		rc = iio_read_channel_processed(chg->iio.connector_temp_chan,
+				&conn_temp);
+		if (rc < 0) {
+			pr_err("Error in reading connector_temp channel, rc=%d", rc);
+			return rc;
+		}
+		val->intval = conn_temp / 100;
+	} else {
+		CHG_DBG_E("no conn_temp io-channel-names\n");
+		return -ENODATA;
+	}
+
+	return rc;
 }
 
 int smblib_get_prop_charger_temp(struct smb_charger *chg,
@@ -3328,6 +3880,7 @@ int smblib_get_prop_charger_temp(struct smb_charger *chg,
 		}
 		val->intval = temp / 100;
 	} else {
+		CHG_DBG_E("no chg_temp io-channel-names\n");
 		return -ENODATA;
 	}
 
@@ -3828,8 +4381,14 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 			 * real_charger_type
 			 */
 			chg->real_charger_type = POWER_SUPPLY_TYPE_USB;
-			rc = vote(chg->usb_icl_votable, USB_PSY_VOTER,
-						true, usb_current);
+			if (!asus_flow_done_flag && usb_current <= USBIN_25MA) {
+				CHG_DBG("WA for SDP debounce 2mA suspend #1");
+				rc = vote(chg->usb_icl_votable, USB_PSY_VOTER,
+							true, USBIN_100MA);
+			} else {
+				rc = vote(chg->usb_icl_votable, USB_PSY_VOTER,
+							true, usb_current);
+			}
 			if (rc < 0)
 				return rc;
 			rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER,
@@ -3846,8 +4405,14 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 		if ((usb_current < SDP_CURRENT_UA) && is_flash_active(chg))
 			usb_current = SDP_CURRENT_UA;
 
-		rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, true,
-							usb_current);
+		if (!asus_flow_done_flag && usb_current <= USBIN_25MA) {
+			CHG_DBG("WA for debounce SDP 2mA suspend #2");
+			rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, true,
+						USBIN_100MA);
+		} else {
+			rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, true,
+						usb_current);
+		}
 		if (rc < 0) {
 			pr_err("Couldn't vote ICL USB_PSY_VOTER rc=%d\n", rc);
 			return rc;
@@ -4351,7 +4916,10 @@ int smblib_get_charge_current(struct smb_charger *chg,
 
 	/* QC 2.0/3.0 adapter */
 	if (apsd_result->bit & (QC_3P0_BIT | QC_2P0_BIT)) {
-		*total_current_ua = HVDCP_CURRENT_UA;
+		if(!asus_flow_done_flag)
+			*total_current_ua = 1000000;
+		else
+			*total_current_ua = HVDCP_CURRENT_UA;
 		return 0;
 	}
 
@@ -4407,6 +4975,1413 @@ int smblib_get_charge_current(struct smb_charger *chg,
 	return 0;
 }
 
+/************************
+ * ASUS GET POWER_SUPPLY DATA *
+ ************************/
+int asus_get_prop_batt_temp(struct smb_charger *chg)
+{
+	union power_supply_propval temp_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &temp_val);
+
+	return temp_val.intval;
+}
+
+int asus_get_prop_batt_volt(struct smb_charger *chg)
+{
+	union power_supply_propval volt_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_VOLTAGE_NOW, &volt_val);
+
+	return volt_val.intval;
+}
+
+int asus_get_prop_batt_current(struct smb_charger *chg)
+{
+	union power_supply_propval current_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_CURRENT_NOW, &current_val);
+
+	return current_val.intval;
+}
+
+int asus_get_prop_batt_capacity(struct smb_charger *chg)
+{
+	union power_supply_propval capacity_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_batt_capacity(chg, &capacity_val);
+
+	return capacity_val.intval;
+}
+
+#define AICL_STEP_MV		200
+#define MAX_AICL_THRESHOLD_MV	4800
+
+int asus_get_prop_batt_health(struct smb_charger *chg)
+{
+	union power_supply_propval health_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_batt_health(chg, &health_val);
+
+	return health_val.intval;
+}
+
+int asus_get_prop_usb_present(struct smb_charger *chg)
+{
+	union power_supply_propval present_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_usb_present(chg, &present_val);
+
+	return present_val.intval;
+}
+
+//[+++]ASUS : Add the interface for charging debug apk
+int asus_get_prop_adapter_id(void)
+{
+	return ASUS_ADAPTER_ID;
+}
+
+int asus_get_prop_is_legacy_cable(void)
+{
+	if (LEGACY_CABLE_FLAG > 0)
+		return 1;
+	else
+		return 0;
+}
+
+int asus_get_prop_total_fcc(void)
+{
+	return Total_FCC_Value/1000;
+}
+
+int asus_get_apsd_result_by_bit(void)
+{
+	const struct apsd_result *apsd_result;
+
+	apsd_result = smblib_get_apsd_result(smbchg_dev);
+	if (apsd_result->bit == (DCP_CHARGER_BIT | QC_3P0_BIT))
+		return 7;
+	else if (apsd_result->bit == (DCP_CHARGER_BIT | QC_2P0_BIT))
+		return 6;
+	else if (apsd_result->bit == FLOAT_CHARGER_BIT)
+		return 5;
+	else if (apsd_result->bit == OCP_CHARGER_BIT)
+		return 4;
+	else if (apsd_result->bit == DCP_CHARGER_BIT)
+		return 3;
+	else if (apsd_result->bit == CDP_CHARGER_BIT)
+		return 2;
+	else if (apsd_result->bit == SDP_CHARGER_BIT)
+		return 1;
+	else
+		return 0;
+}
+//[---]ASUS : Add the interface for charging debug apk
+
+/************************
+ * ASUS FG GET CHARGER PARAMATER NAME *
+ ************************/
+const char *asus_get_apsd_result(void)
+{
+	const struct apsd_result *apsd_result;
+
+	apsd_result = smblib_get_apsd_result(smbchg_dev);
+	return apsd_result->name;
+}
+
+int asus_get_ufp_mode(void)
+{
+	int ufp_mode;
+
+	ufp_mode = smblib_get_prop_ufp_mode(smbchg_dev);
+	if (ufp_mode == POWER_SUPPLY_TYPEC_NONE)
+		return 0;
+	else if (ufp_mode == POWER_SUPPLY_TYPEC_SOURCE_DEFAULT)
+		return 1;
+	else if (ufp_mode == POWER_SUPPLY_TYPEC_SOURCE_MEDIUM)
+		return 2;
+	else if (ufp_mode == POWER_SUPPLY_TYPEC_SOURCE_HIGH)
+		return 3;
+	else
+		return 4;
+}
+
+int asus_get_batt_health(void)
+{
+	int bat_health;
+
+	bat_health = asus_get_prop_batt_health(smbchg_dev);
+
+	if (bat_health == POWER_SUPPLY_HEALTH_GOOD)
+		return 0;
+	else if (bat_health == POWER_SUPPLY_HEALTH_COLD) {
+		//ASUSErclog(ASUS_JEITA_HARD_COLD, "JEITA Hard Cold is triggered");
+		return 1;
+	}
+	else if (bat_health == POWER_SUPPLY_HEALTH_COOL)
+		return 2;
+	else if (bat_health == POWER_SUPPLY_HEALTH_WARM)
+		return 3;
+	else if (bat_health == POWER_SUPPLY_HEALTH_OVERHEAT) {
+		//ASUSErclog(ASUS_JEITA_HARD_HOT, "JEITA Hard Hot is triggered");
+		return 4;
+	}
+	else if (bat_health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) {
+		//ASUSErclog(ASUS_OUTPUT_OVP, "Battery OVP is triggered");
+		return 5;
+	}
+	else
+		return 6;
+}
+
+void asus_typec_removal_function(struct smb_charger *chg)
+{
+	int rc;
+
+	rc = smblib_write(smbchg_dev, HVDCP_PULSE_COUNT_MAX_REG, 0x54);
+	if (rc < 0)
+		CHG_DBG_E("Failed to set HVDCP_PULSE_COUNT_MAX_REG\n");
+
+	//Done by QCOM flow, starting BC1.2 Automatic Power Source Detection as early as after VBUS deglitch, followed by PD, and lastly QC2/3
+	//smblib_apsd_enable(smbchg_dev, true);
+	//smblib_hvdcp_detect_enable(smbchg_dev, true);
+
+	cancel_delayed_work(&chg->asus_chg_flow_work);
+	cancel_delayed_work(&chg->asus_adapter_adc_work);
+	cancel_delayed_work(&chg->asus_min_monitor_work);
+	cancel_delayed_work(&chg->asus_batt_RTC_work);
+	cancel_delayed_work(&chg->asus_set_flow_flag_work);
+	alarm_cancel(&bat_alarm);
+	asus_flow_processing = 0;
+	asus_CHG_TYPE = 0;
+	ASUS_ADAPTER_ID = 0;
+	HVDCP_FLAG = 0;
+	UFP_FLAG = 0;
+	asus_flow_done_flag = 0;
+	asus_adapter_detecting_flag = 0;
+	asus_quick_trigger_hvdcp = false;
+	asus_set_icl = ICL_500mA;
+	asus_smblib_relax(smbchg_dev);
+	power_supply_changed(chg->usb_psy);
+}
+
+/************************
+ * ASUS ADD BAT_ALARM *
+ ************************/
+static DEFINE_SPINLOCK(bat_alarm_slock);
+static enum alarmtimer_restart batAlarm_handler(struct alarm *alarm, ktime_t now)
+{
+	CHG_DBG("batAlarm triggered\n");
+	return ALARMTIMER_NORESTART;
+}
+void asus_batt_RTC_work(struct work_struct *dat)
+{
+	unsigned long batflags;
+	struct timespec new_batAlarm_time;
+	struct timespec mtNow;
+	int RTCSetInterval = 60;
+
+	if (!smbchg_dev) {
+		CHG_DBG("driver not ready yet!\n");
+		return;
+	}
+
+	if (!asus_get_prop_usb_present(smbchg_dev)) {
+		alarm_cancel(&bat_alarm);
+		CHG_DBG("usb not present, cancel\n");
+		return;
+	}
+	mtNow = current_kernel_time();
+	new_batAlarm_time.tv_sec = 0;
+	new_batAlarm_time.tv_nsec = 0;
+
+	RTCSetInterval = 60;
+
+	new_batAlarm_time.tv_sec = mtNow.tv_sec + RTCSetInterval;
+	printk("[BAT][CHG] %s: alarm start after %ds\n", __FUNCTION__, RTCSetInterval);
+	spin_lock_irqsave(&bat_alarm_slock, batflags);
+	alarm_start(&bat_alarm, timespec_to_ktime(new_batAlarm_time));
+	spin_unlock_irqrestore(&bat_alarm_slock, batflags);
+}
+
+//[+++]ASUS : Add demo app read ADF function
+int ADF_check_status(void)
+{
+	char buf[4] = {0, 0, 0, 0};
+	struct file *fd;
+
+	mm_segment_t old_fs;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	fd = filp_open(ADF_PATH, O_RDONLY, 0);
+
+	if (!IS_ERR(fd)) {
+		kernel_read(fd, buf, 4, &(fd->f_pos));
+		filp_close(fd, NULL);
+	} else {
+		set_fs(old_fs);
+		CHG_DBG_E("Open %s failed\n", ADF_PATH);
+		return 0;
+	}
+
+	filp_close(fd, NULL);
+	set_fs(old_fs);
+
+	if (buf[3] == 1 || buf[3] == 2) {
+		return 1;
+	} else {
+		CHG_DBG_E("Check ADF failed, buf[3]=%d\n", buf[3]);
+		return 0;
+	}
+}
+//[---]ASUS : Add demo app read ADF function
+
+/************************
+ * ASUS CHARGER FLOW *
+ ************************/
+
+#define ICL_1000mA	0x14
+#define ICL_1500mA	0x1E
+#define ICL_1750mA	0x23
+#define ICL_2000mA	0x28
+#define ICL_2850mA	0x39
+
+#define ASUS_MONITOR_CYCLE	60000
+#define ADC_WAIT_TIME_HVDCP0	3000
+#define ADC_WAIT_TIME_HVDCP23	100
+
+#define EVB_750K_MIN	0xC2
+#define EVB_750K_MAX	0xDE
+#define EVB_200K_MIN	0x2F
+#define EVB_200K_MAX	0x41
+#define ER_750K_MIN		0x37
+#define ER_750K_MAX		0x53
+#define ER_200K_MIN		0x17
+#define ER_200K_MAX		0x33
+#define EVB_DMV_DPV_TH_LOW	0x2C
+#define EVB_DMV_DPV_TH_HIGH	0x78
+
+//[+++]ASUS : Add per min monitor jeita & thermal & typeC_DFP
+void smblib_asus_monitor_start(struct smb_charger *chg, int time)
+{
+	asus_flow_done_flag = 1;
+	cancel_delayed_work(&chg->asus_min_monitor_work);
+	schedule_delayed_work(&chg->asus_min_monitor_work, msecs_to_jiffies(time));
+	
+	if(LEGACY_CABLE_FLAG == 0 && !(smbchg_dev->pd_active))
+		schedule_delayed_work(&smbchg_dev->asus_cable_capability_check_work, msecs_to_jiffies(12000));
+		
+	schedule_delayed_work(&chg->asus_enable_inov_work, msecs_to_jiffies(60000));
+}
+
+static int SW_recharge(struct smb_charger *chg)
+{
+	int capacity;
+	u8 termination_reg;
+	bool termination_done = 0;
+	int rc;
+
+	rc = smblib_read(chg, BATTERY_CHARGER_STATUS_1_REG, &termination_reg);
+	if (rc < 0) {
+		CHG_DBG_E("Couldn't read BATTERY_CHARGER_STATUS_1_REG\n");
+		return rc;
+	}
+
+	if ((termination_reg & BATTERY_CHARGER_STATUS_MASK) == 0x05)
+		termination_done = 1;
+
+	rc = fg_get_msoc(g_fg, &capacity);
+
+	CHG_DBG("capacity = %d, termination_done = %d, termination_reg = 0x%x\n", capacity, termination_done, termination_reg);
+
+	if (capacity <= 98 && termination_done) {
+		rc = smblib_masked_write(chg, CHARGING_ENABLE_CMD_REG, CHARGING_ENABLE_CMD_BIT, 0);  //Disabled = 0
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't write charging_enable\n");
+			return rc;
+		}
+
+		rc = smblib_masked_write(chg, CHARGING_ENABLE_CMD_REG, CHARGING_ENABLE_CMD_BIT, CHARGING_ENABLE_CMD_BIT);  //Enabled = 1
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't write charging_enable\n");
+			return rc;
+		}
+		CHG_DBG("done recharge\n");
+	}
+	return 0;
+}
+
+#define EN_BAT_CHG_EN_COMMAND_TRUE		BIT(0)
+#define EN_BAT_CHG_EN_COMMAND_FALSE		0
+
+enum JEITA_state {
+	JEITA_STATE_INITIAL,
+	JEITA_STATE_LESS_THAN_0,
+	JEITA_STATE_RANGE_0_to_100,
+	JEITA_STATE_RANGE_100_to_200,
+	JEITA_STATE_RANGE_200_to_450,
+	JEITA_STATE_RANGE_450_to_550,
+	JEITA_STATE_LARGER_THAN_550,
+};
+int smbchg_jeita_judge_state(int old_State, int batt_tempr)
+{
+	int result_State;
+
+	//decide value to set each reg (Vchg, Charging enable, Fast charge current)
+	//batt_tempr < 0
+	if (batt_tempr < 0) {
+		result_State = JEITA_STATE_LESS_THAN_0;
+	//0 <= batt_tempr < 10
+	} else if (batt_tempr < 100) {
+		result_State = JEITA_STATE_RANGE_0_to_100;
+	//10 <= batt_tempr < 20
+	} else if (batt_tempr < 200) {
+		result_State = JEITA_STATE_RANGE_100_to_200;
+	//20 <= batt_tempr < 45
+	} else if (batt_tempr < 450) {
+		result_State = JEITA_STATE_RANGE_200_to_450;
+	//45 <= batt_tempr < 55
+	} else if (batt_tempr < 550) {
+		result_State = JEITA_STATE_RANGE_450_to_550;
+	//55 <= batt_tempr
+	} else{
+		result_State = JEITA_STATE_LARGER_THAN_550;
+	}
+
+	//ASUS BSP : do 3 degree hysteresis
+	if (old_State == JEITA_STATE_LESS_THAN_0 && result_State == JEITA_STATE_RANGE_0_to_100) {
+		if (batt_tempr <= 30) {
+			result_State = old_State;
+		}
+	}
+	if (old_State == JEITA_STATE_RANGE_0_to_100 && result_State == JEITA_STATE_RANGE_100_to_200) {
+		if (batt_tempr <= 130) {
+			result_State = old_State;
+		}
+	}
+	if (old_State == JEITA_STATE_RANGE_100_to_200 && result_State == JEITA_STATE_RANGE_200_to_450) {
+		if (batt_tempr <= 230) {
+			result_State = old_State;
+		}
+	}
+	if (old_State == JEITA_STATE_RANGE_450_to_550 && result_State == JEITA_STATE_RANGE_200_to_450) {
+		if (batt_tempr >= 420) {
+			result_State = old_State;
+		}
+	}
+	if (old_State == JEITA_STATE_LARGER_THAN_550 && result_State == JEITA_STATE_RANGE_450_to_550) {
+		if (batt_tempr >= 520) {
+			result_State = old_State;
+		}
+	}
+	return result_State;
+}
+
+static int jeita_status_regs_write(u8 chg_en, int FV_uV, int FCC_uA)
+{
+	int rc;
+	static int old_FV_uV = 0;
+
+	CHG_DBG("old_FV = %duV, FV = %duV, FCC = %duA, chg_en = %d\n", old_FV_uV, FV_uV, FCC_uA, chg_en);
+
+	if (old_FV_uV != FV_uV) {
+		rc = smblib_masked_write(smbchg_dev, CHARGING_ENABLE_CMD_REG,  //Disabled = 0
+				CHARGING_ENABLE_CMD_BIT, 0);
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't write charging_enable rc = %d\n", rc);
+			return rc;
+		}
+	}
+
+	vote(smbchg_dev->fv_votable, BATT_PROFILE_VOTER, true, FV_uV);
+
+	vote(smbchg_dev->fcc_votable, BATT_PROFILE_VOTER, true, FCC_uA);
+
+	rc = smblib_masked_write(smbchg_dev, CHARGING_ENABLE_CMD_REG,  //Enabled = 1, Disabled = 0
+			CHARGING_ENABLE_CMD_BIT, chg_en);
+	if (rc < 0) {
+		CHG_DBG_E("Couldn't write charging_enable rc = %d\n", rc);
+		return rc;
+	}
+
+	old_FV_uV = FV_uV;
+	return 0;
+}
+
+void jeita_rule(void)
+{
+	static int state = JEITA_STATE_INITIAL;
+	int rc;
+	int bat_volt;
+	int bat_temp;
+	int bat_health;
+	int bat_capacity;
+	u8 charging_enable;
+	u8 FV_reg = 0x4C;  //0x1070 = 0x4C, FV_4p36V
+	u8 ICL_reg = 0;
+	int FV_uV;
+	int FCC_uA;
+	bool feature_stop_chg_flag = 0;
+
+	CHG_DBG("+++\n");
+
+	rc = smblib_write(smbchg_dev, JEITA_EN_CFG_REG, 0x10);
+	//rc = smblib_write(smbchg_dev, JEITA_EN_CFG_REG, 0x00);  //ASUS: WA: Disable JEITA for Ara battery at EVB
+	if (rc < 0)
+		CHG_DBG_E("Failed to set JEITA_EN_CFG_REG\n");
+
+	rc = smblib_read(smbchg_dev, CHGR_FLOAT_VOLTAGE_CFG_REG, &FV_reg);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read CHGR_FLOAT_VOLTAGE_CFG_REG\n");
+
+	rc = smblib_read(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, &ICL_reg);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read USBIN_CURRENT_LIMIT_CFG_REG\n");
+
+	bat_health = asus_get_batt_health();
+	bat_temp = asus_get_prop_batt_temp(smbchg_dev);
+	bat_volt = asus_get_prop_batt_volt(smbchg_dev);
+	bat_capacity = asus_get_prop_batt_capacity(smbchg_dev);
+	state = smbchg_jeita_judge_state(state, bat_temp);
+	CHG_DBG("health = %s, temp = %d, capacity = %d, volt = %duV, ICL = %duA(0x%x)\n",
+			health_type[bat_health], bat_temp, bat_capacity, bat_volt, (int)ICL_reg*50000, ICL_reg);
+
+	switch (state) {
+	case JEITA_STATE_LESS_THAN_0:
+		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
+		FV_uV = FV_JEITA_uV;
+		FCC_uA = 1350000;
+		CHG_DBG("temperature < 0\n");
+		break;
+	case JEITA_STATE_RANGE_0_to_100:
+		charging_enable = EN_BAT_CHG_EN_COMMAND_TRUE;
+		FV_uV = FV_JEITA_uV;
+		FCC_uA = 1350000;
+		CHG_DBG("0 <= temperature < 10\n");
+		rc = SW_recharge(smbchg_dev);
+		if (rc < 0) {
+			CHG_DBG_E("SW_recharge failed rc = %d\n", rc);
+		}
+		break;
+	case JEITA_STATE_RANGE_100_to_200:
+		charging_enable = EN_BAT_CHG_EN_COMMAND_TRUE;
+		FV_uV = FV_JEITA_uV;
+		FCC_uA = 2300000;
+		CHG_DBG("10 <= temperature < 20\n");
+		rc = SW_recharge(smbchg_dev);
+		if (rc < 0) {
+			CHG_DBG_E("SW_recharge failed rc = %d\n", rc);
+		}
+		break;
+	case JEITA_STATE_RANGE_200_to_450:
+		charging_enable = EN_BAT_CHG_EN_COMMAND_TRUE;
+		if (bat_volt <= 4250000) {
+			FV_uV = FV_JEITA_uV;
+			FCC_uA = 3800000;
+		} else {
+			FV_uV = FV_JEITA_uV;
+			FCC_uA = 2300000;
+		}
+		CHG_DBG("20 <= temperature < 45\n");
+		rc = SW_recharge(smbchg_dev);
+		if (rc < 0) {
+			CHG_DBG_E("SW_recharge failed rc = %d\n", rc);
+		}
+		break;
+	case JEITA_STATE_RANGE_450_to_550:
+		if (bat_volt >= 4100000 && FV_reg == 0x4C) {
+			charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
+			FV_uV = FV_JEITA_uV;
+		} else {
+			charging_enable = EN_BAT_CHG_EN_COMMAND_TRUE;
+			FV_uV = 4080000;
+		}
+		FCC_uA = 2300000;
+		CHG_DBG("45 <= temperature < 55\n");
+		break;
+	case JEITA_STATE_LARGER_THAN_550:
+		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
+		FV_uV = FV_JEITA_uV;
+		FCC_uA = 2300000;
+		CHG_DBG("temperature >= 55\n");
+		break;
+	default:
+		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
+		FV_uV = FV_JEITA_uV;
+		FCC_uA = 1350000;
+		CHG_DBG("jeita judge failed, set default setting\n");
+		break;
+	}
+	Total_FCC_Value = FCC_uA;  //Add the interface for charging debug apk
+
+//ASUS : Stop charging - ftm limit +++
+	if (charger_limit_enable_flag && (bat_capacity >= charger_limit_value)) {
+		CHG_DBG("[stop_charging] ftm limit, capacity(%d) >= limit(%d)\n", bat_capacity, charger_limit_value);
+		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
+	}
+
+//ASUS : Stop charging - demo_app limit & ultra_bat_life limit +++
+	if ((demo_app_status_flag && ADF_check_status()) || ultra_bat_life_flag) {
+		atomic_set(&feature_stop_need_release, 1);
+		if (bat_capacity > 60) {
+			smblib_set_usb_suspend(smbchg_dev, true);
+			feature_stop_chg_flag = true;
+		} else if (bat_capacity >= 58) {
+			smblib_set_usb_suspend(smbchg_dev, false);
+			feature_stop_chg_flag = true;
+		} else {
+			smblib_set_usb_suspend(smbchg_dev, false);
+			feature_stop_chg_flag = false;
+		}
+	} else if (atomic_read(&feature_stop_need_release)) {
+		atomic_set(&feature_stop_need_release, 0);
+		smblib_set_usb_suspend(smbchg_dev, false);
+		CHG_DBG("[stop_charging] leaving feautre limit, capacity(%d), demo(%d), ultra(%d), smart(%d)\n",
+				bat_capacity, (demo_app_status_flag && ADF_check_status()), ultra_bat_life_flag, smartchg_stop_flag);
+	}
+
+	if (feature_stop_chg_flag || smartchg_stop_flag) {  //ASUS : Stop charging - support smartchg_stop +++
+		CHG_DBG("[stop_charging] feature limit, capacity(%d), demo(%d), ultra(%d), smart(%d)\n",
+				bat_capacity, (demo_app_status_flag && ADF_check_status()), ultra_bat_life_flag, smartchg_stop_flag);
+		charging_enable = EN_BAT_CHG_EN_COMMAND_FALSE;
+	}
+
+	if (no_input_suspend_flag) {
+		charging_enable = EN_BAT_CHG_EN_COMMAND_TRUE;
+	}
+
+	rc = jeita_status_regs_write(charging_enable, FV_uV, FCC_uA);
+	if (rc < 0)
+		CHG_DBG("Couldn't write jeita_status_register, rc = %d\n", rc);
+
+	CHG_DBG("---\n");
+}
+
+void asus_cable_capability_check_work(struct work_struct *work)
+{
+	const struct apsd_result *apsd_result;
+	u8 set_icl;
+	u8 aicl_stat;
+	u8 icl_stat;
+	static u8 pre_icl = 0;
+	static int count = 0;
+	bool cable_change_to_legacy_medium = false;
+	bool cable_change_to_legacy_high = false;
+	bool cable_capabilit_changed = false;
+	int rc;
+	
+	CHG_DBG("+++");
+	
+	if (!asus_get_prop_usb_present(smbchg_dev)) {
+		asus_typec_removal_function(smbchg_dev);
+		return;
+	}
+	
+	rc = smblib_read(smbchg_dev, AICL_STATUS_REG, &aicl_stat);
+	if (rc < 0) {
+		smblib_err(smbchg_dev, "Couldn't read AICL_STATUS rc=%d\n", rc);
+		return;
+	}
+
+	rc = smblib_read(smbchg_dev, 0x1107, &icl_stat);
+	if (rc < 0) {
+		smblib_err(smbchg_dev, "Couldn't read ICL_STATUS rc=%d\n", rc);
+		return;
+	}
+
+	CHG_DBG("icl_stat = 0x%x \n", icl_stat);
+	if(aicl_stat & AICL_DONE_BIT){
+		if(icl_stat > pre_icl){
+			pre_icl = icl_stat;
+			schedule_delayed_work(&smbchg_dev->asus_cable_capability_check_work, msecs_to_jiffies(5000));
+			return;
+		}
+		else{
+			count++;
+			if(count < 3){
+				schedule_delayed_work(&smbchg_dev->asus_cable_capability_check_work, msecs_to_jiffies(5000));
+				return;
+			}
+		}
+	}
+	else {
+		schedule_delayed_work(&smbchg_dev->asus_cable_capability_check_work, msecs_to_jiffies(5000));
+		return;
+	}
+
+	if(UFP_FLAG == 2){ //1.5A
+		if((aicl_stat & AICL_DONE_BIT) && (icl_stat*50 <= 1350)){
+			LEGACY_CABLE_FLAG = 1;
+			cable_change_to_legacy_medium = true;
+			CHG_DBG("change to legacy cable medium\n");
+		}
+	}
+	else if(UFP_FLAG == 3) { //3A
+		if((aicl_stat & AICL_DONE_BIT) && (icl_stat*50 <= 1800)){
+			LEGACY_CABLE_FLAG = 1;
+			cable_change_to_legacy_high = true;
+			CHG_DBG("change to legacy cable high\n");
+		}
+	}
+	
+	if(!cable_change_to_legacy_medium && !cable_change_to_legacy_high){
+		CHG_DBG("cable capability doesn't change\n");
+		return;
+	}
+	
+	apsd_result = smblib_update_usb_type(smbchg_dev);
+	
+	switch (apsd_result->bit) {
+
+	case SDP_CHARGER_BIT:
+	case FLOAT_CHARGER_BIT:
+		set_icl = ICL_500mA;
+		cable_capabilit_changed = true;
+		break;
+	case CDP_CHARGER_BIT:
+		if (g_Charger_mode)
+			set_icl = ICL_500mA;
+		else
+			set_icl = ICL_1500mA;
+
+		cable_capabilit_changed = true;
+		break;
+	case OCP_CHARGER_BIT:
+		set_icl = ICL_1000mA;
+		cable_capabilit_changed = true;
+		break;
+	case DCP_CHARGER_BIT:
+		if(ASUS_ADAPTER_ID == ASUS_750K || ASUS_ADAPTER_ID == PB)
+			set_icl = ICL_2000mA;
+		else if(ASUS_ADAPTER_ID == ASUS_200K)
+			set_icl = ICL_1000mA;
+		else if(ASUS_ADAPTER_ID == OTHERS)
+			set_icl = ICL_1000mA;
+		else if(ASUS_ADAPTER_ID == ADC_NOT_READY)
+			set_icl = ICL_1000mA;
+		
+		cable_capabilit_changed = true;
+		break;
+	default:
+		schedule_delayed_work(&smbchg_dev->asus_cable_capability_check_work, msecs_to_jiffies(60000));
+		break;
+	}
+	
+	if(cable_capabilit_changed){
+		CHG_DBG("set icl to %dmA\n", set_icl*50);
+		
+		rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, (int)set_icl*50000);
+		if (rc < 0)
+			CHG_DBG_E("Failed to set ICL\n");
+
+		asus_set_icl = set_icl;
+	}
+}
+
+void update_inov_info(void)
+{
+
+	u8 die_temp_status = 0;
+	u8 skin_temp_status = 0;
+	
+	smblib_read(smbchg_dev, DIE_TEMP_STATUS_REG, &die_temp_status);
+	smblib_read(smbchg_dev, SKIN_TEMP_STATUS_REG, &skin_temp_status);
+
+	CHG_DBG("INOV info: DIE_TEMP_STATUS_REG: 0x%x, SKIN_TEMP_STATUS_REG: 0x%x\n",
+		die_temp_status, skin_temp_status);
+}
+
+void asus_min_monitor_work(struct work_struct *work)
+{
+	union power_supply_propval current_val;
+	union power_supply_propval voltage_val;
+	
+	if (!smbchg_dev) {
+		CHG_DBG_E("smbchg_dev is null due to driver probed isn't ready\n");
+		return;
+	}
+
+	if (!asus_get_prop_usb_present(smbchg_dev)) {
+		asus_typec_removal_function(smbchg_dev);
+		return;
+	}
+	
+	smblib_get_prop_usb_current_now(smbchg_dev, &current_val);
+	smblib_get_prop_usb_voltage_now(smbchg_dev, &voltage_val);
+	CHG_DBG("input_current: %d, input_voltage: %d\n", current_val.intval, voltage_val.intval);	
+	update_inov_info();
+
+	jeita_rule();
+
+	if (asus_get_prop_usb_present(smbchg_dev)) {
+		last_jeita_time = current_kernel_time();
+		schedule_delayed_work(&smbchg_dev->asus_min_monitor_work, msecs_to_jiffies(ASUS_MONITOR_CYCLE));
+		schedule_delayed_work(&smbchg_dev->asus_batt_RTC_work, 0);
+	}
+	//asus_smblib_relax(smbchg_dev);
+}
+//[---]ASUS : Add per min monitor jeita & thermal & typeC_DFP
+
+void asus_chg_flow_work(struct work_struct *work)
+{
+	const struct apsd_result *apsd_result;
+	int rc;
+	u8 set_icl;
+	u8 legacy_cable_reg = TYPEC_LEGACY_CABLE_STATUS_BIT;
+
+	CHG_DBG("+++\n");
+
+	if (!asus_get_prop_usb_present(smbchg_dev)) {
+		asus_typec_removal_function(smbchg_dev);
+		return;
+	}
+
+	apsd_result = smblib_update_usb_type(smbchg_dev);
+	if (apsd_result->bit == (DCP_CHARGER_BIT | QC_3P0_BIT))
+		HVDCP_FLAG = 3;
+	else if (apsd_result->bit == (DCP_CHARGER_BIT | QC_2P0_BIT))
+		HVDCP_FLAG = 2;
+	else
+		HVDCP_FLAG = 0;
+
+	UFP_FLAG = asus_get_ufp_mode();
+
+	rc = smblib_read(smbchg_dev, LEGACY_CABLE_STATUS_REG, &legacy_cable_reg);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read LEGACY_CABLE_STATUS_REG\n");
+
+	if((legacy_cable_reg & TYPEC_LEGACY_CABLE_TYPE_MASK) == 0) //non-legacy
+		LEGACY_CABLE_FLAG = 0;
+	else if((legacy_cable_reg & TYPEC_LEGACY_CABLE_TYPE_MASK) == 3) //noncomp-legacy
+		LEGACY_CABLE_FLAG = 1;
+	else if((legacy_cable_reg & TYPEC_LEGACY_CABLE_TYPE_MASK) == 2) //legacy
+		LEGACY_CABLE_FLAG = 2;
+	else {
+		CHG_DBG("LEGACY_CABLE_FLAG error, set LEGACY_CABLE_FLAG = 2\n");
+		LEGACY_CABLE_FLAG = 2;
+	}
+
+	CHG_DBG("%s detected, UFP_FLAG = %s, LEGACY_CABLE_FLAG = %d\n",
+			apsd_result->name, ufp_type[UFP_FLAG], LEGACY_CABLE_FLAG);
+
+	if ((apsd_result->bit == 0) && (UFP_FLAG != 0)) {
+		CHG_DBG("APSD not ready yet, delay 1s\n");
+		msleep(1000);
+		apsd_result = smblib_update_usb_type(smbchg_dev);
+		if (apsd_result->bit == (DCP_CHARGER_BIT | QC_3P0_BIT))
+			HVDCP_FLAG = 3;
+		else if (apsd_result->bit == (DCP_CHARGER_BIT | QC_2P0_BIT))
+			HVDCP_FLAG = 2;
+		else
+			HVDCP_FLAG = 0;
+		CHG_DBG("Retry %s detected\n", apsd_result->name);
+	}
+
+	if (smbchg_dev->pd_active) {
+		CHG_DBG("PD_active\n");
+		asus_adapter_detecting_flag = 0;
+		vote(smbchg_dev->pl_enable_votable_indirect, USBIN_I_VOTER, true, 0);
+		smblib_asus_monitor_start(smbchg_dev, 0);  //ASUS BSP : Jeita start
+		return;
+	}
+
+	switch (apsd_result->bit) {
+
+	case SDP_CHARGER_BIT:
+	case FLOAT_CHARGER_BIT:
+		if (g_Charger_mode) {
+			rc = smblib_masked_write(smbchg_dev, USBIN_ICL_OPTIONS_REG,
+				USB51_MODE_BIT, USB51_MODE_BIT);
+			if (rc < 0)
+				CHG_DBG_E("Couldn't set ICL options\n");
+		}
+
+		if (UFP_FLAG == 3 && LEGACY_CABLE_FLAG == 0)
+			set_icl = ICL_2000mA;
+		else if (UFP_FLAG == 2 && LEGACY_CABLE_FLAG == 0)
+			set_icl = ICL_1500mA;
+		else
+			set_icl = ICL_500mA;
+
+		rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, (int)set_icl*50000);
+		//rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, USBIN_CURRENT_LIMIT_MASK, set_icl);
+		if (rc < 0)
+			CHG_DBG_E("Failed to set ICL\n");
+		asus_set_icl = set_icl;
+		asus_adapter_detecting_flag = 0;
+		smblib_asus_monitor_start(smbchg_dev, 0);  //ASUS BSP : Jeita start
+		break;
+	case CDP_CHARGER_BIT:
+		if (g_Charger_mode) {
+			rc = smblib_masked_write(smbchg_dev, USBIN_ICL_OPTIONS_REG,
+				USBIN_MODE_CHG_BIT | USB51_MODE_BIT, USBIN_MODE_CHG_BIT | USB51_MODE_BIT);
+			if (rc < 0)
+				CHG_DBG_E("Couldn't set ICL options\n");
+		}
+
+		if (UFP_FLAG == 3 && LEGACY_CABLE_FLAG == 0)
+			set_icl = ICL_2000mA;
+		else
+			set_icl = ICL_1500mA;
+
+		rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, (int)set_icl*50000);
+		//rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, USBIN_CURRENT_LIMIT_MASK, set_icl);
+		if (rc < 0)
+			CHG_DBG_E("Failed to set ICL\n");
+		asus_set_icl = set_icl;
+		asus_adapter_detecting_flag = 0;
+		smblib_asus_monitor_start(smbchg_dev, 0);  //ASUS BSP : Jeita start
+		break;
+	case OCP_CHARGER_BIT:
+		if (UFP_FLAG == 3 && LEGACY_CABLE_FLAG == 0)
+			set_icl = ICL_2000mA;
+		else if (UFP_FLAG == 2 && LEGACY_CABLE_FLAG == 0)
+			set_icl = ICL_1500mA;
+		else
+			set_icl = ICL_1000mA;
+
+		rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, (int)set_icl*50000);
+		//rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, USBIN_CURRENT_LIMIT_MASK, set_icl);
+		if (rc < 0)
+			CHG_DBG_E("Failed to set ICL\n");
+		asus_set_icl = set_icl;
+		asus_adapter_detecting_flag = 0;
+		smblib_asus_monitor_start(smbchg_dev, 0);  //ASUS BSP : Jeita start
+		break;
+
+	case DCP_CHARGER_BIT | QC_3P0_BIT:
+	case DCP_CHARGER_BIT | QC_2P0_BIT:
+	case DCP_CHARGER_BIT:
+		//#1: HVDCP_PULSE_COUNT_MAX = QC2_5V & QC3 PULSE COUNT=0
+		//rc = smblib_write(smbchg_dev, HVDCP_PULSE_COUNT_MAX_REG, 0x0);
+		//if (rc < 0)
+		//	CHG_DBG_E("Failed to set HVDCP_PULSE_COUNT_MAX_REG\n");
+
+
+		//#2: USBIN_OPTIONS1_CFG = Disable BC1.2 & Disable HVDCP
+		smblib_apsd_enable(smbchg_dev, false);
+		rc = smblib_masked_write(smbchg_dev, USBIN_OPTIONS_1_CFG_REG, HVDCP_EN_BIT, 0);
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't set HVDCP_EN_BIT rc=%d\n", rc);
+		}
+
+		//#3: Re-run APSD
+		CHG_DBG("Rerun APSD 1st\n");
+		rc = smblib_masked_write(smbchg_dev, CMD_APSD_REG, APSD_RERUN_BIT, APSD_RERUN_BIT);
+		if (rc < 0)
+			CHG_DBG_E("Failed to set CMD_APSD_REG\n");
+
+		//#1: USB DPDM swith to 2D(ADC), ADC_SW_EN-gpio101 = 1
+		rc = gpio_direction_output(global_gpio->ADC_SW_EN, 1);
+		if (rc) {
+			CHG_DBG_E("Failed to swith to 2D, ADC_SW_EN-gpio101(%d)\n", gpio_get_value(global_gpio->ADC_SW_EN));
+		} else {
+			CHG_DBG("USB DPDM swith to 2D, ADC_SW_EN-gpio101(%d) = 1\n", gpio_get_value(global_gpio->ADC_SW_EN));
+		}
+
+		//#2: Delay 3s (HVDCP Flag= 0) / 0.1s (HVDCP Flag= others)
+		if (asus_get_prop_usb_present(smbchg_dev)) {
+			if (HVDCP_FLAG == 0) {
+				CHG_DBG("HVDCP_FLAG = 0, ADC_WAIT_TIME = 3s\n");
+				schedule_delayed_work(&smbchg_dev->asus_adapter_adc_work, msecs_to_jiffies(ADC_WAIT_TIME_HVDCP0));
+			} else {
+				CHG_DBG("HVDCP_FLAG = 2or3, ADC_WAIT_TIME = 0.1s\n");
+				schedule_delayed_work(&smbchg_dev->asus_adapter_adc_work, msecs_to_jiffies(ADC_WAIT_TIME_HVDCP23));
+			}
+		}
+		break;
+	default:
+		asus_adapter_detecting_flag = 0;
+		//asus_smblib_relax(smbchg_dev);
+		break;
+	}
+
+	CHG_DBG("---\n");
+}
+
+//[+++]ASUS : Add ASUS Adapter Detecting
+#define KIRIN_750K_MIN 743
+#define KIRIN_750K_MAX 892
+#define KIRIN_200K_MIN 323
+#define KIRIN_200K_MAX 423
+#define VADC_THD_300MV  300
+#define VADC_THD_1000MV  1000
+void CHG_TYPE_judge(void)
+{
+	int rc;
+	int vadc;
+	int MIN_750K, MAX_750K, MIN_200K, MAX_200K;
+
+	MIN_750K = KIRIN_750K_MIN;
+	MAX_750K = KIRIN_750K_MAX;
+	MIN_200K = KIRIN_200K_MIN;
+	MAX_200K = KIRIN_200K_MAX;
+
+	if (smbchg_dev->iio.asus_adapter_vadc_chan) {
+		rc = iio_read_channel_processed(smbchg_dev->iio.asus_adapter_vadc_chan, &vadc);
+		if (rc < 0) {
+			CHG_DBG_E("Error in reading asus_adapter_vadc channel, rc=%d\n", rc);
+			ASUS_ADAPTER_ID = ADC_NOT_READY;
+			return;
+		}
+		vadc = vadc / 1000;  /* uV to mV */
+		CHG_DBG("vadc(%dmV), first read\n", vadc);
+
+		if (vadc <= VADC_THD_300MV) {
+			//#1: Pull-high 620k ohm, ADCPWREN_PMI_GP1-gpio120 = 1
+			rc = gpio_direction_output(global_gpio->ADCPWREN_PMI_GP1, 1);
+			if (rc) {
+				CHG_DBG_E("Failed to pull-high 620k ohm, ADCPWREN_PMI_GP1-gpio120(%d)\n", gpio_get_value(global_gpio->ADCPWREN_PMI_GP1));
+			} else {
+				CHG_DBG("Pull-high 620k ohm, ADCPWREN_PMI_GP1-gpio120(%d) = 1\n", gpio_get_value(global_gpio->ADCPWREN_PMI_GP1));
+			}
+
+			//#2: Delay 5ms
+			msleep(5);
+
+			rc = iio_read_channel_processed(smbchg_dev->iio.asus_adapter_vadc_chan, &vadc);
+			if (rc < 0) {
+				CHG_DBG_E("Error in reading asus_adapter_vadc channel, rc=%d\n", rc);
+				ASUS_ADAPTER_ID = ADC_NOT_READY;
+				return;
+			}
+			vadc = vadc / 1000;  /* uV to mV */
+			CHG_DBG("vadc(%dmV), after pull-high 620k ohm\n", vadc);
+
+			if (vadc >= VADC_THD_1000MV) {
+				ASUS_ADAPTER_ID = OTHERS;
+			} else {
+				if (vadc >= MIN_750K && vadc <= MAX_750K)
+					ASUS_ADAPTER_ID = ASUS_750K;
+				else if (vadc >= MIN_200K && vadc <= MAX_200K)
+					ASUS_ADAPTER_ID = ASUS_200K;
+				else
+					ASUS_ADAPTER_ID = OTHERS;
+			}
+		} else {
+			if (vadc >= VADC_THD_1000MV)
+				ASUS_ADAPTER_ID = PB;
+			else
+				ASUS_ADAPTER_ID = OTHERS;
+		}
+	} else {
+		CHG_DBG_E("no asus_adapter_vadc io-channel-names\n");
+		ASUS_ADAPTER_ID = ADC_NOT_READY;
+	}
+}
+
+void asus_adapter_adc_work(struct work_struct *work)
+{
+	int rc;
+	u8 usb_max_current = ICL_1000mA;
+	u8 stat;
+
+	if (!asus_get_prop_usb_present(smbchg_dev)) {
+		asus_typec_removal_function(smbchg_dev);
+		return;
+	}
+
+	//#3: Set USBIN_CURRENT_LIMIT to 50mA
+	rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, 50000);
+	if (rc < 0)
+		CHG_DBG_E("Failed to set USBIN_CURRENT_LIMIT to 50mA\n");
+
+	//#4: Delay 5ms
+	msleep(5);
+
+	CHG_TYPE_judge();
+	CHG_DBG("ASUS_ADAPTER_ID(%s)\n", asus_id[ASUS_ADAPTER_ID]);
+
+	//#1: USB DPDM Switch to 1D(PMIC), ADC_SW_EN-gpio101 = 0
+	rc = gpio_direction_output(global_gpio->ADC_SW_EN, 0);
+	if (rc) {
+		CHG_DBG_E("Failed to swith to 1D, ADC_SW_EN-gpio101(%d)\n", gpio_get_value(global_gpio->ADC_SW_EN));
+	} else {
+		CHG_DBG("USB DPDM swith to 1D, ADC_SW_EN-gpio101(%d) = 0\n", gpio_get_value(global_gpio->ADC_SW_EN));
+	}
+
+	//#2: Pull-low 1M ohm, ADCPWREN_PMI_GP1-gpio120 = 0
+	rc = gpio_direction_output(global_gpio->ADCPWREN_PMI_GP1, 0);
+	if (rc) {
+		CHG_DBG_E("Failed to pull-low 1M ohm, ADCPWREN_PMI_GP1-gpio120(%d)\n", gpio_get_value(global_gpio->ADCPWREN_PMI_GP1));
+	} else {
+		CHG_DBG("Pull-low 1M ohm, ADCPWREN_PMI_GP1-gpio120(%d) = 0\n", gpio_get_value(global_gpio->ADCPWREN_PMI_GP1));
+	}
+
+	switch (ASUS_ADAPTER_ID) {
+	case ASUS_750K:
+	case PB:
+		if (HVDCP_FLAG == 0) {
+			if (ASUS_ADAPTER_ID == ASUS_750K)
+				asus_CHG_TYPE = 750;
+			if (LEGACY_CABLE_FLAG || UFP_FLAG == 1)
+				usb_max_current = ICL_2000mA;
+			else
+				usb_max_current = ICL_500mA;
+		} else if (HVDCP_FLAG == 2)
+			usb_max_current = ICL_1000mA;
+		else
+			usb_max_current = ICL_1500mA;
+		break;
+	case ASUS_200K:
+		if (HVDCP_FLAG == 0) {
+			if (LEGACY_CABLE_FLAG || UFP_FLAG == 1)
+				usb_max_current = ICL_1000mA;
+			else
+				usb_max_current = ICL_500mA;
+		} else if (HVDCP_FLAG == 2)
+			usb_max_current = ICL_1000mA;
+		else {
+			asus_CHG_TYPE = 200;
+			usb_max_current = ICL_1750mA;
+		}
+		break;
+	case OTHERS:
+		if (HVDCP_FLAG == 0) {
+			if (UFP_FLAG == 3 && LEGACY_CABLE_FLAG == 0)
+				usb_max_current = ICL_2000mA;
+			else if (UFP_FLAG == 2 && LEGACY_CABLE_FLAG == 0)
+				usb_max_current = ICL_1500mA;
+			else
+				usb_max_current = ICL_1000mA;
+		} else if (HVDCP_FLAG == 2)
+			usb_max_current = ICL_1000mA;
+		else
+			usb_max_current = ICL_1500mA;
+		break;
+	case ADC_NOT_READY:
+		usb_max_current = ICL_1000mA;
+		break;
+	}
+
+	if(LEGACY_CABLE_FLAG == 0 && UFP_FLAG == 3 && HVDCP_FLAG == 0){
+		usb_max_current = ICL_2000mA;
+	}
+	else if(LEGACY_CABLE_FLAG == 0 && UFP_FLAG == 2 && HVDCP_FLAG == 0){
+		usb_max_current = ICL_1500mA;
+	}
+
+	// if ICL is 50mA more than 5 senconds will cause some PB shutdown automatically, so set ICL to 500mA here
+	rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, 500000);
+	if (rc < 0)
+		CHG_DBG_E("Failed to set USBIN_CURRENT_LIMIT to 500mA\n");
+		
+	//#1: HVDCP_PULSE_COUNT_MAX = [7:6] = 0x01(QC2_9V) & [5:0] = 0x14(QC3 PULSE COUNT=9V)
+	rc = smblib_write(smbchg_dev, HVDCP_PULSE_COUNT_MAX_REG, 0x54);
+	if (rc < 0)
+		CHG_DBG_E("Failed to set HVDCP_PULSE_COUNT_MAX_REG\n");
+
+	//#2: USBIN_OPTIONS1_CFG = Enable BC1.2 & Enable HVDCP
+	smblib_apsd_enable(smbchg_dev, true);
+	rc = smblib_masked_write(smbchg_dev, USBIN_OPTIONS_1_CFG_REG, HVDCP_EN_BIT, HVDCP_EN_BIT);
+	if (rc < 0) {
+		CHG_DBG_E("Couldn't set HVDCP_EN_BIT rc=%d\n", rc);
+	}
+
+	//#3: Re-run APSD
+	CHG_DBG("Rerun APSD 2nd\n");
+	rc = smblib_masked_write(smbchg_dev, CMD_APSD_REG, APSD_RERUN_BIT, APSD_RERUN_BIT);
+	if (rc < 0)
+		CHG_DBG_E("Failed to set CMD_APSD_REG\n");
+
+	msleep(1000);
+
+//Set current:
+	CHG_DBG("ASUS_ADAPTER_ID = %s, set ICL = %duA(0x%x), HVDCP_FLAG = %d, UFP_FLAG = %s, LEGACY_CABLE_FLAG = %d\n",
+			asus_id[ASUS_ADAPTER_ID], (int)usb_max_current*50000, usb_max_current, HVDCP_FLAG, ufp_type[UFP_FLAG], LEGACY_CABLE_FLAG);
+	asus_set_icl = usb_max_current;
+	rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, (int)usb_max_current*50000);
+	//rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, USBIN_CURRENT_LIMIT_MASK, usb_max_current);
+	if (rc < 0)
+		CHG_DBG_E("Failed to set ICL\n");
+
+	//#1: 0x1365[4] = 1, Use SW to control Input Current Limit after APSD is completed
+	rc = smblib_read(smbchg_dev, USBIN_LOAD_CFG_REG, &stat);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read USBIN_LOAD_CFG_REG rc=%d\n", rc);
+	else
+		CHG_DBG("Check setting, #1a: USBIN_LOAD_CFG_REG 0x1365 = 0x%x\n", stat);
+
+	rc = smblib_masked_write(smbchg_dev, USBIN_LOAD_CFG_REG,
+			ICL_OVERRIDE_AFTER_APSD_BIT, ICL_OVERRIDE_AFTER_APSD_BIT);
+	if (rc < 0) {
+		dev_err(smbchg_dev->dev, "Couldn't set default USBIN_LOAD_CFG_REG rc=%d\n", rc);
+	}
+
+	rc = smblib_read(smbchg_dev, USBIN_LOAD_CFG_REG, &stat);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read USBIN_LOAD_CFG_REG rc=%d\n", rc);
+	else
+		CHG_DBG("Check setting, #1b: USBIN_LOAD_CFG_REG 0x1365 = 0x%x\n", stat);
+
+
+	//#2: 0x1342[0] = 1, Override ICL BC1.2 / Type-C APSD result with Command Register USBIN_CURRENT_LIMIT_CFG(0x1370)
+	rc = smblib_read(smbchg_dev, CMD_ICL_OVERRIDE_REG, &stat);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read CMD_ICL_OVERRIDE_REG rc=%d\n", rc);
+	else
+		CHG_DBG("Check setting, #2a: CMD_ICL_OVERRIDE_REG 0x1342 = 0x%x\n", stat);
+
+	rc = smblib_masked_write(smbchg_dev, CMD_ICL_OVERRIDE_REG,
+			ICL_OVERRIDE_BIT, ICL_OVERRIDE_BIT);
+	if (rc < 0) {
+		dev_err(smbchg_dev->dev, "Couldn't set default CMD_ICL_OVERRIDE_REG rc=%d\n", rc);
+	}
+
+	rc = smblib_read(smbchg_dev, CMD_ICL_OVERRIDE_REG, &stat);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read CMD_ICL_OVERRIDE_REG rc=%d\n", rc);
+	else
+		CHG_DBG("Check setting, #2b: CMD_ICL_OVERRIDE_REG 0x1342 = 0x%x\n", stat);
+
+
+	//#3: 0x1360 = 0x08, USBIN_ADAPTER_ALLOW_5V_TO_9V
+	rc = smblib_read(smbchg_dev, USBIN_ADAPTER_ALLOW_CFG_REG, &stat);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read USBIN_ADAPTER_ALLOW_CFG_REG rc=%d\n", rc);
+	else
+		CHG_DBG("Check setting, #3a: USBIN_ADAPTER_ALLOW_CFG_REG 0x1360 = 0x%x\n", stat);
+
+	rc = smblib_set_adapter_allowance(smbchg_dev, USBIN_ADAPTER_ALLOW_5V_TO_9V);
+	if (rc < 0) {
+		dev_err(smbchg_dev->dev, "Couldn't set default USBIN_ADAPTER_ALLOW_CFG_REG rc=%d\n", rc);
+	}
+
+	rc = smblib_read(smbchg_dev, USBIN_ADAPTER_ALLOW_CFG_REG, &stat);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read USBIN_ADAPTER_ALLOW_CFG_REG rc=%d\n", rc);
+	else
+		CHG_DBG("Check setting, #3b: USBIN_ADAPTER_ALLOW_CFG_REG 0x1360 = 0x%x\n", stat);
+
+
+	asus_adapter_detecting_flag = 0;
+	smblib_asus_monitor_start(smbchg_dev, 0);  //ASUS BSP : Jeita start
+}
+//[---]ASUS : Add ASUS Adapter Detecting
+
+void asus_insertion_initial_settings(struct smb_charger *chg)
+{
+	int rc;
+
+//#1: 0x1060 = 0x06, PCC_400mA
+	rc = smblib_masked_write(chg, PRE_CHARGE_CURRENT_CFG_REG,
+			PRE_CHARGE_CURRENT_SETTING_MASK, 0x06);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default PRE_CHARGE_CURRENT_CFG_REG rc=%d\n", rc);
+	}
+
+//#2: 0x1061 = 0x2E, FCC_2300mA
+	rc = smblib_write(chg, CHGR_FAST_CHARGE_CURRENT_CFG_REG, 0x2E);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_FAST_CHARGE_CURRENT_CFG_REG rc=%d\n", rc);
+	}
+
+//#3: 0x1070 = 0x4C, FV_4p36V
+	rc = smblib_write(chg, CHGR_FLOAT_VOLTAGE_CFG_REG, 0x4C);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_FLOAT_VOLTAGE_CFG_REG rc=%d\n", rc);
+	}
+
+//#4-1: 0x107E = 0x55, recharge threshold = 4.26V
+	rc = smblib_write(chg, CHGR_ADC_RECHARGE_THRESHOLD_MSB_REG, 0x55);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_ADC_RECHARGE_THRESHOLD_MSB_REG rc=%d\n", rc);
+	}
+
+//#4-2: 0x107F = 0x83, recharge threshold = 4.26V
+	rc = smblib_write(chg, CHGR_ADC_RECHARGE_THRESHOLD_LSB_REG, 0x83);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_ADC_RECHARGE_THRESHOLD_LSB_REG rc=%d\n", rc);
+	}
+
+//#4-3: 0x1051[1] = 0, HW recharge
+	rc = smblib_masked_write(chg, CHGR_CFG2_REG, SOC_BASED, 0);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_CFG2_REG rc=%d\n", rc);
+	}
+
+//#5: 0x1366 = 0x02, USB_2P0_SEL, USB_500_MODE, USB_100_OR_500_MODE
+	rc = smblib_write(chg, USBIN_ICL_OPTIONS_REG, 0x02);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default USBIN_ICL_OPTIONS_REG rc=%d\n", rc);
+	}
+
+//#6-1: 0x1067 = 0xFE, termination current = 150mA
+	rc = smblib_write(chg, CHGR_ADC_ITERM_UP_THD_MSB_REG, 0xFE);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_ADC_ITERM_UP_THD_MSB_REG rc=%d\n", rc);
+	}
+
+//#6-2: 0x1068 = 0x15, termination current = 150mA
+	rc = smblib_write(chg, CHGR_ADC_ITERM_UP_THD_LSB_REG, 0x15);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_ADC_ITERM_UP_THD_LSB_REG rc=%d\n", rc);
+	}
+
+//#7: 0x1360 = 0x08, USBIN_ADAPTER_ALLOW_5V_TO_9V
+	rc = smblib_set_adapter_allowance(chg, USBIN_ADAPTER_ALLOW_5V_TO_9V);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default USBIN_ADAPTER_ALLOW_CFG_REG rc=%d\n", rc);
+	}
+
+/*
+//#8: 0x1362[3:2] = 11, AUTO_SRC_DETECT_ENABLED, HVDCP_ENABLE, done by QCOM smblib_apsd_enable and smblib_hvdcp_detect_enable
+	rc = smblib_masked_write(chg, USBIN_OPTIONS_1_CFG_REG,
+			HVDCP_EN_BIT | BC1P2_SRC_DETECT_BIT, HVDCP_EN_BIT | BC1P2_SRC_DETECT_BIT);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default USBIN_OPTIONS_1_CFG_REG rc=%d\n", rc);
+	}
+*/
+
+//#9: 0x1051[0] = 0, CHG_INHIBIT_DIS
+	rc = smblib_masked_write(chg, CHGR_CFG2_REG,
+			CHARGER_INHIBIT_BIT, 0);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHGR_CFG2_REG rc=%d\n", rc);
+	}
+
+//#10: 0x1042[0] = 0, CHARGING_DISABLED
+	rc = smblib_masked_write(chg, CHARGING_ENABLE_CMD_REG,  //Disabled = 0
+			CHARGING_ENABLE_CMD_BIT, 0);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHARGING_ENABLE_CMD_REG rc=%d\n", rc);
+	}
+
+//#11: 0x1042[0] = 1, CHARGING_ENABLED
+	rc = smblib_masked_write(chg, CHARGING_ENABLE_CMD_REG,  //Enabled = 1
+			CHARGING_ENABLE_CMD_BIT, CHARGING_ENABLE_CMD_BIT);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CHARGING_ENABLE_CMD_REG rc=%d\n", rc);
+	}
+
+//#12: 0x1183 = 0x05, VSYS_MIN_3P2V
+	rc = smblib_write(chg, 0x1183, 0x05);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default DCDC_VSYSMIN_CFG rc=%d\n", rc);
+	}
+
+//#16: 0x1365[4] = 1, Use SW to control Input Current Limit after APSD is completed
+	rc = smblib_masked_write(chg, USBIN_LOAD_CFG_REG,
+			ICL_OVERRIDE_AFTER_APSD_BIT, ICL_OVERRIDE_AFTER_APSD_BIT);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default USBIN_LOAD_CFG_REG rc=%d\n", rc);
+	}
+
+//#17: 0x1342[0] = 1, Override ICL BC1.2 / Type-C APSD result with Command Register USBIN_CURRENT_LIMIT_CFG(0x1370)
+	rc = smblib_masked_write(chg, CMD_ICL_OVERRIDE_REG,
+			ICL_OVERRIDE_BIT, ICL_OVERRIDE_BIT);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default CMD_ICL_OVERRIDE_REG rc=%d\n", rc);
+	}
+
+//#19: 0x155A = 0x01, LEGACY_CABLE_DET_WINDOW = 9ms
+	rc = smblib_write(chg, 0x155A, 0x01);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't set default LEGACY_CABLE_DET_WINDOW rc=%d\n", rc);
+	}
+}
+
+void asus_set_flow_flag_work(struct work_struct *work)
+{
+	//[+++]ASUS : Check the VBUS status again before runing the work
+	if (!asus_get_prop_usb_present(smbchg_dev)) {
+		CHG_DBG_E("Try to run %s, but VBUS_IN is low\n", __func__);
+		return;
+	}
+	//[---]ASUS : Check the VBUS status again before runing the work
+
+	if (asus_flow_processing)
+		asus_adapter_detecting_flag = 1;
+}
+
+void asus_reverse_charge_work(struct work_struct *work)
+{
+	int rc;
+	int batt_current;
+	int batt_capacity;
+	
+	CHG_DBG("+++\n");
+	
+	batt_current = asus_get_prop_batt_current(smbchg_dev);
+	batt_capacity = asus_get_prop_batt_capacity(smbchg_dev);
+	
+	if ((batt_current <= 3300000 && batt_capacity > 30) && !cam_sensor_is_power_up()) {
+		schedule_delayed_work(&smbchg_dev->asus_reverse_charge_work, msecs_to_jiffies(1000));
+	}
+	else {
+		CHG_DBG("batt_current = %d, batt_capacity = %d, set otg current limit to 1A\n", batt_current, batt_capacity);
+		
+		//0x1152 = 0x1, OTG_ILIMIT_1000MA
+		rc = smblib_masked_write(smbchg_dev, DCDC_OTG_CURRENT_LIMIT_CFG_REG,
+			DCDC_OTG_CURRENT_LIMIT_MASK, 0x1);
+		if (rc < 0) {
+			CHG_DBG_E("Couldn't set default DCDC_OTG_CURRENT_LIMIT_CFG_REG rc=%d\n", rc);
+		}
+		
+		default_src_caps[0] = 0x36019032;
+		chg_set_src_cap();
+	}
+}
+
+void asus_reverse_charge_check_camera(struct work_struct *work)
+{
+	int batt_capacity;
+	
+	CHG_DBG("+++\n");
+	
+	batt_capacity = asus_get_prop_batt_capacity(smbchg_dev);
+	
+	
+	if(batt_capacity <= 15){
+		cam_flash_battery_low(1);
+		asus_extcon_set_state_sync(smbchg_dev->reversechg_extcon, 1);
+	}
+	else{
+		schedule_delayed_work(&smbchg_dev->asus_reverse_charge_check_camera, msecs_to_jiffies(1000));
+	}
+}
+
+extern int disable_inov_flag;
+void asus_enable_inov(int enable)
+{
+	int rc;
+	
+	if(disable_inov_flag){
+		enable = 0;
+	}
+	
+	if(enable) {
+		//inov setting: 0x1670 = 0x05, enable INOV
+		rc = smblib_write(smbchg_dev, MISC_THERMREG_SRC_CFG_REG, 0x05);
+		if (rc < 0) {
+			dev_err(smbchg_dev->dev, "Couldn't set default MISC_THERMREG_SRC_CFG_REG rc=%d\n", rc);
+		}
+		CHG_DBG("enable inov\n");
+	}
+	else{
+		//inov setting: 0x1670 = 0x0, disable INOV
+		rc = smblib_write(smbchg_dev, MISC_THERMREG_SRC_CFG_REG, 0x0);
+		if (rc < 0) {
+			dev_err(smbchg_dev->dev, "Couldn't set default MISC_THERMREG_SRC_CFG_REG rc=%d\n", rc);
+		}
+		CHG_DBG("disable inov\n");
+	}
+}
+
+void asus_enable_inov_work(struct work_struct *work)
+{
+	int usb_present;
+	
+	usb_present = asus_get_prop_usb_present(smbchg_dev);
+	asus_enable_inov(usb_present);
+}
 /**********************
  * INTERRUPT HANDLERS *
  **********************/
@@ -4527,8 +6502,6 @@ irqreturn_t batt_psy_changed_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-#define AICL_STEP_MV		200
-#define MAX_AICL_THRESHOLD_MV	4800
 irqreturn_t usbin_uv_irq_handler(int irq, void *data)
 {
 	struct smb_irq_data *irq_data = data;
@@ -4539,70 +6512,6 @@ irqreturn_t usbin_uv_irq_handler(int irq, void *data)
 	u8 stat = 0, max_pulses = 0;
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
-
-	if ((chg->wa_flags & WEAK_ADAPTER_WA)
-			&& is_storming(&irq_data->storm_data)) {
-
-		if (chg->aicl_max_reached) {
-			smblib_dbg(chg, PR_MISC,
-					"USBIN_UV storm at max AICL threshold\n");
-			return IRQ_HANDLED;
-		}
-
-		smblib_dbg(chg, PR_MISC, "USBIN_UV storm at threshold %d\n",
-				chg->aicl_5v_threshold_mv);
-
-		/* suspend USBIN before updating AICL threshold */
-		vote(chg->usb_icl_votable, AICL_THRESHOLD_VOTER, true, 0);
-
-		/* delay for VASHDN deglitch */
-		msleep(20);
-
-		if (chg->aicl_5v_threshold_mv > MAX_AICL_THRESHOLD_MV) {
-			/* reached max AICL threshold */
-			chg->aicl_max_reached = true;
-			goto unsuspend_input;
-		}
-
-		/* Increase AICL threshold by 200mV */
-		rc = smblib_set_charge_param(chg, &chg->param.aicl_5v_threshold,
-				chg->aicl_5v_threshold_mv + AICL_STEP_MV);
-		if (rc < 0)
-			dev_err(chg->dev,
-				"Error in setting AICL threshold rc=%d\n", rc);
-		else
-			chg->aicl_5v_threshold_mv += AICL_STEP_MV;
-
-		rc = smblib_set_charge_param(chg,
-				&chg->param.aicl_cont_threshold,
-				chg->aicl_cont_threshold_mv + AICL_STEP_MV);
-		if (rc < 0)
-			dev_err(chg->dev,
-				"Error in setting AICL threshold rc=%d\n", rc);
-		else
-			chg->aicl_cont_threshold_mv += AICL_STEP_MV;
-
-unsuspend_input:
-		/* Force torch in boost mode to ensure it works with low ICL */
-		if (chg->smb_version == PMI632_SUBTYPE)
-			schgm_flash_torch_priority(chg, TORCH_BOOST_MODE);
-
-		if (chg->aicl_max_reached) {
-			smblib_dbg(chg, PR_MISC,
-				"Reached max AICL threshold resctricting ICL to 100mA\n");
-			vote(chg->usb_icl_votable, AICL_THRESHOLD_VOTER,
-					true, USBIN_100MA);
-			smblib_run_aicl(chg, RESTART_AICL);
-		} else {
-			smblib_run_aicl(chg, RESTART_AICL);
-			vote(chg->usb_icl_votable, AICL_THRESHOLD_VOTER,
-					false, 0);
-		}
-
-		wdata = &chg->irq_info[USBIN_UV_IRQ].irq_data->storm_data;
-		reset_storm_count(wdata);
-	}
-
 	if (!chg->irq_info[SWITCHER_POWER_OK_IRQ].irq_data)
 		return IRQ_HANDLED;
 
@@ -4732,6 +6641,8 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 	struct smb_irq_data *data;
 	struct storm_watch *wdata;
 
+	CHG_DBG("+++\n");
+
 	rc = smblib_read(chg, USBIN_BASE + INT_RT_STS_OFFSET, &stat);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't read USB_INT_RT_STS rc=%d\n", rc);
@@ -4764,9 +6675,67 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 							true, 1500000);
 	}
 
+//[+++]ASUS BSP charger
+	CHG_DBG("vbus_rising = %d\n", vbus_rising);
+
+	if (vbus_rising) {
+		vbus_rising_count ++;
+		asus_enable_inov(0);
+		if (!asus_flow_processing) {
+			asus_flow_processing = 1;
+			schedule_delayed_work(&smbchg_dev->asus_set_flow_flag_work, msecs_to_jiffies(2000));
+			asus_insertion_initial_settings(smbchg_dev);
+			asus_smblib_stay_awake(smbchg_dev);
+			if (g_Charger_mode)
+				schedule_delayed_work(&smbchg_dev->asus_chg_flow_work, msecs_to_jiffies(13500));
+			else
+				schedule_delayed_work(&smbchg_dev->asus_chg_flow_work, msecs_to_jiffies(13000));
+		}
+	} else {
+		rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, false, 0);
+		if (rc < 0)
+			CHG_DBG_E("Failed to disable USBIN_CURRENT_LIMIT\n");
+
+		//#1: Write the ICL to the default 500mA, 0x1370 = 0x0A
+		//Do here, avoid to be overrided by other function
+		//Don't use Voter to set the ICL for keeping min ICL at 500mA. It would result in inpredicted ICL voting result
+		//rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, 500000);
+		rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, USBIN_CURRENT_LIMIT_MASK, 0xA);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't set default USBIN_CURRENT_LIMIT_CFG_REG rc=%d\n", rc);
+		}
+
+		//#2: Write USB_500_MODE, 0x1366 = 0x02, USB_2P0_SEL, USB_500_MODE, USB_100_OR_500_MODE
+		rc = smblib_write(smbchg_dev, USBIN_ICL_OPTIONS_REG, 0x02);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't set default USBIN_ICL_OPTIONS_REG rc=%d\n", rc);
+		}
+
+		//#3: USB DPDM Switch to 1D(PMIC), ADC_SW_EN-gpio101 = 0
+		rc = gpio_direction_output(global_gpio->ADC_SW_EN, 0);
+		if (rc) {
+			CHG_DBG_E("Failed to swith to 1D, ADC_SW_EN-gpio101(%d)\n", gpio_get_value(global_gpio->ADC_SW_EN));
+		} else {
+			CHG_DBG("USB DPDM swith to 1D, ADC_SW_EN-gpio101(%d) = 0\n", gpio_get_value(global_gpio->ADC_SW_EN));
+		}
+
+		vbus_rising_count = 0;
+		asus_typec_removal_function(smbchg_dev);
+		cancel_delayed_work(&chg->asus_enable_inov_work);
+		asus_enable_inov(0);
+	}
+
+	if (usb_thermal_once_flag) {
+		if (cancel_delayed_work(&smbchg_dev->asus_usb_thermal_work))
+			schedule_delayed_work(&smbchg_dev->asus_usb_thermal_work, msecs_to_jiffies(0));
+	}
+//[---]ASUS BSP charger
+
 	power_supply_changed(chg->usb_psy);
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: usbin-plugin %s\n",
 					vbus_rising ? "attached" : "detached");
+
+	CHG_DBG("---\n");
 }
 
 #define PL_DELAY_MS	30000
@@ -4777,6 +6746,8 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 	bool vbus_rising;
 	struct smb_irq_data *data;
 	struct storm_watch *wdata;
+
+	CHG_DBG("+++\n");
 
 	rc = smblib_read(chg, USBIN_BASE + INT_RT_STS_OFFSET, &stat);
 	if (rc < 0) {
@@ -4868,12 +6839,70 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 		smblib_update_usb_type(chg);
 	}
 
+//[+++]ASUS BSP charger
+	CHG_DBG("vbus_rising = %d\n", vbus_rising);
+
+	if (vbus_rising) {
+		vbus_rising_count ++;
+		asus_enable_inov(0);
+		if (!asus_flow_processing) {
+			asus_flow_processing = 1;
+			schedule_delayed_work(&smbchg_dev->asus_set_flow_flag_work, msecs_to_jiffies(2000));
+			asus_insertion_initial_settings(smbchg_dev);
+			asus_smblib_stay_awake(smbchg_dev);
+			if (g_Charger_mode)
+				schedule_delayed_work(&smbchg_dev->asus_chg_flow_work, msecs_to_jiffies(13500));
+			else
+				schedule_delayed_work(&smbchg_dev->asus_chg_flow_work, msecs_to_jiffies(13000));
+		}
+	} else {
+		rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, false, 0);
+		if (rc < 0)
+			CHG_DBG_E("Failed to disable USBIN_CURRENT_LIMIT\n");
+
+		//#1: Write the ICL to the default 500mA, 0x1370 = 0x0A
+		//Do here, avoid to be overrided by other function
+		//Don't use Voter to set the ICL for keeping min ICL at 500mA. It would result in inpredicted ICL voting result
+		//rc = asus_exclusive_vote(smbchg_dev->usb_icl_votable, ASUS_ICL_VOTER, true, 500000);
+		rc = smblib_masked_write(smbchg_dev, USBIN_CURRENT_LIMIT_CFG_REG, USBIN_CURRENT_LIMIT_MASK, 0xA);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't set default USBIN_CURRENT_LIMIT_CFG_REG rc=%d\n", rc);
+		}
+
+		//#2: Write USB_500_MODE, 0x1366 = 0x02, USB_2P0_SEL, USB_500_MODE, USB_100_OR_500_MODE
+		rc = smblib_write(smbchg_dev, USBIN_ICL_OPTIONS_REG, 0x02);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't set default USBIN_ICL_OPTIONS_REG rc=%d\n", rc);
+		}
+
+		//#3: USB DPDM Switch to 1D(PMIC), ADC_SW_EN-gpio101 = 0
+		rc = gpio_direction_output(global_gpio->ADC_SW_EN, 0);
+		if (rc) {
+			CHG_DBG_E("Failed to swith to 1D, ADC_SW_EN-gpio101(%d)\n", gpio_get_value(global_gpio->ADC_SW_EN));
+		} else {
+			CHG_DBG("USB DPDM swith to 1D, ADC_SW_EN-gpio101(%d) = 0\n", gpio_get_value(global_gpio->ADC_SW_EN));
+		}
+
+		vbus_rising_count = 0;
+		asus_typec_removal_function(smbchg_dev);
+		cancel_delayed_work(&chg->asus_enable_inov_work);
+		asus_enable_inov(0);
+	}
+
+	if (usb_thermal_once_flag) {
+		if (cancel_delayed_work(&smbchg_dev->asus_usb_thermal_work))
+			schedule_delayed_work(&smbchg_dev->asus_usb_thermal_work, msecs_to_jiffies(0));
+	}
+//[---]ASUS BSP charger
+
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
 		smblib_micro_usb_plugin(chg, vbus_rising);
 
 	power_supply_changed(chg->usb_psy);
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: usbin-plugin %s\n",
 					vbus_rising ? "attached" : "detached");
+
+	CHG_DBG("---\n");
 }
 
 irqreturn_t usb_plugin_irq_handler(int irq, void *data)
@@ -4894,6 +6923,8 @@ static void smblib_handle_slow_plugin_timeout(struct smb_charger *chg,
 {
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: slow-plugin-timeout %s\n",
 		   rising ? "rising" : "falling");
+	if (chg->asus_print_usb_src_change)
+		CHG_DBG("IRQ: slow-plugin-timeout %s\n", rising ? "rising" : "falling");
 }
 
 static void smblib_handle_sdp_enumeration_done(struct smb_charger *chg,
@@ -4930,6 +6961,8 @@ static void smblib_handle_hvdcp_3p0_auth_done(struct smb_charger *chg,
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: hvdcp-3p0-auth-done rising; %s detected\n",
 		   apsd_result->name);
+	if (chg->asus_print_usb_src_change)
+		CHG_DBG("IRQ: hvdcp-3p0-auth-done rising; %s detected\n", apsd_result->name);
 }
 
 static void smblib_handle_hvdcp_check_timeout(struct smb_charger *chg,
@@ -4943,8 +6976,10 @@ static void smblib_handle_hvdcp_check_timeout(struct smb_charger *chg,
 					CHARGER_TYPE_VOTER, false, 0);
 			vote(chg->hdc_irq_disable_votable,
 					CHARGER_TYPE_VOTER, false, 0);
-			vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
-				HVDCP_CURRENT_UA);
+			if(!asus_flow_done_flag)
+				vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, 1000000);
+			else
+				vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, HVDCP_CURRENT_UA);
 		} else {
 			/* A plain DCP, enforce DCP ICL if specified */
 			vote(chg->usb_icl_votable, DCP_VOTER,
@@ -4962,6 +6997,8 @@ static void smblib_handle_hvdcp_detect_done(struct smb_charger *chg,
 {
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: hvdcp-detect-done %s\n",
 		   rising ? "rising" : "falling");
+	if (chg->asus_print_usb_src_change)
+		CHG_DBG("start, IRQ: hvdcp-detect-done %s\n", rising ? "rising" : "falling");
 }
 
 static void update_sw_icl_max(struct smb_charger *chg, int pst)
@@ -5027,8 +7064,10 @@ static void update_sw_icl_max(struct smb_charger *chg, int pst)
 		break;
 	case POWER_SUPPLY_TYPE_UNKNOWN:
 	default:
-		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
-					SDP_100_MA);
+		if (!asus_adapter_detecting_flag) {
+			vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
+						SDP_100_MA);
+		}
 		break;
 	}
 }
@@ -5042,7 +7081,10 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 
 	apsd_result = smblib_update_usb_type(chg);
 
-	update_sw_icl_max(chg, apsd_result->pst);
+	if (!asus_flow_done_flag)
+		update_sw_icl_max(chg, apsd_result->pst);
+	if (chg->asus_print_usb_src_change)
+		CHG_DBG("apsd_result 0x1308 = 0x%x\n", apsd_result->bit);
 
 	switch (apsd_result->bit) {
 	case SDP_CHARGER_BIT:
@@ -5069,6 +7111,9 @@ irqreturn_t usb_source_change_irq_handler(int irq, void *data)
 	int rc = 0;
 	u8 stat;
 
+	static u8 now_stat = 0x00, pre_stat = 0x00;
+	pre_stat = now_stat;
+
 	/* PD session is ongoing, ignore BC1.2 and QC detection */
 	if (chg->pd_active)
 		return IRQ_HANDLED;
@@ -5079,6 +7124,14 @@ irqreturn_t usb_source_change_irq_handler(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 	smblib_dbg(chg, PR_INTERRUPT, "APSD_STATUS = 0x%02x\n", stat);
+
+	now_stat = stat;
+	if (now_stat != pre_stat) {
+		CHG_DBG("APSD_STATUS 0x1307 = 0x%x\n", stat);
+		chg->asus_print_usb_src_change = true;
+	} else {
+		chg->asus_print_usb_src_change = false;
+	}
 
 	if ((chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
 		&& (stat & APSD_DTC_STATUS_DONE_BIT)
@@ -5134,6 +7187,7 @@ enum alarmtimer_restart smblib_lpd_recheck_timer(struct alarm *alarm,
 	int rc;
 
 	if (chg->lpd_reason == LPD_MOISTURE_DETECTED) {
+		CHG_DBG("[usb_water] Recheck done, lpd_reason = moisture\n");
 		pval.intval = POWER_SUPPLY_TYPEC_PR_DUAL;
 		rc = smblib_set_prop_typec_power_role(chg, &pval);
 		if (rc < 0) {
@@ -5144,6 +7198,7 @@ enum alarmtimer_restart smblib_lpd_recheck_timer(struct alarm *alarm,
 		chg->moisture_present = false;
 		power_supply_changed(chg->usb_psy);
 	} else {
+		CHG_DBG("[usb_water] Recheck done, lpd_reson = floating or none\n");
 		rc = smblib_masked_write(chg, TYPE_C_INTERRUPT_EN_CFG_2_REG,
 					TYPEC_WATER_DETECTION_INT_EN_BIT,
 					TYPEC_WATER_DETECTION_INT_EN_BIT);
@@ -5204,6 +7259,10 @@ static bool smblib_src_lpd(struct smb_charger *chg)
 		power_supply_changed(chg->usb_psy);
 	} else {
 		chg->lpd_reason = LPD_NONE;
+		//[+++]ASUS : Add usb water alert feature
+		CHG_DBG("[usb_water] Not detect water\n");
+		//[---]ASUS : Add usb water alert feature
+
 		chg->typec_mode = smblib_get_prop_typec_mode(chg);
 	}
 
@@ -5298,6 +7357,8 @@ static void typec_src_removal(struct smb_charger *chg)
 	struct storm_watch *wdata;
 	int sec_charger;
 
+	CHG_DBG("start\n");
+
 	sec_charger = chg->sec_pl_present ? POWER_SUPPLY_CHARGER_SEC_PL :
 				POWER_SUPPLY_CHARGER_SEC_NONE;
 
@@ -5377,9 +7438,9 @@ static void typec_src_removal(struct smb_charger *chg)
 
 	/* reconfigure allowed voltage for HVDCP */
 	rc = smblib_set_adapter_allowance(chg,
-			USBIN_ADAPTER_ALLOW_5V_OR_9V_TO_12V);
+			USBIN_ADAPTER_ALLOW_5V_TO_9V);
 	if (rc < 0)
-		smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_OR_9V_TO_12V rc=%d\n",
+		smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_TO_9V rc=%d\n",
 			rc);
 
 	/*
@@ -5515,6 +7576,8 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	struct smb_charger *chg = irq_data->parent_data;
 	int typec_mode;
 
+	CHG_DBG("+++\n");
+
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB) {
 		smblib_dbg(chg, PR_INTERRUPT,
 				"Ignoring for micro USB\n");
@@ -5528,6 +7591,8 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	chg->typec_mode = typec_mode;
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: cc-state-change; Type-C %s detected\n",
+				smblib_typec_mode_name[chg->typec_mode]);
+	CHG_DBG("IRQ: cc-state-change; Type-C %s detected\n",
 				smblib_typec_mode_name[chg->typec_mode]);
 
 	power_supply_changed(chg->usb_psy);
@@ -5553,6 +7618,7 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 	u8 stat;
 	int rc;
 
+	CHG_DBG("IRQ: %s\n", irq_data->name);
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
 	rc = smblib_read(chg, TYPE_C_STATE_MACHINE_STATUS_REG, &stat);
@@ -6533,6 +8599,10 @@ static void smblib_lpd_ra_open_work(struct work_struct *work)
 		}
 
 		chg->lpd_reason = LPD_FLOATING_CABLE;
+		//[+++]ASUS : Add usb water alert feature
+		CHG_DBG("[usb_water] Floating cable\n");
+		//[---]ASUS : Add usb water alert feature
+
 	}
 
 	/* recheck in 60 seconds */
@@ -6549,6 +8619,168 @@ static void smblib_lpd_detach_work(struct work_struct *work)
 	if (chg->lpd_stage == LPD_STAGE_FLOAT_CANCEL)
 		chg->lpd_stage = LPD_STAGE_NONE;
 }
+
+//[+++]ASUS : Add usb thermal alert feature
+void asus_usb_thermal_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work, struct smb_charger,
+							asus_usb_thermal_work.work);
+	int rc;
+	u8 reg;
+	int conn_temp, usb_present, otg_present;
+
+	if (!g_usb_thermal_enable || no_input_suspend_flag)
+		return;
+
+	if (chg->iio.connector_temp_chan) {
+		rc = iio_read_channel_processed(chg->iio.connector_temp_chan,
+				&conn_temp);
+		if (rc < 0) {
+			pr_err("Error in reading connector_temp channel, rc=%d", rc);
+
+			//retry if read fail
+			rc = iio_read_channel_processed(chg->iio.connector_temp_chan,
+				&conn_temp);
+			if (rc < 0) {
+				pr_err("Error in reading connector_temp channel retry, rc=%d", rc);
+				return;
+			}
+			
+		}
+		conn_temp = conn_temp / 100;
+	}
+	if (g_usb_thermal_debug)
+		conn_temp = g_usb_thermal_debug;
+
+	rc = smblib_read(smbchg_dev, TYPE_C_MISC_STATUS_REG, &reg);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read TYPE_C_MISC_STATUS_REG rc=%d\n", rc);
+	usb_present = reg & CC_ATTACHED_BIT;
+
+	rc = smblib_read(smbchg_dev, DCDC_CMD_OTG_REG, &reg);
+	if (rc < 0)
+		CHG_DBG_E("Couldn't read DCDC_CMD_OTG_REG rc=%d\n", rc);
+	otg_present = reg & OTG_EN_BIT;
+
+	if (!usb_thermal_once_flag && conn_temp >= 700) {
+		if (usb_present) {
+			if (!otg_present) {
+				//#1: 0x1340[0] = 1, Charger input suspend
+				smblib_set_usb_suspend(smbchg_dev, 1);
+			} else {
+				//#1: Delay 100ms
+				msleep(100);
+			}
+			//#2: 0x1140[0] = 0, Disable OTG
+			rc = smblib_masked_write(smbchg_dev, DCDC_CMD_OTG_REG, OTG_EN_BIT, 0);
+			if (rc < 0)
+				CHG_DBG_E("Couldn't set DCDC_CMD_OTG_REG rc=%d\n", rc);
+
+			asus_extcon_set_state_sync(chg->thermal_extcon, THERMAL_ALERT_WITH_AC);
+		} else {
+			asus_extcon_set_state_sync(chg->thermal_extcon, THERMAL_ALERT_NO_AC);
+		}
+		usb_thermal_once_flag = true;
+
+		CHG_DBG("conn_temp(%d) >= 700, usb thermal alert\n", conn_temp);
+	}
+	else if (!usb_present && conn_temp <= 600) {
+		smblib_set_usb_suspend(smbchg_dev, 0);
+		usb_thermal_once_flag = 0;
+		
+		asus_extcon_set_state_sync(chg->thermal_extcon, THERMAL_ALERT_NONE);
+		CHG_DBG("conn_temp(%d) <= 600, disable usb suspend\n", conn_temp);
+	}
+	
+	CHG_DBG("conn_temp(%d), usb(%d), otg(%d), usb_connector = %d\n",
+			conn_temp, usb_present, otg_present, asus_extcon_get_state(smbchg_dev->thermal_extcon));
+
+	schedule_delayed_work(&smbchg_dev->asus_usb_thermal_work, msecs_to_jiffies(THERMAL_ALERT_CYCLE));
+}
+//[---]ASUS : Add usb thermal alert feature
+
+//[+++]ASUS : Show "+" on charging icon
+#define SWITCH_QC_NOT_QUICK_CHARGING        4
+#define SWITCH_QC_QUICK_CHARGING            3
+#define SWITCH_QC_NOT_QUICK_CHARGING_PLUS   2
+#define SWITCH_QC_QUICK_CHARGING_PLUS       1
+#define SWITCH_QC_OTHER	             0
+static int pre_set = -1;
+void set_qc_stat(union power_supply_propval *val)
+{
+	int bat_status;
+	int qc_status;
+	int set = SWITCH_QC_OTHER;
+
+	if (g_Charger_mode)
+		return;
+
+	if(smbchg_dev->pd_active){
+		if(final_pd_mw > 10000000){
+			if (asus_get_prop_batt_capacity(smbchg_dev) <= 70)
+				set = SWITCH_QC_QUICK_CHARGING_PLUS;
+			else
+				set = SWITCH_QC_NOT_QUICK_CHARGING_PLUS;
+		}
+		else if(final_pd_mw == 10000000){
+			if (asus_get_prop_batt_capacity(smbchg_dev) <= 70)
+				set = SWITCH_QC_QUICK_CHARGING;
+			else
+				set = SWITCH_QC_NOT_QUICK_CHARGING;
+		}
+		else
+			set = SWITCH_QC_OTHER;
+			
+		asus_extcon_set_state_sync(smbchg_dev->quickchg_extcon, set);
+		return;
+	}
+
+	bat_status = val->intval;
+	qc_status = asus_get_batt_status();
+
+	if (qc_status == NORMAL) {
+		set = SWITCH_QC_OTHER;
+		asus_extcon_set_state_sync(smbchg_dev->quickchg_extcon, set);
+
+		if (pre_set != set) {
+			CHG_DBG("Batt_status = %s, quick_charging = %d\n", bat_status_text[bat_status], set);
+			pre_set = set;
+		}
+		return;
+	}
+
+	switch (bat_status) {
+	//QUICK_CHARGING and QUICK_CHARGING_PLUS happen in charger mode only, refer to smblib_get_prop_batt_status
+	case POWER_SUPPLY_STATUS_CHARGING:
+	case POWER_SUPPLY_STATUS_NOT_CHARGING:
+	case POWER_SUPPLY_STATUS_QUICK_CHARGING:
+	case POWER_SUPPLY_STATUS_QUICK_CHARGING_PLUS:
+		if (asus_get_prop_batt_capacity(smbchg_dev) <= 70) {
+			if (qc_status == QC)
+				set = SWITCH_QC_QUICK_CHARGING;
+			else if (qc_status == QC_PLUS)
+				set = SWITCH_QC_QUICK_CHARGING_PLUS;
+		} else {
+			if (qc_status == QC)
+				set = SWITCH_QC_NOT_QUICK_CHARGING;
+			else if (qc_status == QC_PLUS)
+				set = SWITCH_QC_NOT_QUICK_CHARGING_PLUS;
+		}
+		asus_extcon_set_state_sync(smbchg_dev->quickchg_extcon, set);
+		break;
+	default:
+		set = SWITCH_QC_OTHER;
+		asus_extcon_set_state_sync(smbchg_dev->quickchg_extcon, set);
+		break;
+	}
+
+	if (pre_set != set) {
+		CHG_DBG("Batt_status = %s, quick_charging = %d\n", bat_status_text[bat_status], set);
+		pre_set = set;
+	}
+	return;
+}
+//[---]ASUS : Show "+" on charging icon
 
 static int smblib_create_votables(struct smb_charger *chg)
 {
@@ -6687,6 +8919,8 @@ static void smblib_iio_deinit(struct smb_charger *chg)
 		iio_channel_release(chg->iio.sbux_chan);
 	if (!IS_ERR_OR_NULL(chg->iio.vph_v_chan))
 		iio_channel_release(chg->iio.vph_v_chan);
+	if (!IS_ERR_OR_NULL(chg->iio.asus_adapter_vadc_chan))
+		iio_channel_release(chg->iio.asus_adapter_vadc_chan);
 	if (!IS_ERR_OR_NULL(chg->iio.die_temp_chan))
 		iio_channel_release(chg->iio.die_temp_chan);
 	if (!IS_ERR_OR_NULL(chg->iio.connector_temp_chan))
@@ -6708,6 +8942,20 @@ int smblib_init(struct smb_charger *chg)
 	INIT_WORK(&chg->pl_update_work, pl_update_work);
 	INIT_WORK(&chg->jeita_update_work, jeita_update_work);
 	INIT_DELAYED_WORK(&chg->clear_hdc_work, clear_hdc_work);
+//[+++]ASUS work
+	INIT_DELAYED_WORK(&chg->asus_chg_flow_work, asus_chg_flow_work);
+	INIT_DELAYED_WORK(&chg->asus_adapter_adc_work, asus_adapter_adc_work);
+	INIT_DELAYED_WORK(&chg->asus_min_monitor_work, asus_min_monitor_work);
+	INIT_DELAYED_WORK(&chg->asus_batt_RTC_work, asus_batt_RTC_work);
+	INIT_DELAYED_WORK(&chg->asus_set_flow_flag_work, asus_set_flow_flag_work);
+	alarm_init(&bat_alarm, ALARM_REALTIME, batAlarm_handler);
+	INIT_DELAYED_WORK(&chg->asus_usb_thermal_work, asus_usb_thermal_work);
+	INIT_DELAYED_WORK(&chg->asus_reverse_charge_work, asus_reverse_charge_work);
+	INIT_DELAYED_WORK(&chg->asus_cable_capability_check_work, asus_cable_capability_check_work);
+	INIT_DELAYED_WORK(&chg->asus_reverse_charge_check_camera, asus_reverse_charge_check_camera);
+	INIT_DELAYED_WORK(&chg->asus_enable_inov_work, asus_enable_inov_work);
+//[---]ASUS work
+
 	INIT_DELAYED_WORK(&chg->icl_change_work, smblib_icl_change_work);
 	INIT_DELAYED_WORK(&chg->pl_enable_work, smblib_pl_enable_work);
 	INIT_DELAYED_WORK(&chg->uusb_otg_work, smblib_uusb_otg_work);
@@ -6754,6 +9002,58 @@ int smblib_init(struct smb_charger *chg)
 	chg->sec_chg_selected = POWER_SUPPLY_CHARGER_SEC_NONE;
 	chg->cp_reason = POWER_SUPPLY_CP_NONE;
 	chg->thermal_status = TEMP_BELOW_RANGE;
+
+//[+++]ASUS extcon registration
+	chg->thermal_extcon = extcon_dev_allocate(asus_extcon_cable);
+	if (IS_ERR(chg->thermal_extcon)) {
+		rc = PTR_ERR(chg->thermal_extcon);
+		dev_err(chg->dev, "[BAT][CHG] failed to allocate ASUS thermal extcon device rc=%d\n", rc);
+	}
+
+	asus_extcon_set_fnode_name(chg->thermal_extcon, "usb_connector");
+	rc = extcon_dev_register(chg->thermal_extcon);
+	if (rc < 0) {
+		dev_err(chg->dev, "[BAT][CHG] failed to register ASUS thermal extcon device rc=%d\n", rc);
+	}
+
+	chg->water_extcon = extcon_dev_allocate(asus_extcon_cable);
+	if (IS_ERR(chg->water_extcon)) {
+		rc = PTR_ERR(chg->water_extcon);
+		dev_err(chg->dev, "[BAT][CHG] failed to allocate ASUS water extcon device rc=%d\n", rc);
+	}
+
+	asus_extcon_set_fnode_name(chg->water_extcon, "vbus_liquid");
+	rc = extcon_dev_register(chg->water_extcon);
+	if (rc < 0) {
+		dev_err(chg->dev, "[BAT][CHG] failed to register ASUS water extcon device rc=%d\n", rc);
+	}
+
+	chg->quickchg_extcon = extcon_dev_allocate(asus_extcon_cable);
+	if (IS_ERR(chg->quickchg_extcon)) {
+		rc = PTR_ERR(chg->quickchg_extcon);
+		dev_err(chg->dev, "[BAT][CHG] failed to allocate ASUS quickchg extcon device rc=%d\n", rc);
+	}
+
+	asus_extcon_set_fnode_name(chg->quickchg_extcon, "quick_charging");
+	rc = extcon_dev_register(chg->quickchg_extcon);
+	if (rc < 0) {
+		dev_err(chg->dev, "[BAT][CHG] failed to register ASUS quickchg extcon device rc=%d\n", rc);
+	} else {
+		qc_stat_registed = true;
+	}
+	
+	chg->reversechg_extcon = extcon_dev_allocate(asus_extcon_cable);
+	if (IS_ERR(chg->reversechg_extcon)) {
+		rc = PTR_ERR(chg->reversechg_extcon);
+		dev_err(chg->dev, "[BAT][CHG] failed to allocate ASUS reversechg extcon device rc=%d\n", rc);
+	}
+
+	asus_extcon_set_fnode_name(chg->reversechg_extcon, "reverse_charging");
+	rc = extcon_dev_register(chg->reversechg_extcon);
+	if (rc < 0) {
+		dev_err(chg->dev, "[BAT][CHG] failed to register ASUS reversechg extcon device rc=%d\n", rc);
+	}
+//[---]ASUS extcon registration
 
 	switch (chg->mode) {
 	case PARALLEL_MASTER:
