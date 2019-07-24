@@ -50,6 +50,7 @@
 				qcom,pon-type = <PON_POWER_ON_TYPE_KPDPWR>;
 				qcom,pull-up;
 				linux,code = <KEY_POWER>;
+				qcom,support-reset = <0>;
 			};
 
 			qcom,pon_2 {

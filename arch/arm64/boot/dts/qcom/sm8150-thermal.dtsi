@@ -780,7 +780,7 @@
 		wake-capable-sensor;
 		trips {
 			gpu_trip0: gpu-trip0 {
-				temperature = <95000>;
+				temperature = <105000>;
 				hysteresis = <0>;
 				type = "passive";
 			};
@@ -788,8 +788,7 @@
 		cooling-maps {
 			gpu_cdev {
 				trip = <&gpu_trip0>;
-				cooling-device = <&msm_gpu THERMAL_NO_LIMIT
-							THERMAL_NO_LIMIT>;
+				cooling-device = <&msm_gpu THERMAL_NO_LIMIT 2>;
 			};
 		};
 	};
@@ -872,8 +871,8 @@
 
 		trips {
 			active-config {
-				temperature = <85000>;
-				hysteresis = <25000>;
+				temperature = <95000>;
+				hysteresis = <20000>;
 				type = "passive";
 			};
 		};
@@ -888,8 +887,8 @@
 
 		trips {
 			active-config {
-				temperature = <85000>;
-				hysteresis = <25000>;
+				temperature = <95000>;
+				hysteresis = <20000>;
 				type = "passive";
 			};
 		};
@@ -1249,12 +1248,12 @@
 		wake-capable-sensor;
 		trips {
 			q6_hvx_step0: q6-hvx-step0 {
-				temperature = <95000>;
+				temperature = <110000>;
 				hysteresis = <0>;
 				type = "passive";
 			};
 			q6_hvx_step1: q6-hvx-step1 {
-				temperature = <105000>;
+				temperature = <120000>;
 				hysteresis = <5000>;
 				type = "passive";
 			};
@@ -1263,11 +1262,11 @@
 			hvx_cdev_lvl0 {
 				trip = <&q6_hvx_step0>;
 				cooling-device = <&msm_cdsp_rm
-						THERMAL_NO_LIMIT 6>;
+						THERMAL_NO_LIMIT 2>;
 			};
 			hvx_cdev_lvl1 {
 				trip = <&q6_hvx_step1>;
-				cooling-device = <&msm_cdsp_rm 6 6>;
+				cooling-device = <&msm_cdsp_rm 3 3>;
 			};
 		};
 	};
