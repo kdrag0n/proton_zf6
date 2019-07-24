@@ -700,6 +700,12 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC) $(KBUILD_CFLA
 	KBUILD_AFLAGS += -DCC_HAVE_ASM_GOTO
 endif
 
+ifneq ($(BUILD_NUMBER),)
+	KBUILD_CPPFLAGS += -DASUS_SW_VER=\"$(TARGET_SKU)-$(BUILD_NUMBER)\"
+else
+	KBUILD_CPPFLAGS += -DASUS_SW_VER=\"$(TARGET_SKU)-$(ASUS_BUILD_PROJECT)_ENG\"
+endif
+
 include scripts/Makefile.gcc-plugins
 
 ifdef CONFIG_READABLE_ASM
@@ -943,6 +949,16 @@ KBUILD_CPPFLAGS += $(ARCH_CPPFLAGS) $(KCPPFLAGS)
 KBUILD_AFLAGS   += $(ARCH_AFLAGS)   $(KAFLAGS)
 KBUILD_CFLAGS   += $(ARCH_CFLAGS)   $(KCFLAGS)
 
+# Add ASUS build option to KBUILD_CPPFLAGS
+ifneq ($(TARGET_BUILD_VARIANT),user)
+ifeq ($(ASUS_FTM),y)
+KBUILD_CPPFLAGS += -DASUS_FTM_BUILD=1
+else
+KBUILD_CPPFLAGS += -DASUS_USERDEBUG_BUILD=1
+endif
+else
+KBUILD_CPPFLAGS += -DASUS_USER_BUILD=1
+endif
 # Use --build-id when available.
 LDFLAGS_BUILD_ID := $(patsubst -Wl$(comma)%,%,\
 			      $(call cc-ldoption, -Wl$(comma)--build-id,))
