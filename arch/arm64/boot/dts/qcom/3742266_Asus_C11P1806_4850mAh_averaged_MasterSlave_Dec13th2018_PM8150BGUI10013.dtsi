@@ -1,0 +1,131 @@
+
+qcom,3742266_asus_c11p1806_4850mah_averaged_masterslave_dec13th2018 {
+	qcom,profile-revision = <24>;
+	/* #3742266_Asus_C11P1806_4850mAh_averaged_MasterSlave_Dec13th2018*/
+	qcom,max-voltage-uv = <4360000>;
+	qcom,fg-cc-cv-threshold-mv = <4350>;
+	qcom,nom-batt-capacity-mah = <4850>;
+
+	/* COLD = 0 DegC, HOT = 55 DegC */
+	qcom,jeita-hard-thresholds = <0x58cd 0x181d>;
+	/* COOL = 10 DegC, WARM = 45 DegC */
+	qcom,jeita-soft-thresholds = <0x4ccc 0x20b8>;
+
+	qcom,batt-id-kohm = <51>;
+	qcom,battery-beta = <4250>;
+	qcom,therm-room-temp = <100000>;
+	qcom,battery-type = "3742266_asus_c11p1806_4850mah_averaged_masterslave_dec13th2018";
+	qcom,therm-coefficients = <0x2318 0xd0c 0xdaf7 0xc556 0x848d>;
+	qcom,therm-center-offset = <0x70>;
+	qcom,therm-pull-up = <100>;
+	qcom,rslow-normal-coeffs = <0xf5 0x01 0xb0 0x1a>;
+	qcom,rslow-low-coeffs = <0x22 0x15 0x4f 0x12>;
+	qcom,checksum = <0x46C0>;
+	qcom,gui-version = "PM855GUI - 1.0.0.13";
+	qcom,fg-profile-data = [
+		 09 00 17 EA
+		 E9 DD 98 DB
+		 FF DD 00 00
+		 77 BD 21 8A
+		 FE 87 E1 8D
+		 15 8B FB 87
+		 18 00 F5 01
+		 B0 1A 31 06
+		 3E F3 CE 07
+		 32 00 D5 EB
+		 2A ED 60 D5
+		 E0 03 D1 DD
+		 66 BD AC 1A
+		 8B 02 F9 C3
+		 60 00 51 00
+		 4C 00 4C 00
+		 43 00 34 00
+		 36 00 3C 00
+		 53 00 45 00
+		 32 00 60 00
+		 37 00 3F 00
+		 3E 00 3E 00
+		 38 00 79 00
+		 50 64 4A 00
+		 44 00 49 08
+		 60 00 54 00
+		 52 00 55 10
+		 51 10 4C 00
+		 9A 28 66 50
+		 56 68 51 09
+		 53 00 D8 00
+		 C3 20 68 0C
+		 EA 02 3F FE
+		 3D 1C AC 03
+		 91 05 58 22
+		 EB 16 7A 43
+		 29 55 2E 03
+		 77 11 63 20
+		 E1 04 C4 02
+		 28 F6 F7 1C
+		 3F FB C4 04
+		 8F 03 C5 17
+		 AA 23 BC 44
+		 F9 53 8A 12
+		 1B 1F 4A EE
+		 90 CB 15 BC
+		 EA 1C D5 BA
+		 9C 05 CD BA
+		 68 17 C3 8B
+		 BB 84 DF 9B
+		 86 98 09 80
+		 06 02 63 05
+		 19 FB A3 FB
+		 00 F8 30 DD
+		 49 EB F6 07
+		 ED EB AD CC
+		 03 10 14 08
+		 FA E5 B6 03
+		 A5 04 29 02
+		 CE 07 32 00
+		 3F 03 D6 03
+		 1A 05 29 02
+		 A1 04 7F 02
+		 53 03 61 02
+		 76 04 50 00
+		 3E 00 3F 00
+		 41 64 45 00
+		 44 F8 44 00
+		 46 00 43 00
+		 47 00 4B 10
+		 42 10 3D 00
+		 48 28 4A 48
+		 50 60 5C 0B
+		 40 00 4F 00
+		 50 08 54 F8
+		 4F 00 42 00
+		 3E 08 4B 08
+		 49 00 57 20
+		 6B 48 48 58
+		 51 0E 56 00
+		 51 F8 40 00
+		 D8 F8 D2 1F
+		 41 04 49 0B
+		 37 0F B8 1C
+		 AB 23 86 45
+		 6D 52 48 18
+		 6F 02 C3 04
+		 FE 02 6B 10
+		 3F 0A 34 20
+		 33 05 93 02
+		 89 04 D0 1C
+		 DC 02 47 04
+		 CF 03 8A 18
+		 D8 03 E5 05
+		 32 03 73 00
+		 30 1F 79 04
+		 CC 03 AF 05
+		 CD 1C 76 02
+		 EB 04 57 03
+		 9C 18 35 03
+		 05 05 D5 03
+		 6C 00 4E 01
+		 C0 00 FA 00
+		 EA 12 00 00
+	];
+};

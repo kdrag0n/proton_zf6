@@ -33,7 +33,7 @@ qcom,alium_860_89032_0000_3600mah_averaged_masterslave_sep24th2018 {
 	qcom,jeita-soft-fcc-ua = <2500000 2500000>;
 	qcom,jeita-soft-fv-uv = <4250000 4250000>;
 	qcom,ocv-based-step-chg;
-	qcom,batt-id-kohm = <107>;
+	qcom,batt-id-kohm = <51>;
 	qcom,battery-beta = <4250>;
 	qcom,therm-room-temp = <100000>;
 	qcom,fg-cc-cv-threshold-mv = <4340>;

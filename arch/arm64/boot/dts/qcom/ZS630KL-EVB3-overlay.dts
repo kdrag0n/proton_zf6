@@ -1,0 +1,91 @@
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include "ZS630KL-EVB2-overlay.dts"
+
+/ {
+	model = "KIRIN EVB3";
+	compatible = "qcom,sm8150-cdp", "qcom,sm8150", "qcom,cdp";
+	qcom,board-id = <12 0>;
+};
+
+&dsi_auo_2k_vid {
+	qcom,platform-reset-gpio = <&tlmm 53 0>;
+};
+
+&dsi_boe_2k_vid {
+	qcom,platform-reset-gpio = <&tlmm 53 0>;
+};
+
+&sde_dsi_active {
+         mux {
+                pins = "gpio53";
+         };
+
+         config {
+                pins = "gpio53";
+         };
+};
+
+&sde_dsi_suspend {
+         mux {
+                pins = "gpio53";
+         };
+
+         config {
+                pins = "gpio53";
+         };
+};
+&qupv3_se1_i2c {
+        status = "ok";
+        //vcnl36863@60 {
+        //        compatible = "capella,vcnl36863";
+        //        reg = <0x60>;
+        //        vcc_l7c_3p0-supply = <&pm8150l_l7>;
+        //        vcc_l8c_1p8-supply = <&pm8150l_l8>;
+        //        interrupt-parent = <&tlmm>;
+        //        interrupts = <119 8>;
+        //        capella,intrpin-gpios = <&tlmm 119 0x00>;
+        //        capella,slave_address = <0x60>;
+        //        capella,enable-gpios = <&tlmm 36 0x00>;
+        //};
+        vcnl36863@60 {
+			compatible = "qcom,vcnl36863";
+			reg = <0x60>;
+			pinctrl-names = "alsps_gpio_high","alsps_gpio_low";
+			pinctrl-0 = <&vcnl36863_default>;
+			pinctrl-1 = <&vcnl36863_sleep>;
+			qcom,alsps-gpio = <&tlmm 119 0x0>;
+			qcom,alsps-enable-gpio = <&tlmm 36 0x0>;
+			vcc_psensor-supply = <&pm8150l_l7>;
+		};
+        MSP430FR2311@48 {
+			compatible = "MCU,MSP430FR2311";
+			reg = <0x48>;
+			vcc_l8c_1p8-supply = <&pm8150l_l8>;
+			vcc_s4a_1p8-supply = <&pm8150_s4>;
+			pinctrl-names = "mcu_active", "mcu_suspend";
+			pinctrl-0 = <&mcu_pin_active &mcu_pin_test_enable &mcu5V_boost_pin_enable &mcu_pin_wakeup_enable>;
+			pinctrl-1 = <&mcu_pin_suspend &mcu_pin_test_disable &mcu5V_boost_pin_disable &mcu_pin_wakeup_disable>;
+			gpios = <&tlmm 6 0>,<&tlmm 35 0>, <&tlmm 79 0>, <&tlmm 10 0>;
+
+			MCU,mcureset-gpios = <&tlmm 6 0x00>;
+			MCU,mcutest-gpios = <&tlmm 35 0x00>;
+			MCU,mcu5V_boost_enable-gpios = <&tlmm 79 0x00>;
+			MCU,mcuwakeup-gpios = <&tlmm 10 0x00>;
+			MCU,slave_address = <0x48>;
+        };
+};
+

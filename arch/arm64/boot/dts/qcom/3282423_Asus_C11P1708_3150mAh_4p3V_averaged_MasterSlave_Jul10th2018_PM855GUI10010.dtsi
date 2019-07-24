@@ -1,0 +1,130 @@
+
+qcom,3282423_asus_c11p1708_3150mah_averaged_masterslave_jul10th2018 {
+	qcom,profile-revision = <24>;
+	/* #3282423_Asus_C11P1708_3150mAh_averaged_MasterSlave_Jul10th2018*/
+	/*qcom,max-voltage-uv = <4300000>;*/  /*c11p1708 value*/
+	qcom,max-voltage-uv = <4360000>;
+	qcom,fg-cc-cv-threshold-mv = <4290>;
+	qcom,nom-batt-capacity-mah = <3150>;
+	qcom,batt-id-kohm = <51>;
+	qcom,battery-beta = <3435>;
+	qcom,therm-room-temp = <10000>;
+	qcom,battery-type = "3282423_asus_c11p1708_3150mah_averaged_masterslave_jul10th2018";
+	qcom,therm-coefficients = <0x2307 0x1575 0xf2 0xdd8c 0x9272>;
+	qcom,therm-center-offset = <0x38>;
+	qcom,therm-pull-up = <30>;
+	/*qcom,fastchg-current-ma = <5400>;*/  /*c11p1708 value*/
+	qcom,fastchg-current-ma = <2300>;
+	qcom,jeita-hard-thresholds = <0x3733 0x0A34>;
+	qcom,jeita-soft-thresholds = <0x2AEE 0x0D93>;
+	qcom,rslow-normal-coeffs = <0x31 0xfb 0x4f 0x1a>;
+	qcom,rslow-low-coeffs = <0x6b 0x14 0xb2 0xe4>;
+	qcom,checksum = <0xD9BE>;
+	qcom,gui-version = "PM855GUI - 1.0.0.10";
+	qcom,fg-profile-data = [
+		 09 00 B5 EA
+		 F4 D5 BA CA
+		 48 A4 00 00
+		 2E BC 40 92
+		 F1 87 93 9B
+		 A6 95 C0 87
+		 20 00 31 FB
+		 4F 1A 99 05
+		 1B FB CE 07
+		 32 00 A6 00
+		 15 EA 7D 07
+		 67 0D 91 14
+		 B4 0C 54 1B
+		 0A 52 37 5A
+		 40 00 37 00
+		 40 00 49 00
+		 40 00 38 00
+		 37 00 3C 00
+		 46 00 48 00
+		 40 00 40 00
+		 3E 00 3D 00
+		 3C 00 37 00
+		 31 00 63 00
+		 47 64 3D 00
+		 39 00 40 08
+		 40 F8 36 00
+		 34 00 48 08
+		 3B 08 34 00
+		 6C 28 4B 48
+		 3D 58 37 0E
+		 40 00 D8 00
+		 63 20 F9 0C
+		 79 FA 5B FD
+		 AC 1C 8C 02
+		 E5 0C 0F 23
+		 5F 17 46 42
+		 92 55 91 03
+		 80 12 A5 1F
+		 AF FD 36 02
+		 53 F5 EB 1C
+		 85 FB 4E 04
+		 07 02 C3 17
+		 75 23 18 45
+		 57 53 80 11
+		 FB 1E D1 EC
+		 71 CB 4A C4
+		 D4 1C 4D CB
+		 EE 04 6E 03
+		 D0 17 8B 93
+		 D9 84 D7 9B
+		 7F 98 09 80
+		 A9 02 5E 05
+		 D7 FC 5B 03
+		 00 F8 FE CF
+		 9E D2 ED 07
+		 69 03 64 0D
+		 F4 1F 19 18
+		 E5 26 23 03
+		 87 04 0B 01
+		 CE 07 32 00
+		 CD 02 E2 02
+		 13 03 FF 06
+		 51 04 42 03
+		 91 03 F0 05
+		 76 05 40 00
+		 36 00 3B 00
+		 3D 64 3F 00
+		 41 00 44 00
+		 4D F0 42 00
+		 3E 00 40 08
+		 40 08 38 00
+		 3E 20 3C 48
+		 43 58 4D 0E
+		 35 00 3C 00
+		 41 08 40 F8
+		 40 00 40 00
+		 33 08 39 08
+		 38 00 45 20
+		 54 48 36 58
+		 3D 0E 40 00
+		 40 F8 40 00
+		 D8 00 44 20
+		 B6 05 C5 0B
+		 45 0C 0C 1D
+		 69 22 4F 45
+		 81 5A 97 18
+		 D7 03 F5 05
+		 00 03 83 10
+		 3F 0A 12 20
+		 5B 05 76 02
+		 C9 04 D3 1C
+		 C1 02 7B 04
+		 9E 03 82 18
+		 E0 03 E0 05
+		 3A 03 73 00
+		 06 1F DB 04
+		 86 03 FC 06
+		 C8 1C 82 02
+		 D0 04 80 03
+		 9D 18 49 03
+		 DA 04 17 02
+		 69 00 BA 01
+		 C0 00 FA 00
+		 7A 0C 00 00
+	];
+};
