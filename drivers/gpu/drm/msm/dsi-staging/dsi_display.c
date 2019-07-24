@@ -32,6 +32,12 @@
 #include "sde_dbg.h"
 #include "dsi_parser.h"
 
+#include <linux/proc_fs.h> //ASUS_BSP+++ read lcd unique id for factory
+//ASUS BSP Display +++
+#include <linux/string.h>
+#include <linux/syscalls.h>
+//ASUS BSP Display ---
+
 #define to_dsi_display(x) container_of(x, struct dsi_display, host)
 #define INT_BASE_10 10
 #define NO_OVERRIDE -1
@@ -57,6 +63,40 @@ static const struct of_device_id dsi_display_dt_match[] = {
 	{.compatible = "qcom,dsi-display"},
 	{}
 };
+
+//ASUS BSP Display features
+#define ASUS_LCD_REGISTER_RW     "driver/panel_reg_rw"
+#define ASUS_CABC_PROC_FILE      "driver/cabc"
+#define ASUS_DIM_PROC_FILE       "driver/lcd_dimming"
+#define ASUS_DIM_CONF_PROC_FILE  "driver/lcd_dimming_conf"
+#define ASUS_ESD_PROC_FILE       "driver/esd_debug"
+#define ASUS_MIPI_PROC_FILE      "driver/lcd_mipi_boost_flag"
+#define ASUS_EARLY_ON_PROC_FILE  "driver/lcd_early_on"
+#define ASUS_BKLT_CTL_PROC_FILE  "driver/lcd_bl"
+
+#define ASUS_LCD_REG_RW_MIN_LEN  2
+#define ASUS_LCD_REG_RW_MAX_LEN  4
+#define ASUS_LCD_REG_RW_READ_MAX 20
+
+void asus_lcd_get_tcon_cmd(char cmd, int rlen);
+void asus_lcd_set_tcon_cmd(char *cmd, short len);
+
+struct dsi_display *g_display;
+static struct mutex asus_lcd_tcon_cmd_mutex;
+char asus_lcd_reg_buffer[4095];
+char asus_lcd_cabc_mode[2] = {0x55, 0};
+int asus_lcd_dimming_on = 1; //default resume with dimming
+int asus_lcd_dimming_conf = 4;
+bool asus_lcd_procfs_registered = false;
+int asus_lcd_esd_debug = 0;
+int asus_lcd_mipi_flag = 0x01; //bit 0: for boost enable, bit 1: for dsi phy reg log
+int asus_lcd_early_backlight = 0;
+int asus_lcd_blkt_ctrl = 1;
+
+extern int asus_lcd_bridge_enable;
+extern void asus_lcd_trigger_early_on_wq(void);
+extern void asus_lcd_trigger_early_backlight_wq(u32 level);
+//ASUS BSP Display features ---
 
 static void dsi_display_mask_ctrl_error_interrupts(struct dsi_display *display,
 			u32 mask, bool enable)
@@ -581,6 +621,16 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 
 	for (j = 0; j < config->groups; ++j) {
 		for (i = 0; i < len; ++i) {
+			if (config->status_value[group + i] == 0xff) {
+				pr_debug("[Display] check kirin display ESD status\n");
+				if (config->return_buf[i] & 0x01 || asus_lcd_esd_debug) {
+					printk("[Display] ESD detected\n");
+					asus_lcd_esd_debug = 0;
+					break;
+				} else {
+					continue;
+				}
+			}
 			if (config->return_buf[i] !=
 				config->status_value[group + i]) {
 				DRM_ERROR("mismatch: 0x%x\n",
@@ -2183,6 +2233,8 @@ end:
  *
  * Return:	returns error status
  */
+
+bool is_kirin_panel = false;
 static int dsi_display_parse_boot_display_selection(void)
 {
 	char *pos = NULL;
@@ -2207,8 +2259,13 @@ static int dsi_display_parse_boot_display_selection(void)
 		boot_displays[i].name[j] = '\0';
 
 		boot_displays[i].boot_disp_en = true;
-	}
 
+		pr_err("boot_param is %s, display_name is %s, i=%d\n", boot_displays[i].boot_param, boot_displays[i].name, i);
+	}
+	if (!strcmp(boot_displays[0].name, "dsi_boe_2k_vid_display")) {
+		is_kirin_panel = true;
+		pr_err("is_kirin_panel is %d\n", is_kirin_panel);
+	}
 	return 0;
 }
 
@@ -4658,6 +4715,662 @@ int dsi_display_splash_res_cleanup(struct  dsi_display *display)
 	return rc;
 }
 
+// ASUS BSP Display, panel register read/write +++
+void asus_lcd_set_tcon_cmd(char *cmd, short len)
+{
+	int i = 0, rc = 0;
+	struct dsi_cmd_desc cmds;
+	struct mipi_dsi_msg tcon_cmd = {0, 0x15, 0, 0, 0, len, cmd, 0, NULL};
+	struct dsi_display_ctrl *mctrl;
+
+	for(i = 0; i < 1 /*len*/; i++)
+		pr_info("[Display] cmd%d (0x%02x)\n", i, cmd[i]);
+
+	if(len > 2)
+		tcon_cmd.type = 0x39;
+
+	mctrl = &g_display->ctrl[g_display->cmd_master_idx];
+
+	if (!g_display->panel || !mctrl || !mctrl->ctrl) //|| !pcfg)
+		return;
+
+	if (g_display->ctrl[0].ctrl->current_state.controller_state == DSI_CTRL_ENGINE_ON && asus_lcd_bridge_enable) {
+		mutex_lock(&asus_lcd_tcon_cmd_mutex);
+		dsi_display_clk_ctrl(g_display->dsi_clk_handle, DSI_ALL_CLKS, DSI_CLK_ON);
+
+		if (g_display->tx_cmd_buf == NULL) {
+			rc = dsi_host_alloc_cmd_tx_buffer(g_display);
+			if (rc) {
+				pr_err("[Display] failed to allocate cmd tx buffer memory (%d)\n", rc);
+				goto error_disable_clks;
+			}
+		}
+
+		rc = dsi_display_cmd_engine_enable(g_display);
+		if (rc) {
+			 pr_err("[Display] cmd engine enable failed(%d)\n", rc);
+			 goto error_disable_clks;
+		}
+
+		cmds.msg = tcon_cmd;
+		cmds.last_command = 1;
+		cmds.post_wait_ms = 1;
+		if (cmds.last_command) {
+			cmds.msg.flags |= MIPI_DSI_MSG_LASTCOMMAND;
+		}
+
+		rc = dsi_ctrl_cmd_transfer(mctrl->ctrl, &cmds.msg, DSI_CTRL_CMD_FETCH_MEMORY);
+
+		if (rc)
+			pr_err("[Display] cmd transfer failed, rc=%d\n", rc);
+
+		dsi_display_cmd_engine_disable(g_display);
+		dsi_display_clk_ctrl(g_display->dsi_clk_handle,DSI_ALL_CLKS, DSI_CLK_OFF);
+		mutex_unlock(&asus_lcd_tcon_cmd_mutex);
+		return;
+	} else {
+		pr_err("[Display] %s: panel is off,  asus_lcd_bridge_enable is %d\n", __func__, asus_lcd_bridge_enable);
+		return;
+	}
+
+error_disable_clks:
+	dsi_display_clk_ctrl(g_display->dsi_clk_handle,DSI_ALL_CLKS, DSI_CLK_OFF);
+	mutex_unlock(&asus_lcd_tcon_cmd_mutex);
+}
+
+void asus_lcd_get_tcon_cmd(char cmd, int rlen)
+{
+	char tmp[256];
+	u32 flags = 0;
+	int i = 0, rc = 0, start = 0;
+	u8 *tx_buf, *return_buf, *status_buf;
+	bool success = true;
+
+	struct dsi_cmd_desc cmds;
+	struct mipi_dsi_msg tcon_cmd = {0, 0x06, 0, 0, 5, sizeof(cmd), NULL, rlen, NULL};
+	struct dsi_display_ctrl *mctrl;
+
+	mctrl = &g_display->ctrl[g_display->cmd_master_idx];
+
+	if (!g_display->panel || !mctrl || !mctrl->ctrl) // || !pcfg)
+		return;
+
+	if (g_display->ctrl[0].ctrl->current_state.controller_state == DSI_CTRL_ENGINE_ON) {
+		mutex_lock(&asus_lcd_tcon_cmd_mutex);
+		dsi_display_clk_ctrl(g_display->dsi_clk_handle, DSI_ALL_CLKS, DSI_CLK_ON);
+
+		if (g_display->tx_cmd_buf == NULL) {
+			rc = dsi_host_alloc_cmd_tx_buffer(g_display);
+			if (rc) {
+				pr_err("[Display] failed to allocate cmd tx buffer memory (%d)\n", rc);
+				goto error_disable_clks;
+			}
+		}
+
+		rc = dsi_display_cmd_engine_enable(g_display);
+		if (rc) {
+			 pr_err("[Display]cmd engine enable failed(%d)\n", rc);
+			 goto error_disable_clks;
+		}
+
+		tx_buf = &cmd;
+		return_buf = kcalloc(rlen, sizeof(unsigned char), GFP_KERNEL);
+		status_buf = kzalloc(SZ_4K, GFP_KERNEL);
+		memset(status_buf, 0x0, SZ_4K);
+
+		cmds.msg = tcon_cmd;
+		cmds.last_command = 1;
+		cmds.post_wait_ms = 0;
+		if (cmds.last_command) {
+			cmds.msg.flags |= MIPI_DSI_MSG_LASTCOMMAND;
+			flags |= DSI_CTRL_CMD_LAST_COMMAND;
+		}
+		flags |= (DSI_CTRL_CMD_FETCH_MEMORY | DSI_CTRL_CMD_READ);
+
+		cmds.msg.tx_buf = tx_buf;
+		cmds.msg.rx_buf = status_buf;
+		cmds.msg.rx_len = rlen;
+
+		rc = dsi_ctrl_cmd_transfer(mctrl->ctrl, &cmds.msg, flags);
+		if (rc <= 0) {
+			pr_err("[Display] rx cmd transfer failed rc=%d\n", rc);
+			success = false;
+		}
+
+		if (success) {
+			printk("[Display] rx cmd transfer succeed rc=%d\n", rc);
+			memset(asus_lcd_reg_buffer, 0, sizeof(asus_lcd_reg_buffer));
+			memcpy(return_buf + start, status_buf, rlen);
+			start += rlen;
+
+			for(i=0; i<rlen; i++) {
+				memset(tmp, 0, 256*sizeof(char));
+				printk("[Display] read parameter: 0x%02x = 0x%02x\n", cmd, return_buf[i]);
+				snprintf(tmp, sizeof(tmp), "0x%02x = 0x%02x\n", cmd, return_buf[i]);
+				strcat(asus_lcd_reg_buffer,tmp);
+			}
+		}
+
+		dsi_display_cmd_engine_disable(g_display);
+		dsi_display_clk_ctrl(g_display->dsi_clk_handle,DSI_ALL_CLKS, DSI_CLK_OFF);
+		mutex_unlock(&asus_lcd_tcon_cmd_mutex);
+		return;
+	} else {
+		pr_err("[Display] %s: panel is off\n", __func__);
+		return;
+	}
+
+error_disable_clks:
+	dsi_display_clk_ctrl(g_display->dsi_clk_handle,DSI_ALL_CLKS, DSI_CLK_OFF);
+	mutex_unlock(&asus_lcd_tcon_cmd_mutex);
+}
+
+void asus_lcd_cabc_set(int mode)
+{
+	asus_lcd_cabc_mode[1] = mode;
+	asus_lcd_set_tcon_cmd(asus_lcd_cabc_mode, ARRAY_SIZE(asus_lcd_cabc_mode));
+
+	printk("%s: write cabc: %d\n", __func__, asus_lcd_cabc_mode[1]);
+}
+EXPORT_SYMBOL(asus_lcd_cabc_set);
+
+int asus_lcd_cabc_get(void)
+{
+	return asus_lcd_cabc_mode[1];
+}
+EXPORT_SYMBOL(asus_lcd_cabc_get);
+
+static ssize_t asus_lcd_cabc_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	int mode = 0;
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	if(strncmp(messages, "0", 1) == 0)  //off
+		mode = 0x0;
+	else if(strncmp(messages, "1", 1) == 0) //ui
+		mode = 0x1;
+	else if(strncmp(messages, "2", 1) == 0) //still
+		mode = 0x2;
+	else if(strncmp(messages, "3", 1) == 0) //moving
+		mode = 0x3;
+
+	asus_lcd_cabc_set(mode);
+
+	return len;
+}
+
+static ssize_t asus_lcd_cabc_proc_read(struct file *file, char __user *buf,
+                    size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+	int cabc_current_value = asus_lcd_cabc_get();
+
+	buff = kmalloc(100, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += sprintf(buff, "%d\n", cabc_current_value);
+
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_lcd_cabc_proc_ops = {
+	.write = asus_lcd_cabc_proc_write,
+	.read = asus_lcd_cabc_proc_read,
+};
+
+static ssize_t asus_lcd_dim_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	if(strncmp(messages, "0", 1) == 0)
+		asus_lcd_dimming_on = 0;
+	else if(strncmp(messages, "1", 1) == 0)
+		asus_lcd_dimming_on = 1;
+
+	printk("%s: dimming on command select to: %d\n", __func__, asus_lcd_dimming_on);
+
+	return len;
+}
+
+static ssize_t asus_lcd_dim_proc_read(struct file *file, char __user *buf,
+                    size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+
+	buff = kmalloc(100, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += sprintf(buff, "%d\n", asus_lcd_dimming_on);
+
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_lcd_dim_proc_ops = {
+	.write = asus_lcd_dim_proc_write,
+	.read = asus_lcd_dim_proc_read,
+};
+
+/*
+	adb shell "echo w,00,00 > proc/driver/panel_reg_rw"
+	adb shell "echo w,ff,87,19,01 > proc/driver/panel_reg_rw"
+	adb shell "echo w,00,80 > proc/driver/panel_reg_rw"
+	adb shell "echo w,ff,87,19 > proc/driver/panel_reg_rw"
+
+	adb shell "echo w,00,a5 > proc/driver/panel_reg_rw"
+	adb shell "echo w,B0,3c > proc/driver/panel_reg_rw"
+ */
+void asus_lcd_dim_conf_apply(void)
+{
+	char a_cmd1[2] = {0x00, 0x00};
+	char a_cmd2[4] = {0xff, 0x87, 0x19, 0x01};
+	char a_cmd3[2] = {0x00, 0x80};
+	char a_cmd4[3] = {0xff, 0x87, 0x19};
+
+	char a_cmd5[2] = {0x00, 0xB5};
+	char a_cmd6[2] = {0xCA, (char)asus_lcd_dimming_conf};
+
+	char a_cmd7[2] = {0x00, 0x80};
+	char a_cmd8[3] = {0xff, 0x00, 0x00};
+	char a_cmd9[2] = {0x00, 0x00};
+	char a_cmd10[4]= {0xff, 0x00, 0x00, 0x00};
+
+	asus_lcd_set_tcon_cmd(a_cmd1, ARRAY_SIZE(a_cmd1));
+	asus_lcd_set_tcon_cmd(a_cmd2, ARRAY_SIZE(a_cmd2));
+	asus_lcd_set_tcon_cmd(a_cmd3, ARRAY_SIZE(a_cmd3));
+	asus_lcd_set_tcon_cmd(a_cmd4, ARRAY_SIZE(a_cmd4));
+	asus_lcd_set_tcon_cmd(a_cmd5, ARRAY_SIZE(a_cmd5));
+	asus_lcd_set_tcon_cmd(a_cmd6, ARRAY_SIZE(a_cmd6));
+	asus_lcd_set_tcon_cmd(a_cmd7, ARRAY_SIZE(a_cmd7));
+	asus_lcd_set_tcon_cmd(a_cmd8, ARRAY_SIZE(a_cmd8));
+	asus_lcd_set_tcon_cmd(a_cmd9, ARRAY_SIZE(a_cmd9));
+	asus_lcd_set_tcon_cmd(a_cmd10, ARRAY_SIZE(a_cmd10));
+}
+
+static ssize_t asus_lcd_dim_conf_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	int parse_result = 0;
+	int data = 0;
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	messages[len] = '\0';
+
+	parse_result = sscanf(messages, "%x", &data);
+	if (parse_result < 0) {
+		printk("[Display] unknown dimming configure.\n");
+	} else {
+		printk("[Display] parse to 0x%x\n", data);
+		asus_lcd_dimming_conf = data;
+	}
+
+	printk("[Display] %s: dimming conf flag select to: %d\n", __func__, asus_lcd_dimming_conf);
+
+	return len;
+}
+
+static ssize_t asus_lcd_dim_conf_proc_read(struct file *file, char __user *buf,
+                    size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+
+	buff = kmalloc(100, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += sprintf(buff, "%d\n", asus_lcd_dimming_conf);
+
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_lcd_dim_conf_proc_ops = {
+	.write = asus_lcd_dim_conf_proc_write,
+	.read = asus_lcd_dim_conf_proc_read,
+};
+
+
+static ssize_t asus_lcd_esd_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	asus_lcd_esd_debug = 1;
+	printk("[Display] Trigger ESD on next checking\n");
+
+	return len;
+}
+
+static struct file_operations asus_lcd_esd_proc_ops = {
+	.write = asus_lcd_esd_proc_write,
+};
+
+static ssize_t asus_lcd_early_on_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	printk("[Display] Trigger early on by process\n");
+	asus_lcd_trigger_early_on_wq();
+
+	return len;
+}
+
+static struct file_operations asus_lcd_early_on_proc_ops = {
+	.write = asus_lcd_early_on_write,
+};
+
+static ssize_t asus_lcd_bklt_control_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	int value = 0;
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	if (sscanf(messages, "%d", &value) <= 0) {
+		printk("[Display] parsed failed: %s", messages);
+	} else {
+		printk("[Display] manully setting display backlight to %d\n", value);
+		asus_lcd_blkt_ctrl = value;
+		asus_lcd_trigger_early_backlight_wq(asus_lcd_blkt_ctrl);
+	}
+
+	return len;
+}
+
+static ssize_t asus_lcd_bklt_control_proc_read(struct file *file, char __user *buf,
+                    size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+
+	buff = kmalloc(100, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += sprintf(buff, "%d\n", asus_lcd_blkt_ctrl);
+
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_lcd_bklt_control_proc_ops = {
+	.write = asus_lcd_bklt_control_proc_write,
+	.read  = asus_lcd_bklt_control_proc_read,
+};
+
+static ssize_t asus_lcd_mipi_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+
+	memset(messages, 0, sizeof(messages));
+
+	if (len > 256)
+		len = 256;
+
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+
+	if(strncmp(messages, "0", 1) == 0)
+		asus_lcd_mipi_flag = 0;
+	else if(strncmp(messages, "1", 1) == 0)
+		asus_lcd_mipi_flag = 1;
+	else if(strncmp(messages, "2", 1) == 0)
+		asus_lcd_mipi_flag = 2;
+	else if(strncmp(messages, "3", 1) == 0)
+		asus_lcd_mipi_flag = 3;
+
+	printk("%s: mipi boost flag select to: %d\n", __func__, asus_lcd_dimming_on);
+
+	return len;
+}
+
+static ssize_t asus_lcd_mipi_proc_read(struct file *file, char __user *buf,
+                    size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+
+	buff = kmalloc(100, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += sprintf(buff, "%d\n", asus_lcd_mipi_flag);
+
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_lcd_mipi_proc_ops = {
+	.write = asus_lcd_mipi_proc_write,
+	.read = asus_lcd_mipi_proc_read,
+};
+
+/*
+ * asus_lcd_reg_write
+ * write command to tcon and save result to buffer
+ * sample: write 0xfff0 to 0x51 (all in hexadecimal)
+ *         echo 'w,51,ff, f0' > /proc/driver/panel_reg_rw
+ * sample: read length 1 (decimal) from 0x56
+ *         echo 'r,56,1' > /proc/driver/panel_reg_rw
+ *         and get result by cat /proc/driver/panel_reg_rw
+ */
+static ssize_t asus_lcd_reg_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char *messages, *tmp, *cur;
+	char *token, *token_par;
+	char *put_cmd;
+	bool flag = 0;
+	int *store;
+	int i = 0, cnt = 0, cmd_cnt = 0;
+	int ret = 0;
+	uint8_t str_len = 0;
+
+	messages = (char*) kmalloc(len * sizeof(char), GFP_KERNEL);
+	if(!messages)
+		return -EFAULT;
+
+	tmp = (char*) kmalloc(len * sizeof(char), GFP_KERNEL);
+	memset(tmp, 0, len * sizeof(char));
+	store =  (int*) kmalloc((len / ASUS_LCD_REG_RW_MIN_LEN) * sizeof(int), GFP_KERNEL);
+	put_cmd = (char*) kmalloc((len / ASUS_LCD_REG_RW_MIN_LEN) * sizeof(char), GFP_KERNEL);
+
+	if (copy_from_user(messages, buff, len)) {
+		ret = -1;
+		goto error;
+	}
+	cur = messages;
+	*(cur + len - 1) = '\0';
+
+	printk("[Display] %s (%s) +++\n", __func__, cur);
+
+	if (strncmp(cur, "w", 1) == 0) { //write
+		flag = true;
+	} else if(strncmp(cur, "r", 1) == 0) { //read
+		flag = false;
+	} else {
+		ret = -1;
+		goto error;
+	}
+
+	while ((token = strsep(&cur, "wr")) != NULL) {
+		str_len = strlen(token);
+
+		if(str_len > 0) { /* filter zero length */
+			int reg_parsed = 0; /* determine if it is parsed for register or read length */
+			if(!(strncmp(token, ",", 1) == 0) || (str_len < ASUS_LCD_REG_RW_MAX_LEN)) {
+				ret = -1;
+				goto error;
+			}
+
+			memset(store, 0, (len / ASUS_LCD_REG_RW_MIN_LEN) * sizeof(int));
+			memset(put_cmd, 0, (len / ASUS_LCD_REG_RW_MIN_LEN) * sizeof(char));
+			cmd_cnt++;
+
+			while ((token_par = strsep(&token, ",")) != NULL) {
+				if(strlen(token_par) > ASUS_LCD_REG_RW_MIN_LEN) {
+					ret = -1;
+					goto error;
+				}
+
+				if(strlen(token_par)) {
+					int parse_result = 0;
+
+					if (flag || !reg_parsed)
+						parse_result = sscanf(token_par, "%x", &(store[cnt]));
+					else if (!flag && reg_parsed)
+						parse_result = sscanf(token_par, "%d", &(store[cnt]));
+
+					if (parse_result < 0) {
+						ret = -1;
+						goto error;
+					}
+
+					cnt++;
+					reg_parsed = 1;
+				}
+			}
+
+			for(i = 0; i < cnt; i++)
+				put_cmd[i] = store[i] & 0xff;
+
+			if(flag) {
+				printk("[Display] write panel command\n");
+				asus_lcd_set_tcon_cmd(put_cmd, cnt);
+			} else {
+				printk("[Display] read panel command\n");
+				if (store[1] < ASUS_LCD_REG_RW_READ_MAX) {
+					asus_lcd_get_tcon_cmd(put_cmd[0], store[1]);
+				} else {
+					printk("[Display] read support up to length of 19\n");
+					ret = -1;
+					goto error;
+				}
+			}
+
+			if(cur != NULL) {
+				if (*(tmp + str_len) == 'w')
+					flag = true;
+				else if (*(tmp + str_len) == 'r')
+					flag = false;
+			}
+			cnt = 0;
+		}
+
+		memset(tmp, 0, len*sizeof(char));
+
+		if(cur != NULL)
+			strcpy(tmp, cur);
+	}
+
+	if(cmd_cnt == 0) {
+		ret = -1;
+		goto error;
+	}
+
+	ret = len;
+
+error:
+	printk("[Display] %s(%d) ---\n", __func__, ret);
+	kfree(messages);
+	kfree(tmp);
+	kfree(store);
+	kfree(put_cmd);
+	return ret;
+}
+
+/*
+ * asus_lcd_reg_read
+ * read previous result from asus_lcd_reg_write
+ */
+static ssize_t asus_lcd_reg_read(struct file *file, char __user *buf,
+					size_t count, loff_t *ppos)
+{
+	int len = 0;
+	ssize_t ret = 0;
+	char *buff;
+
+	buff = kmalloc(256, GFP_KERNEL);
+	if (!buff)
+		return -ENOMEM;
+
+	len += snprintf(buff, 256, "%s\n", asus_lcd_reg_buffer);
+	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
+	kfree(buff);
+
+	return ret;
+}
+
+static struct file_operations asus_lcd_reg_rw_ops = {
+	.write = asus_lcd_reg_write,
+	.read = asus_lcd_reg_read,
+};
+// ASUS BSP Display, panel register read/write ---
+
 static int dsi_display_link_clk_force_update_ctrl(void *handle)
 {
 	int rc = 0;
@@ -5066,6 +5779,24 @@ static int dsi_display_bind(struct device *dev,
 
 	/* register te irq handler */
 	dsi_display_register_te_irq(display);
+
+
+	// ASUS BSP display features initialization +++
+	if (asus_lcd_procfs_registered == false) {
+		mutex_init(&asus_lcd_tcon_cmd_mutex);
+		proc_create(ASUS_CABC_PROC_FILE,  0777, NULL, &asus_lcd_cabc_proc_ops);
+		proc_create(ASUS_LCD_REGISTER_RW, 0666, NULL, &asus_lcd_reg_rw_ops);
+		proc_create(ASUS_DIM_PROC_FILE,   0666, NULL, &asus_lcd_dim_proc_ops);
+		proc_create(ASUS_DIM_CONF_PROC_FILE,   0666, NULL, &asus_lcd_dim_conf_proc_ops);
+		proc_create(ASUS_ESD_PROC_FILE,   0666, NULL, &asus_lcd_esd_proc_ops);
+		proc_create(ASUS_EARLY_ON_PROC_FILE,   0666, NULL, &asus_lcd_early_on_proc_ops);
+		proc_create(ASUS_MIPI_PROC_FILE,  0666, NULL, &asus_lcd_mipi_proc_ops);
+		proc_create(ASUS_BKLT_CTL_PROC_FILE,   0666, NULL, &asus_lcd_bklt_control_proc_ops);
+		asus_lcd_procfs_registered = true;
+	}
+
+	g_display = display;
+	// ASUS BSP display features initialization ---
 
 	goto error;
 

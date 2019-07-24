@@ -43,6 +43,7 @@ struct extcon_dev {
 	const char *name;
 	const unsigned int *supported_cable;
 	const u32 *mutually_exclusive;
+	const char *fnode_name;
 
 	/* Internal data. Please do not set. */
 	struct device dev;

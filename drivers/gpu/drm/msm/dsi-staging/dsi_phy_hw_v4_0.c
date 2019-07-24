@@ -80,6 +80,8 @@
 #define DSIPHY_LNX_LPRX_CTRL(n)                    (0x214 + (0x80 * (n)))
 #define DSIPHY_LNX_TX_DCTRL(n)                     (0x218 + (0x80 * (n)))
 
+extern int asus_lcd_mipi_flag;
+
 static int dsi_phy_hw_v4_0_is_pll_on(struct dsi_phy_hw *phy)
 {
 	u32 data = 0;
@@ -179,6 +181,12 @@ void dsi_phy_hw_v4_0_enable(struct dsi_phy_hw *phy,
 	/* Alter PHY configurations if data rate less than 1.5GHZ*/
 	if (cfg->bit_clk_rate_hz < 1500000000)
 		less_than_1500_mhz = true;
+
+	if (asus_lcd_mipi_flag & 0x01) {
+		printk("[Display] dsi phy hw enable boost\n");
+		less_than_1500_mhz = false;
+	}
+
 	vreg_ctrl_0 = less_than_1500_mhz ? 0x5B : 0x59;
 	glbl_str_swi_cal_sel_ctrl = less_than_1500_mhz ? 0x03 : 0x00;
 	glbl_hstx_str_ctrl_0 = less_than_1500_mhz ? 0x66 : 0x88;
@@ -204,8 +212,13 @@ void dsi_phy_hw_v4_0_enable(struct dsi_phy_hw *phy,
 					glbl_str_swi_cal_sel_ctrl);
 	DSI_W32(phy, DSIPHY_CMN_GLBL_HSTX_STR_CTRL_0, glbl_hstx_str_ctrl_0);
 	DSI_W32(phy, DSIPHY_CMN_GLBL_PEMPH_CTRL_0, 0x00);
-	DSI_W32(phy, DSIPHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL, 0x03);
-	DSI_W32(phy, DSIPHY_CMN_GLBL_RESCODE_OFFSET_BOT_CTRL, 0x3c);
+	if (asus_lcd_mipi_flag & 0x01) {
+		DSI_W32(phy, DSIPHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL, 0x00);
+		DSI_W32(phy, DSIPHY_CMN_GLBL_RESCODE_OFFSET_BOT_CTRL, 0x00);
+	} else {
+		DSI_W32(phy, DSIPHY_CMN_GLBL_RESCODE_OFFSET_TOP_CTRL, 0x03);
+		DSI_W32(phy, DSIPHY_CMN_GLBL_RESCODE_OFFSET_BOT_CTRL, 0x3c);
+	}
 	DSI_W32(phy, DSIPHY_CMN_GLBL_LPTX_STR_CTRL, 0x55);
 
 	/* Remove power down from all blocks */

@@ -165,6 +165,7 @@ struct dsi_panel {
 	struct mipi_dsi_device mipi_device;
 
 	struct mutex panel_lock;
+	struct mutex bl_lock;
 	struct drm_panel drm_panel;
 	struct mipi_dsi_host *host;
 	struct device *parent;
@@ -204,6 +205,11 @@ struct dsi_panel {
 	enum dsi_dms_mode dms_mode;
 
 	bool sync_broadcast_en;
+
+	// for early backlight
+	u32 early_bl_level;
+	struct workqueue_struct *early_bl_workqueue;
+	struct work_struct early_bl_work;
 };
 
 static inline bool dsi_panel_ulps_feature_enabled(struct dsi_panel *panel)
