@@ -229,6 +229,7 @@ clean:
 }
 EXPORT_SYMBOL(read_range_data_from_node);
 
+#define BATT_TYPE_KIRIN  "3742266_asus_c11p1806_4850mah_averaged_masterslave_dec13th2018"
 static int get_step_chg_jeita_setting_from_profile(struct step_chg_info *chip)
 {
 	struct device_node *batt_node, *profile_node;
@@ -263,7 +264,8 @@ static int get_step_chg_jeita_setting_from_profile(struct step_chg_info *chip)
 		return -EBUSY;
 
 	profile_node = of_batterydata_get_best_profile(batt_node,
-					batt_id_ohms / 1000, NULL);
+					batt_id_ohms  / 1000, BATT_TYPE_KIRIN);
+
 	if (IS_ERR(profile_node))
 		return PTR_ERR(profile_node);
 
