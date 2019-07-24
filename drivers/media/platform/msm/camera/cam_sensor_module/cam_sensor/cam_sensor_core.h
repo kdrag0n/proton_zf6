@@ -14,6 +14,12 @@
 #define _CAM_SENSOR_CORE_H_
 
 #include "cam_sensor_dev.h"
+/**
+ *
+ * This API returns if any camera has been powered up
+ */
+
+int cam_sensor_is_power_up(void);
 
 /**
  * @s_ctrl: Sensor ctrl structure

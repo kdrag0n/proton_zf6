@@ -98,6 +98,8 @@ enum cam_cci_cmd_type {
 	MSM_CCI_GPIO_WRITE,
 	MSM_CCI_I2C_WRITE_SYNC,
 	MSM_CCI_I2C_WRITE_SYNC_BLOCK,
+	MSM_CCI_I2C_MUTEX_LOCK,
+	MSM_CCI_I2C_MUTEX_UNLOCK,
 };
 
 enum cci_i2c_queue_t {
@@ -234,9 +236,12 @@ struct cci_device {
 	uint32_t cpas_handle;
 	uint32_t irq_status1;
 	spinlock_t lock_status;
-	bool is_burst_read;
+	bool is_burst_read[MASTER_MAX];
 	uint32_t irqs_disabled;
 	struct mutex init_mutex;
+	struct mutex mutex_for_init;
+	uint32_t rw_cnt[8];
+	struct mutex mutex_for_conf[MASTER_MAX];
 };
 
 enum cam_cci_i2c_cmd_type {

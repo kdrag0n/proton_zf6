@@ -16,10 +16,17 @@
 #include "cam_sensor_util.h"
 #include "cam_soc_util.h"
 #include "cam_trace.h"
+#include "asus_cam_sensor.h" //ASUS_BSP Zhengwei "porting sensor ATD"
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
 
 
+static int g_cam0_power_up = 0;
+static int g_cam2_power_up = 0;
+int cam_sensor_is_power_up()
+{
+	return g_cam0_power_up | g_cam2_power_up;
+}
 static void cam_sensor_update_req_mgr(
 	struct cam_sensor_ctrl_t *s_ctrl,
 	struct cam_packet *csl_packet)
@@ -743,6 +750,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		 */
 		s_ctrl->is_probe_succeed = 1;
 		s_ctrl->sensor_state = CAM_SENSOR_INIT;
+		asus_cam_sensor_init(s_ctrl);//ASUS_BSP Zhengwei "porting sensor ATD"
 	}
 		break;
 	case CAM_ACQUIRE_DEV: {
@@ -1108,7 +1116,7 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		}
 	}
 
-	rc = cam_sensor_core_power_up(power_info, soc_info);
+	rc = cam_sensor_core_power_up(power_info, soc_info, &(s_ctrl->io_master_info));
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power up the core is failed:%d", rc);
 		return rc;
@@ -1118,6 +1126,12 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 	if (rc < 0)
 		CAM_ERR(CAM_SENSOR, "cci_init failed: rc: %d", rc);
 
+	s_ctrl->power_state = 1;//ASUS_BSP Zhengwei "porting sensor ATD"
+	if (0x586 == slave_info->sensor_id) {
+		g_cam0_power_up = 1;
+	} else if (0xd855 == slave_info->sensor_id) {
+		g_cam2_power_up = 1;
+	}
 	return rc;
 }
 
@@ -1125,6 +1139,7 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 {
 	struct cam_sensor_power_ctrl_t *power_info;
 	struct cam_hw_soc_info *soc_info;
+	struct cam_camera_slave_info *slave_info;
 	int rc = 0;
 
 	if (!s_ctrl) {
@@ -1134,12 +1149,12 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 
 	power_info = &s_ctrl->sensordata->power_info;
 	soc_info = &s_ctrl->soc_info;
-
+	slave_info = &(s_ctrl->sensordata->slave_info);
 	if (!power_info) {
 		CAM_ERR(CAM_SENSOR, "failed: power_info %pK", power_info);
 		return -EINVAL;
 	}
-	rc = cam_sensor_util_power_down(power_info, soc_info);
+	rc = cam_sensor_util_power_down(power_info, soc_info, &(s_ctrl->io_master_info));
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power down the core is failed:%d", rc);
 		return rc;
@@ -1156,7 +1171,12 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 	}
 
 	camera_io_release(&(s_ctrl->io_master_info));
-
+	s_ctrl->power_state = 0;//ASUS_BSP Zhengwei "porting sensor ATD"
+	if (0x586 == slave_info->sensor_id) {
+		g_cam0_power_up = 0;
+	} else if (0xd855 == slave_info->sensor_id) {
+		g_cam2_power_up = 0;
+	}
 	return rc;
 }
 

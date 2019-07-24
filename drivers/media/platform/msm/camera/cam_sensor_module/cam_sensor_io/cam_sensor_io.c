@@ -152,6 +152,46 @@ int32_t camera_io_dev_write_continuous(struct camera_io_master *io_master_info,
 	}
 }
 
+int32_t camera_cci_lock(struct camera_io_master *io_master_info)
+{
+	if (!io_master_info) {
+		CAM_ERR(CAM_SENSOR, "Invalid Args");
+		return -EINVAL;
+	}
+
+	if (io_master_info->master_type == CCI_MASTER) {
+		io_master_info->cci_client->cci_subdev =
+		cam_cci_get_subdev(io_master_info->cci_client->cci_device);
+		return cam_sensor_cci_i2c_util(io_master_info->cci_client,
+			MSM_CCI_I2C_MUTEX_LOCK);
+	} else if ((io_master_info->master_type == I2C_MASTER) ||
+			(io_master_info->master_type == SPI_MASTER)) {
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+int32_t camera_cci_unlock(struct camera_io_master *io_master_info)
+{
+	if (!io_master_info) {
+		CAM_ERR(CAM_SENSOR, "Invalid Args");
+		return -EINVAL;
+	}
+
+	if (io_master_info->master_type == CCI_MASTER) {
+		io_master_info->cci_client->cci_subdev =
+		cam_cci_get_subdev(io_master_info->cci_client->cci_device);
+		return cam_sensor_cci_i2c_util(io_master_info->cci_client,
+			MSM_CCI_I2C_MUTEX_UNLOCK);
+	} else if ((io_master_info->master_type == I2C_MASTER) ||
+			(io_master_info->master_type == SPI_MASTER)) {
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
 int32_t camera_io_init(struct camera_io_master *io_master_info)
 {
 	if (!io_master_info) {

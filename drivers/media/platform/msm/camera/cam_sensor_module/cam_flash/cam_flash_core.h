@@ -22,5 +22,18 @@ int cam_flash_apply_request(struct cam_req_mgr_apply_request *apply);
 int cam_flash_process_evt(struct cam_req_mgr_link_evt_data *event_data);
 int cam_flash_flush_request(struct cam_req_mgr_flush_request *flush);
 
+int cam_flash_off(struct cam_flash_ctrl *fctrl);
+int cam_flash_prepare(struct cam_flash_ctrl *flash_ctrl,
+	bool regulator_enable);
+void cam_flash_shutdown(struct cam_flash_ctrl *flash_ctrl);
+int cam_flash_stop_dev(struct cam_flash_ctrl *flash_ctrl);
+int cam_flash_release_dev(struct cam_flash_ctrl *fctrl);
+//ASUS_BSP +++ Zhengwei "porting flash"
+int cam_flash_low(struct cam_flash_ctrl *flash_ctrl,struct cam_flash_frame_setting *flash_data);
+int cam_flash_high(struct cam_flash_ctrl *flash_ctrl,struct cam_flash_frame_setting *flash_data);
+//ASUS_BSP --- Zhengwei "porting flash"
+
+int cam_flash_battery_low(int enable);
+void cam_flash_copy_fctrl(struct cam_flash_ctrl *fctrl);
 
 #endif /*_CAM_FLASH_CORE_H_*/

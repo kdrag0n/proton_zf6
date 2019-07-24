@@ -35,7 +35,6 @@
 #include "cam_soc_util.h"
 #include "cam_debug_util.h"
 #include "cam_sensor_io.h"
-#include "cam_flash_core.h"
 #include "cam_context.h"
 
 #define CAMX_FLASH_DEV_NAME "cam-flash-dev"

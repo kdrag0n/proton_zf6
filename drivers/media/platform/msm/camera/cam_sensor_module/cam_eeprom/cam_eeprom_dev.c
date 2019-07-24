@@ -419,6 +419,8 @@ static int32_t cam_eeprom_platform_driver_probe(
 	struct cam_eeprom_ctrl_t       *e_ctrl = NULL;
 	struct cam_eeprom_soc_private  *soc_private = NULL;
 
+	CAM_INFO(CAM_EEPROM,"EEPROM Probe Start");
+
 	e_ctrl = kzalloc(sizeof(struct cam_eeprom_ctrl_t), GFP_KERNEL);
 	if (!e_ctrl)
 		return -ENOMEM;
@@ -472,6 +474,7 @@ static int32_t cam_eeprom_platform_driver_probe(
 	platform_set_drvdata(pdev, e_ctrl);
 	e_ctrl->cam_eeprom_state = CAM_EEPROM_INIT;
 
+	CAM_INFO(CAM_EEPROM,"EEPROM Probe done");
 	return rc;
 free_soc:
 	kfree(soc_private);
@@ -479,7 +482,7 @@ free_cci_client:
 	kfree(e_ctrl->io_master_info.cci_client);
 free_e_ctrl:
 	kfree(e_ctrl);
-
+	CAM_INFO(CAM_EEPROM,"EEPROM Probe failed");
 	return rc;
 }
 

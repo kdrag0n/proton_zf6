@@ -153,7 +153,7 @@ static int cam_ois_power_up(struct cam_ois_ctrl_t *o_ctrl)
 
 	power_info->dev = soc_info->dev;
 
-	rc = cam_sensor_core_power_up(power_info, soc_info);
+	rc = cam_sensor_core_power_up(power_info, soc_info, &(o_ctrl->io_master_info));
 	if (rc) {
 		CAM_ERR(CAM_OIS, "failed in ois power up rc %d", rc);
 		return rc;
@@ -195,7 +195,7 @@ static int cam_ois_power_down(struct cam_ois_ctrl_t *o_ctrl)
 		return -EINVAL;
 	}
 
-	rc = cam_sensor_util_power_down(power_info, soc_info);
+	rc = cam_sensor_util_power_down(power_info, soc_info, &(o_ctrl->io_master_info));
 	if (rc) {
 		CAM_ERR(CAM_OIS, "power down the core is failed:%d", rc);
 		return rc;
