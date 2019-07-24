@@ -135,6 +135,16 @@ static char *initcall_command_line;
 static char *execute_command;
 static char *ramdisk_execute_command;
 
+//[+++]ASUS : Add for kernel charger mode
+bool g_Charger_mode = false;
+static int set_charger_mode(char *str)
+{
+	g_Charger_mode = !strcmp("charger", str);
+	return 0;
+}
+__setup("androidboot.mode=", set_charger_mode);
+EXPORT_SYMBOL(g_Charger_mode);
+
 /*
  * Used to generate warnings if static_key manipulation functions are used
  * before jump_label_init is called.
