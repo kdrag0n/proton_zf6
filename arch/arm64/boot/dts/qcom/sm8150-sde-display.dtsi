@@ -31,6 +31,8 @@
 #include "dsi-panel-sw43404-amoled-dsc-wqhd-cmd.dtsi"
 #include "dsi-panel-sw43404-amoled-dsc-wqhd-video.dtsi"
 #include "dsi-panel-sw43404-amoled-dsc-fhd-plus-cmd.dtsi"
+#include "dsi-panel-auo-2k-video.dtsi"
+#include "dsi-panel-boe-2k-video.dtsi"
 #include "dsi-panel-nt36850-truly-dualmipi-wqhd-cmd.dtsi"
 #include <dt-bindings/clock/mdss-10nm-pll-clk.h>
 
@@ -61,7 +63,7 @@
 			qcom,supply-max-voltage = <1800000>;
 			qcom,supply-enable-load = <62000>;
 			qcom,supply-disable-load = <80>;
-			qcom,supply-post-on-sleep = <20>;
+			//qcom,supply-post-on-sleep = <3>;
 		};
 
 		qcom,panel-supply-entry@1 {
@@ -71,6 +73,7 @@
 			qcom,supply-max-voltage = <6000000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
+			//qcom,supply-post-on-sleep = <3>;
 		};
 
 		qcom,panel-supply-entry@2 {
@@ -80,7 +83,6 @@
 			qcom,supply-max-voltage = <6000000>;
 			qcom,supply-enable-load = <100000>;
 			qcom,supply-disable-load = <100>;
-			qcom,supply-post-on-sleep = <20>;
 		};
 	};
 
@@ -347,7 +349,29 @@
 		qcom,dsi-panel = <&dsi_sw43404_amoled_fhd_plus_cmd>;
 	};
 
-	dsi_dual_nt36850_truly_cmd_display: qcom,dsi-display@19 {
+	dsi_auo_2k_vid_display: qcom,dsi-display@19 {
+		label = "dsi_auo_2k_vid_display";
+		qcom,display-type = "primary";
+
+		qcom,dsi-ctrl-num = <0>;
+		qcom,dsi-phy-num = <0>;
+		qcom,dsi-select-clocks = "src_byte_clk0", "src_pixel_clk0";
+
+		qcom,dsi-panel = <&dsi_auo_2k_vid>;
+	};
+
+	dsi_boe_2k_vid_display: qcom,dsi-display@20 {
+		label = "dsi_boe_2k_vid_display";
+		qcom,display-type = "primary";
+
+		qcom,dsi-ctrl-num = <0>;
+		qcom,dsi-phy-num = <0>;
+		qcom,dsi-select-clocks = "src_byte_clk0", "src_pixel_clk0";
+
+		qcom,dsi-panel = <&dsi_boe_2k_vid>;
+	};
+
+	dsi_dual_nt36850_truly_cmd_display: qcom,dsi-display@21 {
 		label = "dsi_dual_nt36850_truly_cmd_display";
 		qcom,display-type = "primary";
 
@@ -358,7 +382,7 @@
 		qcom,dsi-panel = <&dsi_dual_nt36850_truly_cmd>;
 	};
 
-	dsi_nt35695b_truly_fhd_cmd_sec_display: qcom,dsi-display@20 {
+	dsi_nt35695b_truly_fhd_cmd_sec_display: qcom,dsi-display@22 {
 		label = "dsi_nt35695b_truly_fhd_cmd_display";
 		qcom,display-type = "secondary";
 
@@ -370,7 +394,7 @@
 
 	};
 
-	dsi_nt35695b_truly_fhd_video_sec_display: qcom,dsi-display@21 {
+	dsi_nt35695b_truly_fhd_video_sec_display: qcom,dsi-display@23 {
 		label = "dsi_nt35695b_truly_fhd_video_display";
 		qcom,display-type = "secondary";
 
@@ -381,7 +405,7 @@
 		qcom,dsi-panel = <&dsi_nt35695b_truly_fhd_video>;
 	};
 
-	dsi_sim_sec_hd_cmd_display: qcom,dsi-display@22 {
+	dsi_sim_sec_hd_cmd_display: qcom,dsi-display@24 {
 
 		label = "dsi_sim_sec_hd_cmd_display";
 		qcom,display-type = "secondary";
@@ -439,6 +463,8 @@
 			&dsi_nt35695b_truly_fhd_video_display
 			&dsi_sw43404_amoled_video_display
 			&dsi_sw43404_amoled_fhd_plus_cmd_display
+			&dsi_auo_2k_vid_display
+			&dsi_boe_2k_vid_display
 			&dsi_dual_nt36850_truly_cmd_display>;
 	};
 
@@ -492,17 +518,18 @@
 &sde_dp {
 	qcom,dp-usbpd-detection = <&pm8150b_pdphy>;
 	qcom,ext-disp = <&ext_disp>;
-	qcom,dp-aux-switch = <&fsa4480>;
+	status = "disabled";
+	//qcom,dp-aux-switch = <&fsa4480>;
 
 	qcom,usbplug-cc-gpio = <&tlmm 38 0>;
 
 	pinctrl-names = "mdss_dp_active", "mdss_dp_sleep";
-	pinctrl-0 = <&sde_dp_usbplug_cc_active>;
-	pinctrl-1 = <&sde_dp_usbplug_cc_suspend>;
+	pinctrl-0 = <&sde_dp_aux_active &sde_dp_usbplug_cc_active>;
+	pinctrl-1 = <&sde_dp_aux_suspend &sde_dp_usbplug_cc_suspend>;
 };
 
 &mdss_mdp {
-	connectors = <&sde_rscc &sde_wb &sde_dp &sde_dsi &sde_dsi1>;
+	connectors = <&sde_rscc &sde_wb &sde_dsi &sde_dsi1>;
 };
 
 /* PHY TIMINGS REVISION T */
@@ -869,6 +896,28 @@
 				07 04 02 04 00 16 16];
 			/*qcom,mdss-dsi-panel-clockrate = <700000000>;*/
 			qcom,display-topology = <2 2 1>;
+			qcom,default-topology-index = <0>;
+		};
+	};
+};
+
+&dsi_auo_2k_vid {
+	qcom,mdss-dsi-display-timings {
+		timing@0 {
+			qcom,mdss-dsi-panel-phy-timings = [00 22 09 09 25 23 09
+				09 06 03 04 1C 19 00];
+			qcom,display-topology = <1 0 1>;
+			qcom,default-topology-index = <0>;
+		};
+	};
+};
+
+&dsi_boe_2k_vid {
+	qcom,mdss-dsi-display-timings {
+		timing@0 {
+			qcom,mdss-dsi-panel-phy-timings = [00 22 09 09 25 24 09
+				09 06 02 04 00 1C 19];
+			qcom,display-topology = <1 0 1>;
 			qcom,default-topology-index = <0>;
 		};
 	};

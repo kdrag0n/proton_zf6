@@ -42,21 +42,20 @@
 		"DMIC4", "MIC BIAS4",
 		"MIC BIAS4", "Digital Mic4",
 		"DMIC5", "MIC BIAS4",
-		"MIC BIAS4", "Digital Mic5",
-		"SpkrLeft IN", "SPK1 OUT",
-		"SpkrRight IN", "SPK2 OUT";
+		"MIC BIAS4", "Digital Mic5";
+		// "SpkrLeft IN", "SPK1 OUT",
+		// "SpkrRight IN", "SPK2 OUT";
 
 	qcom,pahu-ext-clk-freq = <19200000>;
 
 	asoc-codec = <&stub_codec>, <&ext_disp_audio_codec>;
 	asoc-codec-names = "msm-stub-codec.1",
 			   "msm-ext-disp-audio-codec-rx";
-
-	qcom,wsa-max-devs = <1>;
-	qcom,wsa-devs = <&wsa881x_0211>, <&wsa881x_0212>,
-			<&wsa881x_0213>, <&wsa881x_0214>;
-	qcom,wsa-aux-dev-prefix = "SpkrLeft", "SpkrRight",
-				  "SpkrLeft", "SpkrRight";
+	qcom,wsa-max-devs = <0>;
+	// qcom,wsa-devs = <&wsa881x_0211>, <&wsa881x_0212>,
+			// <&wsa881x_0213>, <&wsa881x_0214>;
+	// qcom,wsa-aux-dev-prefix = "SpkrLeft", "SpkrRight",
+				  // "SpkrLeft", "SpkrRight";
 };
 
 &snd_934x {
@@ -74,30 +73,18 @@
 		"hifi amp", "LINEOUT2",
 		"AMIC2", "MIC BIAS2",
 		"MIC BIAS2", "Headset Mic",
-		"AMIC3", "MIC BIAS2",
-		"MIC BIAS2", "ANCRight Headset Mic",
-		"AMIC4", "MIC BIAS2",
-		"MIC BIAS2", "ANCLeft Headset Mic",
-		"AMIC5", "MIC BIAS3",
-		"MIC BIAS3", "Handset Mic",
-		"DMIC0", "MIC BIAS1",
-		"MIC BIAS1", "Digital Mic0",
-		"DMIC1", "MIC BIAS1",
-		"MIC BIAS1", "Digital Mic1",
-		"DMIC2", "MIC BIAS3",
-		"MIC BIAS3", "Digital Mic2",
-		"DMIC3", "MIC BIAS3",
-		"MIC BIAS3", "Digital Mic3",
-		"DMIC4", "MIC BIAS4",
-		"MIC BIAS4", "Digital Mic4",
-		"DMIC5", "MIC BIAS4",
-		"MIC BIAS4", "Digital Mic5",
-		"SpkrLeft IN", "SPK1 OUT",
-		"SpkrRight IN", "SPK2 OUT";
+		"AMIC3", "MIC BIAS3",
+		"MIC BIAS3", "ANCRight Headset Mic",
+		"AMIC4", "MIC BIAS4",
+		"MIC BIAS4", "ANCLeft Headset Mic",
+		"AMIC1", "MIC BIAS1",
+		"MIC BIAS1", "Handset Mic";
+		// "SpkrLeft IN", "SPK1 OUT",
+		// "SpkrRight IN", "SPK2 OUT";
 
 	qcom,msm-mbhc-hphl-swh = <1>;
 	qcom,msm-mbhc-gnd-swh = <1>;
-	qcom,msm-mbhc-hs-mic-max-threshold-mv = <1700>;
+	qcom,msm-mbhc-hs-mic-max-threshold-mv = <2550>;
 	qcom,msm-mbhc-hs-mic-min-threshold-mv = <50>;
 	qcom,hph-en0-gpio = <&tavil_hph_en0>;
 	qcom,hph-en1-gpio = <&tavil_hph_en1>;
@@ -107,11 +94,11 @@
 	asoc-codec-names = "msm-stub-codec.1",
 			   "msm-ext-disp-audio-codec-rx";
 
-	qcom,wsa-max-devs = <2>;
-	qcom,wsa-devs = <&wsa881x_70211>, <&wsa881x_70212>,
-			<&wsa881x_70213>, <&wsa881x_70214>;
-	qcom,wsa-aux-dev-prefix = "SpkrLeft", "SpkrRight",
-				  "SpkrLeft", "SpkrRight";
+	qcom,wsa-max-devs = <0>;
+	// qcom,wsa-devs = <&wsa881x_70211>, <&wsa881x_70212>,
+			// <&wsa881x_70213>, <&wsa881x_70214>;
+	// qcom,wsa-aux-dev-prefix = "SpkrLeft", "SpkrRight",
+				  // "SpkrLeft", "SpkrRight";
 };
 
 &soc {
@@ -123,7 +110,7 @@
 		interrupt-parent = <&tlmm>;
 		qcom,gpio-connect = <&tlmm 123 0>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&wcd_intr_default>;
+		pinctrl-0 = <&wcd_intr_default &audio_debug>;
 	};
 
 	clock_audio: audio_ext_clk {
@@ -183,6 +170,7 @@
 
 &slim_aud {
 	wcd9360_cdc: pahu_codec {
+		status = "disabled";
 		compatible = "qcom,pahu-slim-pgd";
 		elemental-addr = [00 01 C0 02 17 02];
 
@@ -256,6 +244,8 @@
 
 		qcom,wcd-rst-gpio-node = <&wcd_rst_gpio>;
 
+		asus,uart-sw-control = <&tlmm 59 0x0>;
+
 		clock-names = "wcd_clk";
 		clocks = <&clock_audio_lnbb 0>;
 
@@ -291,7 +281,7 @@
 					   "cdc-vdd-3v3";
 
 		qcom,cdc-micbias1-mv = <1800>;
-		qcom,cdc-micbias2-mv = <1800>;
+		qcom,cdc-micbias2-mv = <2800>;
 		qcom,cdc-micbias3-mv = <1800>;
 		qcom,cdc-micbias4-mv = <1800>;
 
@@ -349,4 +339,26 @@
 		qcom,cdc-mclk-clk-rate = <9600000>;
 		qcom,cdc-micbias1-mv = <1800>;
 	};
+};
+
+&qupv3_se8_i2c {	/* i2c for Amp */
+	status = "okay";
+	tfa98xx@34 {
+		compatible = "nxp,tfa98xx";
+		reg = <0x34>;
+		irq-gpio = <&tlmm 49 0>;
+		reset-gpio = <&tlmm 94 0>;
+		asus,control-name = "Receiver";
+	};
+	tfa98xx@35 {
+		compatible = "nxp,tfa98xx";
+		reg = <0x35>;
+		irq-gpio = <&tlmm 42 0>;
+		reset-gpio = <&tlmm 92 0>;
+		asus,control-name = "Speaker";
+	};
+};
+
+&fsa4480 {
+	status = "disabled";
 };

@@ -27,6 +27,9 @@
 	qcom,board-id = <1 0>;
 };
 
-&dsi_sharp_4k_dsc_cmd_display {
+//&dsi_sharp_4k_dsc_cmd_display {
+	//qcom,dsi-display-active;
+//};
+&dsi_auo_2k_vid_display {
 	qcom,dsi-display-active;
 };

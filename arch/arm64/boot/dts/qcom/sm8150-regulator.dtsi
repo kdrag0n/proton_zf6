@@ -468,9 +468,9 @@
 		L17A: pm8150_l17: regulator-pm8150-l17 {
 			regulator-name = "pm8150_l17";
 			qcom,set = <RPMH_REGULATOR_SET_ALL>;
-			regulator-min-microvolt = <2856000>;
-			regulator-max-microvolt = <3008000>;
-			qcom,init-voltage = <2856000>;
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+			qcom,init-voltage = <2800000>;
 			qcom,init-mode = <RPMH_REGULATOR_MODE_LPM>;
 		};
 	};
@@ -789,10 +789,11 @@
 		L7C: pm8150l_l7: regulator-pm8150l-l7 {
 			regulator-name = "pm8150l_l7";
 			qcom,set = <RPMH_REGULATOR_SET_ALL>;
-			regulator-min-microvolt = <2856000>;
-			regulator-max-microvolt = <3104000>;
-			qcom,init-voltage = <2856000>;
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3000000>;
+			qcom,init-voltage = <3000000>;
 			qcom,init-mode = <RPMH_REGULATOR_MODE_LPM>;
+			regulator-always-on;	/* ASUS BSP Always Enable 3V for AL\P sensors */
 		};
 	};
 
@@ -805,6 +806,7 @@
 			qcom,set = <RPMH_REGULATOR_SET_ALL>;
 			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <1800000>;
+			regulator-always-on;	/* ASUS BSP Always Enable 1.8V for I2C & Sensors */
 		};
 	};
 

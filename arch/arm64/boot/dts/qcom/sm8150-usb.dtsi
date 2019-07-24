@@ -356,9 +356,8 @@
 		#size-cells = <1>;
 		ranges;
 
-		interrupts = <0 491 0>, <0 135 0>, <0 487 0>, <0 490 0>;
-		interrupt-names = "dp_hs_phy_irq", "pwr_event_irq",
-				"ss_phy_irq", "dm_hs_phy_irq";
+		interrupts = <0 491 0>, <0 135 0>, <0 490 0>;
+		interrupt-names = "dp_hs_phy_irq", "pwr_event_irq", "dm_hs_phy_irq";
 		qcom,use-pdc-interrupts;
 
 		USB3_GDSC-supply = <&usb30_sec_gdsc>;
@@ -423,7 +422,7 @@
 			snps,bus-suspend-enable;
 			usb-core-id = <1>;
 			tx-fifo-resize;
-			maximum-speed = "super-speed";
+			maximum-speed = "high-speed";
 			dr_mode = "otg";
 		};
 	};
