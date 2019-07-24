@@ -26,4 +26,9 @@ config QPNP_USB_PDPHY
 	  which communicates over the SPMI bus. The is used to handle
 	  the PHY layer communication of the Power Delivery stack.
 
+config ASUS_PD_CHARGER
+	tristate "ASUS CHG USB Power Delivery"
+	help
+          Choose the limit of voltage and power for ASUS device.
+
 endmenu
