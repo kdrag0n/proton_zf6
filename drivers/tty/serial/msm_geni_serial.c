@@ -2319,6 +2319,16 @@ static const struct of_device_id msm_geni_device_tbl[] = {
 	{},
 };
 
+unsigned uart_info = 0;
+EXPORT_SYMBOL(uart_info);
+
+static int __init get_uart_info(char *p)
+{
+        uart_info = 1;
+        return 0;
+}
+early_param("UART", get_uart_info);
+
 static int msm_geni_serial_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -2333,7 +2343,14 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	struct device_node *wrapper_ph_node;
 	u32 wake_char = 0;
 
-	id = of_match_device(msm_geni_device_tbl, &pdev->dev);
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+	/* This requires CONFIG_SERIAL_MSM_GENI_CONSOLE is set otherwise would crash */
+	if(!uart_info) {
+		id = of_match_device(msm_geni_device_tbl+1, &pdev->dev);
+	}else
+#endif
+		id = of_match_device(msm_geni_device_tbl, &pdev->dev);
+
 	if (id) {
 		dev_dbg(&pdev->dev, "%s: %s\n", __func__, id->compatible);
 		drv = (struct uart_driver *)id->data;
@@ -2357,6 +2374,11 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	if ((line < 0) || (line >= GENI_UART_NR_PORTS))
 		return -ENXIO;
 	is_console = (drv->cons ? true : false);
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+	/* is_console should be false when uart_info is 0, but still add this check*/
+	if(is_console && !uart_info)
+		return 0;
+#endif
 	dev_port = get_port_from_line(line, is_console);
 	if (IS_ERR_OR_NULL(dev_port)) {
 		ret = PTR_ERR(dev_port);
@@ -2546,6 +2568,7 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct msm_geni_serial_port *port = platform_get_drvdata(pdev);
 	int ret = 0;
+
 	u32 geni_status = geni_read_reg_nolog(port->uport.membase,
 							SE_GENI_STATUS);
 
@@ -2721,19 +2744,37 @@ static int __init msm_geni_serial_init(void)
 		msm_geni_console_port.uport.line = i;
 	}
 
-	ret = console_register(&msm_geni_console_driver);
-	if (ret)
-		return ret;
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+	if (uart_info) {
+#endif
+		ret = console_register(&msm_geni_console_driver);
+		if (ret)
+			return ret;
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+	}
+#endif
 
 	ret = uart_register_driver(&msm_geni_serial_hs_driver);
 	if (ret) {
-		uart_unregister_driver(&msm_geni_console_driver);
-		return ret;
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+		if (uart_info) {
+#endif
+			uart_unregister_driver(&msm_geni_console_driver);
+			return ret;
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+		}
+#endif
 	}
 
 	ret = platform_driver_register(&msm_geni_serial_platform_driver);
 	if (ret) {
-		console_unregister(&msm_geni_console_driver);
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+		if (uart_info) {
+#endif
+			console_unregister(&msm_geni_console_driver);
+#if defined(CONFIG_SERIAL_MSM_GENI_CONSOLE)
+		}
+#endif
 		uart_unregister_driver(&msm_geni_serial_hs_driver);
 		return ret;
 	}
