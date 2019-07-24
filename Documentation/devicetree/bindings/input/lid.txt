@@ -1,0 +1,60 @@
+Hall sensor driver
+
+Hall sensor is a switch. It senses magnetic field change and trigger interrupts to cpu.
+
+Required properties:
+
+ - compatible	: Should be "asustek_lid".
+ - pinctrl-names: Pinctrl configuration names of this sensor driver.
+				Should be "default".
+ - gpios	: Irq gpio which is to provide interrupts to host.
+		Eg: <&pio 0 0>
+			<[phandle of the gpio controller node]
+			 [line number within the gpio controller]
+			 [flags]>
+
+		Values for gpio specifier:
+			- Line number: is a value between 0 to 202.
+			- Flags:  bit field of flags, as defined in <dt-bindings/gpio/gpio.h>.
+		Only the following flags are supported:
+			0 - GPIO_ACTIVE_HIGH
+			1 - GPIO_ACTIVE_LOW
+
+Optional properties:
+
+ - asustek_lid,wakeup	: Boolean to select interrupt wakeup or not, if this property is defined
+				device will wakeup system.
+
+Example:
+XXX_msmXXX-mtp.dtsi
+ &soc {
+	asustek_lid {
+		compatible = "asustek_lid";
+		pinctrl-names = "asustek_lid_active", "asustek_lid_suspend";
+		pinctrl-0 = <&asustek_lid_active>;
+		pinctrl-1 = <&asustek_lid_suspend>;
+		gpios = <&msm_gpio 139 0x1>;
+		asustek_lid,wakeup;
+	};
+ };
+
+XXX_msmXXX-pinctrl.dtsi
+ &soc {
+	tlmm_pinmux: pinctrl@1000000 {
+		/* add pingrp for hall sensor */
+		asustek_lid_gpio {
+			qcom,pins = <&gp 139>;
+			qcom,pin-func = <0>;
+			qcom,num-grp-pins = <1>;
+			label = "asustek_lid_gpio";
+			asustek_lid_active: asustek_lid_active {
+				drive-strength = <2>;	/* 2 MA */
+				bias-pull-up;		/* pull-up */
+			};
+			asustek_lid_suspend: asustek_lid_suspend {
+				drive-strength = <2>;	/* 2 MA */
+				bias-pull-up;		/* pull-up */
+			};
+		};
+ };
+

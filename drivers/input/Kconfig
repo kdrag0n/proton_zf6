@@ -197,6 +197,32 @@ config INPUT_KEYCOMBO
 	---help---
 	  Say Y here if you want to take action when some keys are pressed;
 
+config INPUT_HALLSENSOR
+	tristate "Hall Sensor"
+	default y
+	depends on INPUT
+	---help---
+	  Say Y here if you want to sense when magnetic object is approached.
+
+	  More information is available:
+	  <file:Documentation/devicetree/bindings/input/hall_sensor.txt>
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called hallsensor.
+
+config INPUT_HALLSENSOR2
+	tristate "Hall Sensor 2"
+	default y
+	depends on INPUT
+	---help---
+	  Say Y here if you want to sense when magnetic object is approached.
+
+	  More information is available:
+	  <file:Documentation/devicetree/bindings/input/hall_sensor.txt>
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called hallsensor.
+
 comment "Input Device Drivers"
 
 source "drivers/input/keyboard/Kconfig"
@@ -212,6 +238,8 @@ source "drivers/input/touchscreen/Kconfig"
 source "drivers/input/misc/Kconfig"
 
 source "drivers/input/rmi4/Kconfig"
+
+source "drivers/input/fingerprint/Kconfig"
 
 endif
 
