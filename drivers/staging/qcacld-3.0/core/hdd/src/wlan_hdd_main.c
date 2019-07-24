@@ -135,9 +135,6 @@
 #include "wlan_hdd_apf.h"
 #include "wlan_hdd_twt.h"
 #include "wlan_mlme_ucfg_api.h"
-//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-#include <linux/asusdebug.h>
-//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 
 #ifdef CNSS_GENL
 #include <net/cnss_nl.h>

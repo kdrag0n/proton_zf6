@@ -61,9 +61,6 @@
 #include "wlan_p2p_ucfg_api.h"
 #include "wlan_ipa_ucfg_api.h"
 #include "wlan_hdd_scan.h"
-//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-#include <linux/asusdebug.h>
-//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 
 #include "wlan_hdd_nud_tracking.h"
 /* These are needed to recognize WPA and RSN suite types */
@@ -1372,9 +1369,6 @@ static void hdd_send_association_event(struct net_device *dev,
 			MAC_ADDR_ARRAY(adapter->mac_addr.bytes),
 			MAC_ADDR_ARRAY(wrqu.ap_addr.sa_data));
 		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: " MAC_ADDRESS_STR " connected to " MAC_ADDRESS_STR "\n",
-			MAC_ADDR_ARRAY(adapter->mac_addr.bytes),
-			MAC_ADDR_ARRAY(wrqu.ap_addr.sa_data));
 		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		hdd_send_update_beacon_ies_event(adapter, pCsrRoamInfo);
 
@@ -1452,7 +1446,6 @@ static void hdd_send_association_event(struct net_device *dev,
 	} else {                /* Not Associated */
 		hdd_debug("[wlan]: disconnected");
 		//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
-		ASUSEvtlog("[wlan]: disconnected.\n");
 		//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		memset(wrqu.ap_addr.sa_data, '\0', ETH_ALEN);
 		policy_mgr_decr_session_set_pcl(hdd_ctx->psoc,
