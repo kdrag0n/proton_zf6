@@ -1055,7 +1055,7 @@ EXPORT_SYMBOL(mipi_dsi_dcs_set_tear_scanline);
 int mipi_dsi_dcs_set_display_brightness(struct mipi_dsi_device *dsi,
 					u16 brightness)
 {
-	u8 payload[2] = { brightness & 0xff, brightness >> 8 };
+	u8 payload[2] = { (brightness>>4) & 0xff, brightness & 0xf };
 	ssize_t err;
 
 	err = mipi_dsi_dcs_write(dsi, MIPI_DCS_SET_DISPLAY_BRIGHTNESS,
@@ -1092,6 +1092,50 @@ int mipi_dsi_dcs_get_display_brightness(struct mipi_dsi_device *dsi,
 	return 0;
 }
 EXPORT_SYMBOL(mipi_dsi_dcs_get_display_brightness);
+
+/**
+ * mipi_dsi_dcs_set_display_dimming() - sets the dimming feature of the
+ *    display
+ * @dsi: DSI peripheral device
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int mipi_dsi_dcs_set_display_dimming(struct mipi_dsi_device *dsi)
+{
+	u8 payload[1] = {0x2C};
+	ssize_t err;
+
+	err = mipi_dsi_dcs_write(dsi, MIPI_DCS_WRITE_CONTROL_DISPLAY,
+				 payload, sizeof(payload));
+	pr_err("%s: set tcon dimming function\n", __func__);
+	if (err < 0)
+		return err;
+
+	return 0;
+}
+EXPORT_SYMBOL(mipi_dsi_dcs_set_display_dimming);
+
+/**
+ * mipi_dsi_dcs_set_display_cabc() - sets the cabc feature of the
+ *    display
+ * @dsi: DSI peripheral device
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int mipi_dsi_dcs_set_display_cabc(struct mipi_dsi_device *dsi)
+{
+	u8 payload[1] = {0x03};
+	ssize_t err;
+
+	err = mipi_dsi_dcs_write(dsi, MIPI_DCS_WRITE_POWER_SAVE,
+				 payload, sizeof(payload));
+	pr_err("%s: set tcon CABC function\n", __func__);
+	if (err < 0)
+		return err;
+
+	return 0;
+}
+EXPORT_SYMBOL(mipi_dsi_dcs_set_display_cabc);
 
 static int mipi_dsi_drv_probe(struct device *dev)
 {
