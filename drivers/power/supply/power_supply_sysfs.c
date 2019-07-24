@@ -49,8 +49,9 @@ static const char * const power_supply_type_text[] = {
 	"Charge_Pump",
 };
 
-static const char * const power_supply_status_text[] = {
-	"Unknown", "Charging", "Discharging", "Not charging", "Full"
+static const char * const power_supply_status_text[] = {  //ASUS BSP charger +++
+	"Unknown", "Charging", "Discharging", "Not charging", "Full",
+	"Quick charging", "Quick charging plus", "Thermal Alert"
 };
 
 static const char * const power_supply_charge_type_text[] = {
@@ -89,6 +90,15 @@ static const char * const power_supply_usbc_text[] = {
 static const char * const power_supply_usbc_pr_text[] = {
 	"none", "dual power role", "sink", "source"
 };
+
+//[+++]ASUS : Add the interface for charging debug apk
+static char *adapter_id_text[] = {
+	"NONE", "ASUS_750K", "ASUS_200K", "PB", "OTHERS", "ADC_NOT_READY"
+};
+static char *apsd_result_text[] = {
+	"UNKNOWN", "SDP", "CDP", "DCP", "OCP", "FLOAT", "HVDCP2", "HVDCP3"
+};
+//[---]ASUS : Add the interface for charging debug apk
 
 static const char * const power_supply_typec_src_rp_text[] = {
 	"Rp-Default", "Rp-1.5A", "Rp-3A"
@@ -157,6 +167,13 @@ static ssize_t power_supply_show_property(struct device *dev,
 			       power_supply_health_text[value.intval]);
 	else if (off >= POWER_SUPPLY_PROP_MODEL_NAME)
 		return sprintf(buf, "%s\n", value.strval);
+
+	//[+++]ASUS : Add the interface for charging debug apk
+	else if (off == POWER_SUPPLY_PROP_ASUS_ADAPTER_ID)
+		return sprintf(buf, "%s\n", adapter_id_text[value.intval]);
+	else if (off == POWER_SUPPLY_PROP_ASUS_APSD_RESULT)
+		return sprintf(buf, "%s\n", apsd_result_text[value.intval]);
+	//[---]ASUS : Add the interface for charging debug apk_done
 
 	if (off == POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT)
 		return sprintf(buf, "%lld\n", value.int64val);
@@ -348,6 +365,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(pd_in_hard_reset),
 	POWER_SUPPLY_ATTR(pd_current_max),
 	POWER_SUPPLY_ATTR(pd_usb_suspend_supported),
+	POWER_SUPPLY_ATTR(conn_temp),
 	POWER_SUPPLY_ATTR(charger_temp),
 	POWER_SUPPLY_ATTR(charger_temp_max),
 	POWER_SUPPLY_ATTR(parallel_disable),
@@ -368,6 +386,13 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(pd_voltage_max),
 	POWER_SUPPLY_ATTR(pd_voltage_min),
 	POWER_SUPPLY_ATTR(sdp_current_max),
+	//[+++]ASUS : Add the interface for charging debug apk
+	POWER_SUPPLY_ATTR(asus_apsd_result),
+	POWER_SUPPLY_ATTR(asus_adapter_id),
+	POWER_SUPPLY_ATTR(asus_is_legacy_cable),
+	POWER_SUPPLY_ATTR(asus_icl_setting),
+	POWER_SUPPLY_ATTR(asus_total_fcc),
+	//[---]ASUS : Add the interface for charging debug apk
 	POWER_SUPPLY_ATTR(connector_type),
 	POWER_SUPPLY_ATTR(parallel_batfet_mode),
 	POWER_SUPPLY_ATTR(parallel_fcc_max),
