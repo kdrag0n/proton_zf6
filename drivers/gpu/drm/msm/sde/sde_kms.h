@@ -259,8 +259,10 @@ struct sde_kms {
 	struct sde_hw_mdp *hw_mdp;
 	int dsi_display_count;
 	void **dsi_displays;
+#ifdef CONFIG_DRM_SDE_WB
 	int wb_display_count;
 	void **wb_displays;
+#endif
 	int dp_display_count;
 	void **dp_displays;
 	int dp_stream_count;
