@@ -338,6 +338,10 @@ static void msm_restart_prepare(const char *cmd)
 			if (!ret)
 				__raw_writel(0x6f656d00 | (code & 0xff),
 					     restart_reason);
+		} else if (!strncmp(cmd, "official-unlock", 15)) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_UNLOCK);
+                        __raw_writel(0x6f656d08, restart_reason);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
 		} else {
