@@ -56,7 +56,7 @@ function croot() {
 
 # Get the version of Clang in an user-friendly form
 function get_clang_version() {
-	"$1" --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//'
+	"$1" --version | head -n 1 | perl -pe 's/\((?:http|git).*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//'
 }
 
 # Get the version of GCC in an user-friendly form
