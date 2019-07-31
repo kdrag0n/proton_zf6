@@ -25,7 +25,7 @@ jobs=$(nproc)
 # Load the shared helpers
 source helpers.sh
 
-export LD_LIBRARY_PATH="$clang_bin/../lib:$PATH"
+export LD_LIBRARY_PATH="$clang_bin/../lib:$clang_bin/../lib64:$LD_LIBRARY_PATH"
 export PATH="$clang_bin:$PATH"
 
 kmake_flags+=(
