@@ -289,6 +289,18 @@ struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
 }
 
 #ifdef CONFIG_BPF_JIT
+#ifndef CONFIG_MODULES
+void * __weak module_alloc(unsigned long size)
+{
+	return vmalloc_exec(size);
+}
+
+void __weak module_memfree(void *module_region)
+{
+	vfree(module_region);
+}
+#endif
+
 static __always_inline void
 bpf_get_prog_addr_region(const struct bpf_prog *prog,
 			 unsigned long *symbol_start,
