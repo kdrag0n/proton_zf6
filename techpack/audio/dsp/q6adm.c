@@ -2854,6 +2854,17 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 		 __func__, port_id, path, rate, channel_mode, perf_mode,
 		 topology);
 
+//Jessy +++
+	if (((topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_SPK) ||
+                (topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP && channel_mode == 2) ||
+                (topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP_HIIMP && channel_mode == 2) 
+		) && perf_mode == LEGACY_PCM_MODE  && path == ADM_PATH_PLAYBACK){
+                bit_width = 24;
+                pr_err("%s: Force open adm in 24-bit for topology 0x%x\n",
+                        __func__, topology);
+        }
+//Jessy ---
+
 	port_id = q6audio_convert_virtual_to_portid(port_id);
 	port_idx = adm_validate_and_get_port_index(port_id);
 	if (port_idx < 0) {

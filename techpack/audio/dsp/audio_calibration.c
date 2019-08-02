@@ -21,6 +21,35 @@
 #include <dsp/audio_calibration.h>
 #include <dsp/audio_cal_utils.h>
 
+//Jessy +++ AudioWizard hifi & ringtone mode
+#include <linux/input.h>
+
+int g_audiowizard_force_preset_state = 0;
+struct input_dev *audiowizard;
+
+//Jessy ---
+
+/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+static struct kset *activeinputpid_uevent_kset;
+static struct kobject *activeinputpid_kobj;
+static void send_activeinput_pid_uevent(int activeinputpid, int failedinputpid);
+/* ASUS_BSP --- */
+
+/* ASUS_BSP +++ Audio mode and device */
+static int audio_mode = -1;
+static int audmode = -1;
+static int rcv_device = -1;
+static int rcvdev = -1;
+bool fts_set_pmode(bool pmode);
+/* ASUS_BSP --- Audio mode and device */
+
+/* ASUS_BSP +++ Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
+static int active_outputpid = 0;
+static struct kset *rcv_notification_uevent_kset;
+static struct kobject *rcv_notification_kobj;
+static void send_rcv_notification_uevent(int rcvdev);
+/* ASUS_BSP --- Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
+
 struct audio_cal_client_info {
 	struct list_head		list;
 	struct audio_cal_callbacks	*callbacks;
@@ -35,6 +64,23 @@ struct audio_cal_info {
 
 static struct audio_cal_info	audio_cal;
 
+
+//Jessy +++ AudioWizard hifi & ringtone mode
+//hifi:2 , ringtone:1
+static void send_audiowizard_state(struct input_dev *dev ,int audiowizard_state)
+{
+    if(audiowizard_state == 2) {
+        input_report_switch(audiowizard,SW_AUDIOWIZARD_RINGTONG,0);
+        input_report_switch(audiowizard,SW_AUDIOWIZARD_HIFI,1);
+    } else if (audiowizard_state == 1) {
+        input_report_switch(audiowizard,SW_AUDIOWIZARD_RINGTONG,1);
+        input_report_switch(audiowizard,SW_AUDIOWIZARD_HIFI,0);
+    } else {
+        input_report_switch(audiowizard,SW_AUDIOWIZARD_RINGTONG,0);
+        input_report_switch(audiowizard,SW_AUDIOWIZARD_HIFI,0);
+    }
+}
+//Jessy ---
 
 static bool callbacks_are_equal(struct audio_cal_callbacks *callback1,
 				struct audio_cal_callbacks *callback2)
@@ -394,11 +440,81 @@ static int audio_cal_release(struct inode *inode, struct file *f)
 	return ret;
 }
 
+static void check_audio_and_set_pmode(void)
+{
+	if ((audio_mode == AUDIO_DRV_MODE_IN_CALL || audio_mode == AUDIO_DRV_MODE_IN_COMMUNICATION) &&
+			rcv_device == AUDIO_DRV_DEVICE_RECEIVER) {
+		fts_set_pmode(true);
+	} else {
+		fts_set_pmode(false);
+	}
+}
+
+/* ASUS_BSP +++ Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
+static void send_rcv_notification_uevent(int rcvdev)
+{
+        if (rcv_notification_kobj) {
+		char uevent_buf[512];
+		char *envp[] = { uevent_buf, NULL };
+		if (rcvdev == 1) {
+			snprintf(uevent_buf, sizeof(uevent_buf), "PHONE_RECEIVER_NOTIFICATION=%d", active_outputpid);
+			printk("PHONE_RECEIVER_NOTIFICATION=%d, RCV\n", active_outputpid);
+		} else {
+			snprintf(uevent_buf, sizeof(uevent_buf), "PHONE_RECEIVER_NOTIFICATION=0");
+			printk("PHONE_RECEIVER_NOTIFICATION=0, not RCV\n");
+		}
+		kobject_uevent_env(rcv_notification_kobj, KOBJ_CHANGE, envp);
+	}
+}
+
+static void rcv_notification_uevent_release(struct kobject *kobj)
+{
+	kfree(kobj);
+}
+
+static struct kobj_type rcv_notification_uevent_ktype = {
+	.release = rcv_notification_uevent_release,
+};
+
+static int rcv_notification_uevent_init(void)
+{
+	int ret;
+
+	rcv_notification_uevent_kset = kset_create_and_add("rcv_notification_uevent", NULL, kernel_kobj);
+	if (!rcv_notification_uevent_kset) {
+		pr_err("%s: failed to create rcv_notification_uevent_kset", __func__);
+		return -ENOMEM;
+	}
+	rcv_notification_kobj = kzalloc(sizeof(*rcv_notification_kobj), GFP_KERNEL);
+	if (!rcv_notification_kobj) {
+		pr_err("%s: failed to create rcv_notification_kobj", __func__);
+		return -ENOMEM;
+	}
+
+	rcv_notification_kobj->kset = rcv_notification_uevent_kset;
+
+	ret = kobject_init_and_add(rcv_notification_kobj, &rcv_notification_uevent_ktype, NULL, "audio_rcv_notification");
+	if (ret) {
+		pr_err("%s: failed to init rcv_notification_kobj", __func__);
+		kobject_put(rcv_notification_kobj);
+		return -EINVAL;
+	}
+
+	kobject_uevent(rcv_notification_kobj, KOBJ_ADD);
+
+	return 0;
+}
+/* ASUS_BSP --- Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
+
 static long audio_cal_shared_ioctl(struct file *file, unsigned int cmd,
 							void __user *arg)
 {
 	int ret = 0;
 	int32_t size;
+	/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+	int activeinputpid = 0;
+	int failedinputpid = 0;
+	/* ASUS_BSP --- */
 	struct audio_cal_basic *data = NULL;
 
 	pr_debug("%s\n", __func__);
@@ -411,6 +527,85 @@ static long audio_cal_shared_ioctl(struct file *file, unsigned int cmd,
 	case AUDIO_GET_CALIBRATION:
 	case AUDIO_POST_CALIBRATION:
 		break;
+//Jessy +++ AudioWizard hifi & ringtone mode
+        case AUDIO_SET_AUDIOWIZARD_FORCE_PRESET:
+            mutex_lock(&audio_cal.cal_mutex[AUDIOWIZARD_FORCE_PRESET_TYPE]);
+            printk("audio_cal_shared_ioctl AUDIO_SET_AUDIOWIZARD_FORCE_PRESET ");
+                if (copy_from_user(&g_audiowizard_force_preset_state, (void *)arg,
+                        sizeof(g_audiowizard_force_preset_state))) {
+                    pr_err("%s: Could not copy g_audiowizard_force_preset_state from user\n", __func__);
+                    ret = -EFAULT;
+                }
+            printk("audio_cal_shared_ioctl AUDIO_SET_AUDIOWIZARD_FORCE_PRESET g_audiowizard_force_preset_state:%d",g_audiowizard_force_preset_state);
+            send_audiowizard_state(audiowizard,g_audiowizard_force_preset_state);
+            input_sync(audiowizard);
+            mutex_unlock(&audio_cal.cal_mutex[AUDIOWIZARD_FORCE_PRESET_TYPE]);
+            goto done;
+//Jessy ---
+
+	/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+	case AUDIO_SET_ACTIVEINPUT_PID:
+		mutex_lock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEINPUT_PID_TYPE]);
+		if (copy_from_user(&activeinputpid, (void *)arg, sizeof(activeinputpid))) {
+			pr_err("%s: Could not copy state from user\n", __func__);
+			ret = -EFAULT;
+		}
+		if (copy_from_user(&failedinputpid, (void *)(arg + sizeof(activeinputpid)), sizeof(failedinputpid))) {
+			pr_err("%s: Could not copy state from user\n", __func__);
+			ret = -EFAULT;
+		}
+		printk("activeinputpid=%d, failedinputpid=%d\n", activeinputpid, failedinputpid);
+		send_activeinput_pid_uevent(activeinputpid, failedinputpid);
+		mutex_unlock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEINPUT_PID_TYPE]);
+		goto done;
+	/* ASUS_BSP --- */
+
+	/* ASUS_BSP +++ Add uevent for receiver checking */
+        case AUDIO_SET_ACTIVEOUTPUT_PID:
+		mutex_lock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEOUTPUT_PID_TYPE]);
+		if (copy_from_user(&active_outputpid, (void *)arg, sizeof(active_outputpid))) {
+                        pr_err("%s: Could not copy state from user\n", __func__);
+                        ret = -EFAULT;
+                }
+                printk("active_outputpid=%d\n", active_outputpid);
+		if (active_outputpid == 0) {
+			send_rcv_notification_uevent(0);	/* previous outputpid's track was removed */
+		}
+                mutex_unlock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEOUTPUT_PID_TYPE]);
+                goto done;
+        /* ASUS_BSP --- */
+
+	/* ASUS_BSP +++ Audio mode */
+	case AUDIO_SET_MODE:
+		mutex_lock(&audio_cal.cal_mutex[SET_MODE_TYPE]);
+		if(copy_from_user(&audmode, (void *)arg,sizeof(audmode))) {
+			pr_err("%s: Could not copy lmode to user\n", __func__);
+			ret = -EFAULT;
+		}
+
+		audio_mode = audmode;
+		check_audio_and_set_pmode();
+		printk("%s: Audio mode status:audio_mode=%d\n", __func__, audio_mode);
+		mutex_unlock(&audio_cal.cal_mutex[SET_MODE_TYPE]);
+		goto done;
+	/* ASUS_BSP --- */
+
+	/* ASUS_BSP +++ Audio RCV device */
+	case AUDIO_SET_RCV_DEVICE:
+		mutex_lock(&audio_cal.cal_mutex[SET_RCV_DEVICE_TYPE]);
+		if(copy_from_user(&rcvdev, (void *)arg,sizeof(rcvdev))) {
+			pr_err("%s: Could not copy lmode to user\n", __func__);
+			ret = -EFAULT;
+		}
+
+		rcv_device = rcvdev;
+		/* check_audio_and_set_pmode(); */
+		send_rcv_notification_uevent(rcv_device);
+		printk("%s: Audio device status:rcv_device=%d\n", __func__, rcv_device);
+		mutex_unlock(&audio_cal.cal_mutex[SET_RCV_DEVICE_TYPE]);
+		goto done;
+	/* ASUS_BSP --- */
+
 	default:
 		pr_err("%s: ioctl not found!\n", __func__);
 		ret = -EFAULT;
@@ -519,6 +714,22 @@ done:
 	return ret;
 }
 
+/* ASUS_BSP +++ */
+int get_audiomode(void)
+{
+    printk("%s: Audio mode=%d\n",__func__, audio_mode);
+    return audio_mode;
+}
+EXPORT_SYMBOL(get_audiomode);
+
+int get_audio_rcv_device(void)
+{
+    printk("%s: Audio RCV device=%d\n",__func__, rcv_device);
+    return rcv_device;
+}
+EXPORT_SYMBOL(get_audio_rcv_device);
+/* ASUS_BSP --- */
+
 static long audio_cal_ioctl(struct file *f,
 		unsigned int cmd, unsigned long arg)
 {
@@ -539,6 +750,25 @@ static long audio_cal_ioctl(struct file *f,
 							204, compat_uptr_t)
 #define AUDIO_POST_CALIBRATION32	_IOWR(CAL_IOCTL_MAGIC, \
 							205, compat_uptr_t)
+
+//Jessy +++ AudioWizard hifi & ringtone mode
+#define AUDIO_SET_AUDIOWIZARD_FORCE_PRESET32	_IOWR(CAL_IOCTL_MAGIC, \
+							221, compat_uptr_t)
+//Jessy ---
+
+/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+#define AUDIO_SET_ACTIVEINPUT_PID32 _IOWR(CAL_IOCTL_MAGIC, \
+							232,compat_uptr_t)
+/* ASUS_BSP --- */
+
+/* ASUS_BSP +++ Audio mode and device */
+#define AUDIO_SET_MODE32		_IOWR(CAL_IOCTL_MAGIC, \
+							225, compat_uptr_t)
+#define AUDIO_SET_RCV_DEVICE32		_IOWR(CAL_IOCTL_MAGIC, \
+							233, compat_uptr_t)
+#define AUDIO_SET_ACTIVEOUTPUT_PID32 _IOWR(CAL_IOCTL_MAGIC, \
+                                                        234,compat_uptr_t)
+/* ASUS_BSP --- Audio mode and device */
 
 static long audio_cal_compat_ioctl(struct file *f,
 		unsigned int cmd, unsigned long arg)
@@ -565,6 +795,29 @@ static long audio_cal_compat_ioctl(struct file *f,
 	case AUDIO_POST_CALIBRATION32:
 		cmd64 = AUDIO_POST_CALIBRATION;
 		break;
+//Jessy +++ AudioWizard hifi & ringtone mode
+	case AUDIO_SET_AUDIOWIZARD_FORCE_PRESET32:
+		cmd64 = AUDIO_SET_AUDIOWIZARD_FORCE_PRESET;
+		break;
+//Jessy ---
+
+/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+	case AUDIO_SET_ACTIVEINPUT_PID32:
+		cmd64 = AUDIO_SET_ACTIVEINPUT_PID;
+		break;
+/* ASUS_BSP --- */
+
+/* ASUS_BSP +++ Audio mode and device */
+	case AUDIO_SET_MODE32:
+		cmd64 = AUDIO_SET_MODE;
+		break;
+	case AUDIO_SET_RCV_DEVICE32:
+		cmd64 = AUDIO_SET_RCV_DEVICE;
+		break;
+	case AUDIO_SET_ACTIVEOUTPUT_PID32:
+		cmd64 = AUDIO_SET_ACTIVEOUTPUT_PID;
+		break;
+/* ASUS_BSP --- Audio mode and device */
 	default:
 		pr_err("%s: ioctl not found!\n", __func__);
 		ret = -EFAULT;
@@ -593,11 +846,86 @@ struct miscdevice audio_cal_misc = {
 	.fops	= &audio_cal_fops,
 };
 
+/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+static void send_activeinput_pid_uevent(int activeinputpid, int failedinputpid)
+{
+	if (activeinputpid_kobj) {
+		char uevent_buf1[512];
+		char uevent_buf2[512];
+		char *envp[] = { uevent_buf1, uevent_buf2, NULL }; 
+		snprintf(uevent_buf1, sizeof(uevent_buf1), "ACTIVEINPUT_PID=%d", activeinputpid);
+		snprintf(uevent_buf2, sizeof(uevent_buf2), "FAILEDINPUT_PID=%d", failedinputpid);
+		kobject_uevent_env(activeinputpid_kobj, KOBJ_CHANGE, envp);
+	}
+}
+
+static void activeinputpid_uevent_release(struct kobject *kobj)
+{
+	kfree(kobj);
+}
+
+static struct kobj_type activeinputpid_uevent_ktype = {
+	.release = activeinputpid_uevent_release,
+};
+
+static int activeinputpid_uevent_init(void)
+{
+	int ret;
+
+	activeinputpid_uevent_kset = kset_create_and_add("activeinputpid_uevent", NULL, kernel_kobj);
+	if (!activeinputpid_uevent_kset) {
+		pr_err("%s: failed to create activeinputpid_uevent_kset", __func__);
+		return -ENOMEM;
+	}
+	activeinputpid_kobj = kzalloc(sizeof(*activeinputpid_kobj), GFP_KERNEL);
+	if (!activeinputpid_kobj) {
+		pr_err("%s: failed to create activeinputpid_kobj", __func__);
+		return -ENOMEM;
+	}
+
+	activeinputpid_kobj->kset = activeinputpid_uevent_kset;
+
+	ret = kobject_init_and_add(activeinputpid_kobj, &activeinputpid_uevent_ktype, NULL, "audio_activeinputpid");
+	if (ret) {
+		pr_err("%s: failed to init activeinputpid_kobj", __func__);
+		kobject_put(activeinputpid_kobj);
+		return -EINVAL;
+	}
+
+	kobject_uevent(activeinputpid_kobj, KOBJ_ADD);
+
+	return 0;
+}
+/* ASUS_BSP --- */
+
 int __init audio_cal_init(void)
 {
 	int i = 0;
+//Jessy +++ AudioWizard hifi & ringtone mode
+       int ret =0;
+//Jessy ---
 
 	pr_debug("%s\n", __func__);
+
+//Jessy +++ AudioWizard hifi & ringtone mode
+	audiowizard = input_allocate_device();
+	if(!audiowizard)
+		pr_err("%s: failed to allocate inputevent audiowizard\n", __func__);
+	audiowizard->name = "audiowizard";
+	input_set_capability(audiowizard,EV_SW,0x0b);
+	input_set_capability(audiowizard,EV_SW,0x0d);
+	ret = input_register_device(audiowizard);
+	if (ret<0)
+		pr_err("%s: failed to register inputevent audiowizard\n", __func__);
+//Jessy ---
+
+/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
+	activeinputpid_uevent_init();
+/* ASUS_BSP --- */
+
+/* ASUS_BSP +++ Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
+	rcv_notification_uevent_init();
+/* ASUS_BSP --- Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
 
 	memset(&audio_cal, 0, sizeof(audio_cal));
 	mutex_init(&audio_cal.common_lock);
@@ -614,6 +942,10 @@ void audio_cal_exit(void)
 	int i = 0;
 	struct list_head *ptr, *next;
 	struct audio_cal_client_info *client_info_node;
+
+//Jessy +++ AudioWizard hifi & ringtone mode
+    input_free_device(audiowizard);
+//Jessy ---
 
 	for (; i < MAX_CAL_TYPES; i++) {
 		list_for_each_safe(ptr, next,

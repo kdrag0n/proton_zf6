@@ -5076,6 +5076,12 @@ struct afe_param_id_lpass_core_shared_clk_cfg {
 #define ADM_CMD_COPP_OPEN_TOPOLOGY_ID_AUDIOSPHERE	0x10028000
 #define VPM_TX_DM_FLUENCE_EF_COPP_TOPOLOGY		0x10000005
 
+//Jessy +++
+#define ADM_CMD_COPP_OPEN_TOPOLOGY_ID_SPK 0x11000003
+#define ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP 0x1000000c
+#define ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP_HIIMP 0x10000010
+//Jessy ---
+
 /* Memory map regions command payload used by the
  * #ASM_CMD_SHARED_MEM_MAP_REGIONS ,#ADM_CMD_SHARED_MEM_MAP_REGIONS
  * commands.

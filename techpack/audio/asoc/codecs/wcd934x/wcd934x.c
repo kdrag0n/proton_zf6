@@ -51,6 +51,11 @@
 #include "../wcdcal-hwdep.h"
 #include "wcd934x-dsd.h"
 
+#include <linux/proc_fs.h>
+#include <soc/internal.h>
+//#define GPIO_AUDIO_DEBUG 122
+struct tavil_priv *g_tavil_priv;
+
 #define WCD934X_RATES_MASK (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
 			    SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_48000 |\
 			    SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_192000 |\
@@ -5869,6 +5874,29 @@ static int tavil_amic_pwr_lvl_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int tavil_uart_control_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct wcd9xxx_pdata *pdata = dev_get_platdata(codec->dev->parent);
+
+	if (pdata->uart_control > 0)
+		ucontrol->value.integer.value[0] = gpio_get_value(pdata->uart_control);
+	return 0;
+}
+
+static int tavil_uart_control_put(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct wcd9xxx_pdata *pdata = dev_get_platdata(codec->dev->parent);
+	int value = ucontrol->value.integer.value[0];
+
+	if (pdata->uart_control > 0)
+		gpio_set_value(pdata->uart_control, value);
+	return 0;
+}
+
 static const char *const tavil_conn_mad_text[] = {
 	"NOTUSED1", "ADC1", "ADC2", "ADC3", "ADC4", "NOTUSED5",
 	"NOTUSED6", "NOTUSED2", "DMIC0", "DMIC1", "DMIC2", "DMIC3",
@@ -6540,6 +6568,8 @@ static const struct snd_kcontrol_new tavil_snd_controls[] = {
 	SOC_ENUM_EXT("AMIC_5_6 PWR MODE", amic_pwr_lvl_enum,
 		tavil_amic_pwr_lvl_get, tavil_amic_pwr_lvl_put),
 
+	SOC_SINGLE_EXT("UART_Control", SND_SOC_NOPM, 23, 1, 0,
+		tavil_uart_control_get, tavil_uart_control_put),
 	SOC_ENUM_EXT("DMIC Drive Ctl", dmic_drv_ctl_enum,
 		tavil_dmic_drv_get, tavil_dmic_drv_put),
 };

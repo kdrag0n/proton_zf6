@@ -272,6 +272,8 @@ done:
 }
 
 /* To determine if cross connection occurred */
+/* ASUS_BSP +++ Fix OMTP headset issue */
+#if 0
 static int wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 {
 	enum wcd_mbhc_plug_type plug_type = MBHC_PLUG_TYPE_NONE;
@@ -350,6 +352,8 @@ done:
 
 	return (plug_type == MBHC_PLUG_TYPE_GND_MIC_SWAP) ? true : false;
 }
+#endif
+/* ASUS_BSP --- Fix OMTP headset issue */
 
 static bool wcd_mbhc_adc_check_for_spl_headset(struct wcd_mbhc *mbhc,
 					   int *spl_hs_cnt)
@@ -614,7 +618,7 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	int ret = 0;
 	int spl_hs_count = 0;
 	int output_mv = 0;
-	int cross_conn;
+	int cross_conn = 0;	/* ASUS_BSP +++ Fix OMTP headset issue */
 	int try = 0;
 
 	pr_debug("%s: enter\n", __func__);
@@ -629,7 +633,7 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 
 	/* Check for cross connection */
 	do {
-		cross_conn = wcd_check_cross_conn(mbhc);
+		//cross_conn = wcd_check_cross_conn(mbhc);	/* ASUS_BSP +++ Fix OMTP headset issue */
 		try++;
 	} while (try < mbhc->swap_thr);
 
@@ -716,7 +720,7 @@ correct_plug_type:
 		if ((output_mv <= WCD_MBHC_ADC_HS_THRESHOLD_MV) &&
 		    (!is_pa_on)) {
 			/* Check for cross connection*/
-			ret = wcd_check_cross_conn(mbhc);
+			//ret = wcd_check_cross_conn(mbhc); /* ASUS_BSP +++ Fix OMTP headset issue */
 			if (ret < 0)
 				continue;
 			else if (ret > 0) {
@@ -866,8 +870,19 @@ enable_supply:
 exit:
 	if (mbhc->mbhc_cb->mbhc_micbias_control &&
 	    !mbhc->micbias_enable)
+	/* #ASUS_BSP +++ Enable MIC bias always if HEADSET inserted for ASUS Design */
+	{
+		if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
+			mbhc->mbhc_cb->mbhc_micbias_control(codec, MIC_BIAS_2,
+							    MICB_ENABLE);
+			mbhc->micbias_enable = true;
+		} else	{
 		mbhc->mbhc_cb->mbhc_micbias_control(codec, MIC_BIAS_2,
 						    MICB_DISABLE);
+
+		}
+	}
+	/* #ASUS_BSP --- */
 
 	/*
 	 * If plug type is corrected from special headset to headphone,

@@ -1,0 +1,61 @@
+# make sure that the environment variables ARCH and CROSS_COMPILE
+# are set for your architecture and cross compiler
+#
+# e.g. for Beaglebone black:
+# export ARCH := arm
+# export CROSS_COMPILE := arm-linux-gnueabihf-
+#
+# e.g. Samsung Galaxy S6:
+# export ARCH := arm64
+# export CROSS_COMPILE := aarch64-linux-android-
+
+# In case of out of tree build, build as a module
+# (when build inside kernel we will not enter this directory and this will have no effect)
+
+# additional debugging
+#TFA_DEBUG=1
+#
+# include $(AUDIO_ROOT)/config/sdm855auto.conf
+# export
+# INCS    +=  -include $(AUDIO_ROOT)/config/sdm855autoconf.h
+
+
+ifeq ($(CONFIG_ARCH_SM8150), y)
+
+include $(AUDIO_ROOT)/config/sm8150auto.conf
+export
+INCS    +=  -include $(AUDIO_ROOT)/config/sm8150autoconf.h
+
+endif
+
+TFA_INC := $(AUDIO_ROOT)/asoc/codecs/tfa9872/inc
+
+# add version number derived from Git
+# ifeq ($(KDIR),)
+# PLMA_HOSTSW_DIR=$(realpath -f $(srctree)/$(src))
+# else
+# PLMA_HOSTSW_DIR=$(realpath -f $(src))
+# endif
+# GIT_VERSION=$(shell cd $(PLMA_HOSTSW_DIR); git describe --tags --dirty --match "v[0-9]*.[0-9]*.[0-9]*")
+# EXTRA_CFLAGS += -DTFA98XX_GIT_VERSIONS=\"$(GIT_VERSION)\"
+
+# debugging support (also enables trace_printk)
+EXTRA_CFLAGS += -DDEBUG -DTFA9874_NONDSP_STEREO
+
+EXTRA_CFLAGS += -I$(TFA_INC)
+# EXTRA_CFLAGS += -Werror
+
+$(info cextra_flag ${EXTRA_CFLAGS})
+
+TFA9872_OBJS += tfa98xx.o
+TFA9872_OBJS += tfa_container.o
+TFA9872_OBJS += tfa_dsp.o
+TFA9872_OBJS += tfa_init.o
+
+ifdef TFA_DEBUG
+EXTRA_CFLAGS += -DTFA_DEBUG -DDEBUG
+snd-soc-tfa9872-objs += tfa_debug.o
+endif
+
+obj-$(CONFIG_SND_SOC_TFA9872) := snd-soc-tfa9872.o
+snd-soc-tfa9872-y := $(TFA9872_OBJS)

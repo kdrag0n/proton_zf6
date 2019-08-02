@@ -616,6 +616,7 @@ static struct dentry *debugfs_peek;
 static struct dentry *debugfs_poke;
 static struct dentry *debugfs_power_state;
 static struct dentry *debugfs_reg_dump;
+static struct dentry *debugfs_uart_status;
 
 static unsigned char read_data;
 
@@ -682,6 +683,7 @@ static ssize_t codec_debug_read(struct file *file, char __user *ubuf,
 	char lbuf[8];
 	char *access_str = file->private_data;
 	ssize_t ret_cnt;
+	struct wcd9xxx_pdata *pdata= NULL;
 
 	if (*ppos < 0 || !count)
 		return -EINVAL;
@@ -692,6 +694,12 @@ static ssize_t codec_debug_read(struct file *file, char __user *ubuf,
 					       strnlen(lbuf, 7));
 	} else if (!strcmp(access_str, "slimslave_reg_dump")) {
 		ret_cnt = wcd9xxx_slimslave_reg_show(ubuf, count, ppos);
+	} else if (!strcmp(access_str, "slimslave_uart_status")) {
+		pdata = debugCodec->slim->dev.platform_data;
+		snprintf(lbuf, sizeof(lbuf), "%s\n",
+			gpio_get_value(pdata->uart_control) ? "hp": "uart");
+		ret_cnt = simple_read_from_buffer(ubuf, count, ppos, lbuf,
+				strnlen(lbuf, sizeof(lbuf)));
 	} else {
 		pr_err("%s: %s not permitted to read\n", __func__, access_str);
 		ret_cnt = -EPERM;
@@ -769,6 +777,7 @@ static ssize_t codec_debug_write(struct file *filp,
 	char lbuf[32];
 	int rc;
 	long int param[5];
+	struct wcd9xxx_pdata *pdata = NULL;
 
 	if (cnt > sizeof(lbuf) - 1)
 		return -EINVAL;
@@ -796,6 +805,11 @@ static ssize_t codec_debug_write(struct file *filp,
 				param[0]);
 		else
 			rc = -EINVAL;
+	} else if (!strcmp(access_str, "slimslave_uart_status")) {
+		rc = get_parameters(lbuf, param, 1);
+		pdata = debugCodec->slim->dev.platform_data;
+		pr_info("param %ld\n", param[0]);
+		gpio_set_value(pdata->uart_control, param[0] != 0 ? 1: 0);
 	} else if (!strcmp(access_str, "power_state")) {
 		rc = codec_debug_process_cdc_power(lbuf);
 	}
@@ -1427,6 +1441,10 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 		debugfs_reg_dump = debugfs_create_file("slimslave_reg_dump",
 		S_IFREG | 0444, debugfs_wcd9xxx_dent,
 		(void *) "slimslave_reg_dump", &codec_debug_ops);
+
+		debugfs_uart_status = debugfs_create_file("slimslave_uart_status",
+		S_IFREG | 0444, debugfs_wcd9xxx_dent,
+		(void *) "slimslave_uart_status", &codec_debug_ops);
 	}
 #endif
 

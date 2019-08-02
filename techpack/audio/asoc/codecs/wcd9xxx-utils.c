@@ -27,6 +27,9 @@
 #include "wcd9xxx-irq.h"
 #include "wcd9xxx-utils.h"
 
+extern int uart_info;
+
+
 #define REG_BYTES 2
 #define VAL_BYTES 1
 /*
@@ -432,6 +435,19 @@ struct wcd9xxx_pdata *wcd9xxx_populate_dt_data(struct device *dev)
 
 	pdata->dmic_clk_drv = dmic_clk_drive;
 
+	pdata->uart_control = of_get_named_gpio_flags(dev->of_node,
+			"asus,uart-sw-control", 0, NULL);
+	if (pdata->uart_control < 0) {
+		dev_warn(dev, "no asus,uart-sw-control provided %d\n", pdata->uart_control);
+	} else {
+		
+		printk("populate_dt_data: uart control status %d\n", uart_info);
+		gpio_request_one(pdata->uart_control, 
+				((uart_info == 1)? GPIOF_OUT_INIT_LOW: GPIOF_OUT_INIT_HIGH),
+				"uart-sw-control");
+		dev_dbg(dev, "uart gpio requested");
+	}
+
 	return pdata;
 
 err_parse_dt_prop:
@@ -440,6 +456,7 @@ err_parse_dt_prop:
 	pdata->num_supplies = 0;
 err_power_sup:
 	devm_kfree(dev, pdata);
+	pdata->uart_control = -1;
 	return NULL;
 }
 EXPORT_SYMBOL(wcd9xxx_populate_dt_data);
