@@ -1211,7 +1211,8 @@ static int qti_haptics_hw_init(struct qti_hap_chip *chip)
 	/* Set ZX_CFG */
 	addr = REG_HAP_ZX_CFG;
 	mask = HAP_ZX_DET_DEB_MASK;
-	val = ZX_DET_DEB_80US;
+	//val = ZX_DET_DEB_80US;
+	val = ZX_DET_DEB_10US;
 	rc = qti_haptics_masked_write(chip, addr, mask, val);
 	if (rc < 0) {
 		dev_err(chip->dev, "write ZX_CFG failed, rc=%d\n", rc);
@@ -1252,9 +1253,10 @@ static int qti_haptics_hw_init(struct qti_hap_chip *chip)
 	}
 
 	addr = REG_HAP_AUTO_RES_CFG;
-	mask = HAP_AUTO_RES_MODE_BIT | HAP_CAL_EOP_EN_BIT | HAP_CAL_PERIOD_MASK;
+	//mask = HAP_AUTO_RES_MODE_BIT | HAP_CAL_EOP_EN_BIT | HAP_CAL_PERIOD_MASK;
+	mask = HAP_AUTO_RES_MODE_BIT | HAP_CAL_EOP_EN_BIT | HAP_CAL_PERIOD_MASK | BIT(4);
 	val = config->lra_auto_res_mode << HAP_AUTO_RES_MODE_SHIFT;
-	val |= HAP_CAL_EOP_EN_BIT | HAP_CAL_OPT3_EVERY_8_PERIOD;
+	//val |= HAP_CAL_EOP_EN_BIT | HAP_CAL_OPT3_EVERY_8_PERIOD;
 	rc = qti_haptics_masked_write(chip, addr, mask, val);
 	if (rc < 0) {
 		dev_err(chip->dev, "set AUTO_RES_CFG failed, rc=%d\n", rc);
@@ -1262,9 +1264,10 @@ static int qti_haptics_hw_init(struct qti_hap_chip *chip)
 	}
 
 	addr = REG_HAP_AUTO_RES_CTRL;
-	val = HAP_AUTO_RES_EN_BIT | HAP_SEL_AUTO_RES_PERIOD |
-		AUTO_RES_CNT_ERR_DELTA(2) | HAP_AUTO_RES_ERR_RECOVERY_BIT |
-		AUTO_RES_EN_DLY(4);
+	//val = HAP_AUTO_RES_EN_BIT | HAP_SEL_AUTO_RES_PERIOD |
+	//	AUTO_RES_CNT_ERR_DELTA(2) | HAP_AUTO_RES_ERR_RECOVERY_BIT |
+	//	AUTO_RES_EN_DLY(4);
+	val = HAP_AUTO_RES_EN_BIT | AUTO_RES_EN_DLY(4);
 	rc = qti_haptics_write(chip, addr, &val, 1);
 	if (rc < 0) {
 		dev_err(chip->dev, "set AUTO_RES_CTRL failed, rc=%d\n",

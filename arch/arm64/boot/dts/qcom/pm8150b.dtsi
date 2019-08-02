@@ -503,7 +503,7 @@
 			interrupt-names = "hap-sc-irq", "hap-play-irq";
 			qcom,actuator-type = "lra";
 			qcom,vmax-mv = <2420>;
-			qcom,play-rate-us = <5100>;
+			qcom,play-rate-us = <4255>;
 			qcom,wf-brake-pattern = [02 02 02 02];
 			qcom,lra-resonance-sig-shape = "sine";
 			qcom,lra-auto-resonance-mode = "qwd";
@@ -512,8 +512,8 @@
 				/* CLICK */
 				qcom,effect-id = <0>;
 				qcom,wf-vmax-mv = <3596>;
-				qcom,wf-pattern = [3e];
-				qcom,wf-play-rate-us = <5000>;
+				qcom,wf-pattern = [3e 3e 3e];
+				qcom,wf-play-rate-us = <4255>;
 				qcom,wf-brake-pattern = [02 02 00 00];
 			};
 			wf_1 {
