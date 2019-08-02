@@ -24,9 +24,6 @@ endif
 # GIT_VERSION=$(shell cd $(PLMA_HOSTSW_DIR); git describe --tags --dirty --match "v[0-9]*.[0-9]*.[0-9]*")
 # EXTRA_CFLAGS += -DTFA98XX_GIT_VERSIONS=\"$(GIT_VERSION)\"
 
-# debugging support (also enables trace_printk)
-EXTRA_CFLAGS += -DDEBUG
-
 EXTRA_CFLAGS += -I$(src)/inc
 
 snd-soc-tfa9872-objs += tfa98xx.o
