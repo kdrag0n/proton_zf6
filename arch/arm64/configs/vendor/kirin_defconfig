@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 4.14.83 Kernel Configuration
+# Linux/arm64 4.14.135 Kernel Configuration
 #
 CONFIG_ARM64=y
 CONFIG_64BIT=y
@@ -1861,6 +1861,7 @@ CONFIG_UNIX98_PTYS=y
 # CONFIG_SERIAL_NONSTANDARD is not set
 # CONFIG_N_GSM is not set
 # CONFIG_TRACE_SINK is not set
+# CONFIG_LDISC_AUTOLOAD is not set
 # CONFIG_DEVMEM is not set
 
 #
@@ -1900,7 +1901,6 @@ CONFIG_HW_RANDOM=y
 # CONFIG_HW_RANDOM_TIMERIOMEM is not set
 # CONFIG_HW_RANDOM_MSM is not set
 CONFIG_HW_RANDOM_MSM_LEGACY=y
-# CONFIG_R3964 is not set
 
 #
 # PCMCIA character devices
@@ -3366,6 +3366,7 @@ CONFIG_MMC_CLKGATE=y
 # CONFIG_MMC_DEBUG is not set
 # CONFIG_MMC_ARMMMCI is not set
 CONFIG_MMC_SDHCI=y
+CONFIG_MMC_SDHCI_IO_ACCESSORS=y
 CONFIG_MMC_SDHCI_PLTFM=y
 # CONFIG_MMC_SDHCI_OF_ARASAN is not set
 # CONFIG_MMC_SDHCI_OF_AT91 is not set
