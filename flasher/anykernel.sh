@@ -37,7 +37,11 @@ comp_image=$decomp_image.gz
 # Hex-patch the kernel if Magisk is installed ('skip_initramfs' -> 'want_initramfs')
 # This negates the need to reflash Magisk afterwards
 if [ -f $comp_image ]; then
-  if [ -d $ramdisk/.backup ]; then
+  comp_rd=$split_img/ramdisk.cpio
+  decomp_rd=$home/_ramdisk.cpio
+  $bin/magiskboot decompress $comp_rd $decomp_rd || cp $comp_rd $decomp_rd
+
+  if $bin/magiskboot cpio $decomp_rd "exists .backup"; then
     ui_print "  • Preserving Magisk";
     $bin/magiskboot decompress $comp_image $decomp_image;
     $bin/magiskboot hexpatch $decomp_image 736B69705F696E697472616D667300 77616E745F696E697472616D667300;
