@@ -767,6 +767,8 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 	u8 stat;  //Add the interface for charging debug apk
 	val->intval = 0;
 
+	val->intval = 0;
+
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
 		rc = smblib_get_prop_usb_present(chg, val);
@@ -4045,14 +4047,6 @@ static ssize_t INOV_enable_show(struct device *dev, struct device_attribute *att
 	return sprintf(buf, "INOV_reg 0x1670 = 0x%x\n", reg);
 }
 
-static char *asus_id[] = {
-	"NONE",
-	"ASUS_750K",
-	"ASUS_200K",
-	"PB",
-	"OTHERS",
-	"ADC_NOT_READY"
-};
 static ssize_t adc_adapter_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
