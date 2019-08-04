@@ -43,7 +43,7 @@ static SAR_sensor_GPIO * mSAR_sensor_GPIO;
 #else
 	#define dbg(fmt, args...)
 #endif
-#define log(fmt, args...) printk(KERN_INFO "[%s][%s]"fmt,MODULE_NAME,SENSOR_TYPE_NAME,##args)
+#define log(fmt, args...) do {} while (0)
 #define err(fmt, args...) printk(KERN_ERR "[%s][%s]"fmt,MODULE_NAME,SENSOR_TYPE_NAME,##args)
 
 static irqreturn_t SAR_sensor_irq_handler(int irq, void *dev_id);

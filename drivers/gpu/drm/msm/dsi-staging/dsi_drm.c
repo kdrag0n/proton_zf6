@@ -162,8 +162,6 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 
-	printk("[Display] dsi_bridge_pre_enable !!!\n");
-
 	if (dsi_on)
 		return;
 

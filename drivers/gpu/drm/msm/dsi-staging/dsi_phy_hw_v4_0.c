@@ -182,10 +182,8 @@ void dsi_phy_hw_v4_0_enable(struct dsi_phy_hw *phy,
 	if (cfg->bit_clk_rate_hz < 1500000000)
 		less_than_1500_mhz = true;
 
-	if (asus_lcd_mipi_flag & 0x01) {
-		printk("[Display] dsi phy hw enable boost\n");
+	if (asus_lcd_mipi_flag & 0x01)
 		less_than_1500_mhz = false;
-	}
 
 	vreg_ctrl_0 = less_than_1500_mhz ? 0x5B : 0x59;
 	glbl_str_swi_cal_sel_ctrl = less_than_1500_mhz ? 0x03 : 0x00;

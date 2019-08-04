@@ -458,7 +458,6 @@ bool fts_fwupg_check_fw_valid(struct i2c_client *client)
 {
     int ret = 0;
 
-    printk("[FTS][touch][UPGRADE]fts_fwupg_check_fw_valid");
     ret = fts_wait_tp_to_valid(client);
     if (ret < 0) {
         FTS_INFO("tp fw invaild");
@@ -1160,7 +1159,6 @@ int fts_upgrade_bin(struct i2c_client *client, char *fw_name, bool force)
 
     fts_show_tpfwver(fw_verison);
     fts_data->touch_edev->name = fw_verison;
-    printk("[FTS][touch][UPGRADE]fw_verison=%s,touch->name=%s \n", fw_verison, fts_data->touch_edev->name);
 
 err_bin:
     if (fw_file_buf) {
@@ -1521,8 +1519,6 @@ static bool fts_fwupg_need_upgrade(struct i2c_client *client)
     u8 fw_ver_in_host = 0;
     u8 fw_ver_in_tp = 0;
 
-    printk("[FTS][touch][UPGRADE]fts_fwupg_need_upgrade");
-
     fwvalid = fts_fwupg_check_fw_valid(client);
     if (fwvalid) {
         ret = fts_fwupg_get_ver_in_host(&fw_ver_in_host);
@@ -1563,7 +1559,6 @@ int fts_fwupg_upgrade(struct i2c_client *client, struct fts_upgrade *upg)
     int upgrade_count = 0;
     u8 ver = 0;
 
-    printk("[FTS][touch][UPGRADE]fts_fwupg_upgrade");
     FTS_INFO("fw auto upgrade function");
     if ((NULL == upg) || (NULL == upg->func)) {
         FTS_ERROR("upg/upg->func is null");
@@ -1571,7 +1566,6 @@ int fts_fwupg_upgrade(struct i2c_client *client, struct fts_upgrade *upg)
     }
 
     upgrade_flag = fts_fwupg_need_upgrade(client);
-    printk("[FTS][touch][UPGRADE]fw upgrade flag:%d", upgrade_flag);
     FTS_INFO("fw upgrade flag:%d", upgrade_flag);
     do {
         upgrade_count++;
@@ -1627,7 +1621,6 @@ void fts_fwupg_auto_upgrade(struct fts_ts_data *ts_data)
     struct i2c_client *client = ts_data->client;
     struct fts_upgrade *upg = fwupgrade;
 
-    printk("[FTS][touch][UPGRADE]fts_fwupg_auto_upgrade");
     FTS_INFO("********************FTS enter upgrade********************");
 
     ret = fts_fwupg_upgrade(client, upg);
@@ -1777,7 +1770,6 @@ static void fts_fwupg_work(struct work_struct *work)
     struct fts_ts_data *ts_data = container_of(work,
                                   struct fts_ts_data, fwupg_work);
 
-    printk("[FTS][touch][UPGRADE]fw upgrade work function");
     FTS_INFO("fw upgrade work function");
     ts_data->fw_loading = 1;
     fts_irq_disable();
@@ -1785,7 +1777,6 @@ static void fts_fwupg_work(struct work_struct *work)
     fts_esdcheck_switch(DISABLE);
 #endif
 
-    printk("[FTS][touch][UPGRADE]get upgrade fw file");
     FTS_INFO("get upgrade fw file");
     ret = fts_fwupg_get_fw_file(ts_data);
     fts_fwupg_init_ic_detail();
@@ -1804,7 +1795,6 @@ static void fts_fwupg_work(struct work_struct *work)
     ts_data->fw_loading = 0;
     fts_show_tpfwver(fw_verison);
     ts_data->touch_edev->name = fw_verison;
-    printk("[FTS][touch][UPGRADE]fw_verison=%s,touch->name=%s \n", fw_verison, ts_data->touch_edev->name);
     FTS_FUNC_EXIT();
 }
 
@@ -1816,7 +1806,6 @@ void fts_show_tpfwver(char *buf)
 	    printk("[touch][fts] %s :  read FW fail \n ", __func__);
 	    snprintf(buf, 64, "get tp fw version fail!\n");
     } else {
-	    printk("[touch][fts] %s :  TP_ID = 0x%x touch FW = 0x%x\n ", __func__, g_vendor_id, IC_FW);
 	    snprintf(buf, 64, "0x%x-0x%x\n", g_vendor_id, IC_FW);
     }
 }
@@ -1853,7 +1842,6 @@ int fts_fwupg_init(struct fts_ts_data *ts_data)
     struct upgrade_func *func = upgrade_func_list[0];
     int func_count = sizeof(upgrade_func_list) / sizeof(upgrade_func_list[0]);
 
-    printk("[FTS][touch][UPGRADE]fw upgrade init function");
     FTS_INFO("fw upgrade init function");
 
     if (NULL == ts_data->ts_workqueue) {

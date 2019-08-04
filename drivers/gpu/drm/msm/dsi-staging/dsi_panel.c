@@ -463,7 +463,6 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
 	int rc = 0;
 
 	if (!fts_gesture_check()) {
-		printk("[Display] gesture disabled, enable regulator\n");
 		rc = dsi_pwr_enable_regulator(&panel->power_info, true);
 		if (rc) {
 			pr_err("[%s] failed to enable vregs, rc=%d\n", panel->name, rc);
@@ -505,8 +504,6 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 {
 	int rc = 0;
 
-	printk("[Display] dsi_panel_power_off !!!\n");
-
 	if (gpio_is_valid(panel->reset_config.disp_en_gpio))
 		gpio_set_value(panel->reset_config.disp_en_gpio, 0);
 
@@ -532,7 +529,6 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 	}
 
 	if (!fts_gesture_check()) {
-		printk("[Display] gesture disabled, disable regulator\n");
 		rc = dsi_pwr_enable_regulator(&panel->power_info, false);
 		if (rc)
 			pr_err("[%s] failed to enable vregs, rc=%d\n", panel->name, rc);
@@ -699,11 +695,8 @@ void dsi_panel_set_backlight_asus_logic(struct dsi_panel *panel, u32 bl_level)
 {
 	struct dsi_backlight_config *bl = &panel->bl_config;
 
-	printk("[Display] backlight request: value = %d\n", bl_level);
-
 	if (bl_level == 0) {
 		backlight_device_set_brightness(bl->raw_bd, WLED_MIN_LEVEL_DISABLE);
-		printk("[Display] g_bl_full_dcs ctrl disable\n");
 		g_bl_full_dcs = false;
 	} else if (bl_level < g_bl_threshold) { /*wled control*/
 		if (g_last_bl == 0) {
@@ -718,14 +711,11 @@ void dsi_panel_set_backlight_asus_logic(struct dsi_panel *panel, u32 bl_level)
 				(g_last_bl >= g_bl_threshold) ? g_bl_threshold : g_last_bl, bl_level);
 		} else if (g_last_bl < bl_level) {
 			asus_lcd_led_trigger_dim(bl, g_last_bl, bl_level);
-		} else {
-			printk("[Display] Bypass backlight request with same level\n");
 		}
 		g_bl_full_dcs = false;
 	} else { /*dcs control*/
 		if (g_last_bl == 0) {
 			backlight_device_set_brightness(bl->raw_bd, WLED_MAX_LEVEL_ENABLE);
-			printk("[Display] g_bl_full_dcs ctrl enable\n");
 			dsi_panel_update_backlight(panel, bl_level);
 		} else {
 			dsi_panel_update_backlight(panel, bl_level);
@@ -764,7 +754,6 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 			goto finally;
 		}
 
-		printk("[Display] setting WLED to max, backlight = %d\n", bl_lvl);
 		asus_wled_fsc_validate();
 		dsi_panel_update_backlight(panel, bl_lvl);
 		rc = backlight_device_set_brightness(bl->raw_bd, bl->raw_bd->props.max_brightness);
@@ -804,14 +793,11 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = -ENOTSUPP;
 	}
 
-	if (bl_lvl == 0 && g_last_bl != 0) {
-		printk("[Display] Backlight set 0 to turn off\n");
+	if (bl_lvl == 0 && g_last_bl != 0)
 		bl_off_to_wait_on = true;
-	}
 
 	if (bl_off_to_wait_on && bl_lvl) {
 		dsi = &panel->mipi_device;
-		printk("[Display] Backlight first set non-zero value to turn on: %d\n", bl_lvl);
 		bl_off_to_wait_on = false;
 
 		if (asus_lcd_cabc_mode[1] == 3)
@@ -2583,7 +2569,6 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 	mode->pixel_clk_khz = (DSI_H_TOTAL_DSC(&mode->timing) *
 			DSI_V_TOTAL(&mode->timing) *
 			mode->timing.refresh_rate) / 1000;
-	printk("[Display] Pixel clk is %d kHz\n", mode->pixel_clk_khz);
 	return rc;
 }
 

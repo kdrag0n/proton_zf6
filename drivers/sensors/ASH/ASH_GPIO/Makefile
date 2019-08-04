@@ -12,13 +12,3 @@ else
 endif
 
 ccflags-y += $(LOCAL_CFALG)
-
-DEBUG = n
-
-ifeq ($(DEBUG),y)
-	DEBFLAGS = -O -g -DASH_GPIO_DEBUG
-else
-	DEBFLAGS = -O -g
-endif
-ccflags-y += $(DEBFLAGS)
-

@@ -88,7 +88,6 @@ static int __init asustek_lid_get_devtree(struct device *dev)
 	struct device_node *node;
 	enum of_gpio_flags flags;
 
-	printk("[lid] %s \n", __func__);
 	node = dev->of_node;
 	if (!node)
 		return -ENODEV;
@@ -114,7 +113,6 @@ static int asustek_lid_pinctrl_configure(struct pinctrl *key_pinctrl,
 
 	int retval;
 
-	printk("[lid] %s \n", __func__);
 	if (active) {
 		set_state = pinctrl_lookup_state(key_pinctrl,
 						"asustek_lid_active");
@@ -147,7 +145,6 @@ static int __init lid_driver_probe(struct platform_device *pdev)
 	struct input_dev *input;
 	static const char lid_probe[] __initconst = "ASUSTek: %s\n";
 
-	printk("[lid] %s : Start !!!\n", __func__);
 	if (!pdev)
 		return -EINVAL;
 
@@ -171,7 +168,6 @@ static int __init lid_driver_probe(struct platform_device *pdev)
 	input->phys = LID_PHYS;
 	set_bit(EV_SW, input->evbit);
 	set_bit(SW_LID, input->swbit);
-	printk("[lid] %s : set ket capabilities\n", __func__);
 
 	/* Get pinctrl if target uses pinctrl */
 	ddata->key_pinctrl = devm_pinctrl_get(dev);
@@ -199,7 +195,6 @@ static int __init lid_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, ret);
 		return ret;
 	}
-	printk("[lid] %s : input register ok\n", __func__);
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &lid_attr_group);
 	if (ret) {
@@ -208,7 +203,6 @@ static int __init lid_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, ret);
 		return ret;
 	}
-	printk("[lid] %s : create sysfs ok\n", __func__);
 
 	INIT_DELAYED_WORK(&ddata->dwork, lid_report_function);
 
@@ -228,7 +222,6 @@ static int __init lid_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, ddata->gpio);
 		goto fail_remove_group;
 	}
-	printk("[lid] %s : request gpio-irq ok\n", __func__);
 
 	ret = gpio_direction_input(ddata->gpio);
 	if (ret < 0) {
@@ -256,14 +249,11 @@ static int __init lid_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, irq);
 		goto fail_remove_group;
 	}
-	printk("[lid] %s : request irq handler ok\n", __func__);
 
 	if (ddata->wakeup) {
 		device_init_wakeup(&pdev->dev, 1);
 		enable_irq_wake(irq);
 	}
-
-	printk("[lid] %s : End !!!\n", __func__);
 
 	return ret;
 

@@ -2128,8 +2128,6 @@ static int msm_pdev_probe(struct platform_device *pdev)
 	int ret;
 	struct component_match *match = NULL;
 
-	printk("[Display] msm_pdev_probe +++ \n");
-
 	ret = add_display_components(&pdev->dev, &match);
 	if (ret)
 		return ret;
@@ -2154,7 +2152,6 @@ static int msm_pdev_remove(struct platform_device *pdev)
 	component_master_del(&pdev->dev, &msm_drm_ops);
 	of_platform_depopulate(&pdev->dev);
 
-	printk("[Display] msm_pdev_remove +++ \n");
 	g_msm_drv_shutdown_in_progress = 1;
 
 	if(resume_wq)
@@ -2170,7 +2167,6 @@ static void msm_pdev_shutdown(struct platform_device *pdev)
 	struct drm_device *ddev = platform_get_drvdata(pdev);
 	struct msm_drm_private *priv = NULL;
 
-	printk("[Display] msm_pdev_shutdown +++ \n");
 	g_msm_drv_shutdown_in_progress = 1;
 
 	if (!ddev) {

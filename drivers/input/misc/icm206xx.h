@@ -335,11 +335,7 @@ struct icm206xx_data {
 #define icm_errmsg(str, args...) \
 	printk("[icm206xx][error]%s: " str, __func__, ##args)
 
-#define icm_dbgmsg(str, args...) \
-	if (icm_enable_debug) \
-		printk("[icm206xx]%s: " str, __func__, ##args)
-
-bool icm_enable_debug = true;		// set if verbose message is needed.
+#define icm_dbgmsg(str, args...) do {} while (0)
 
 struct icm_ctrl_t *g_icm_ctrl = NULL;
 struct icm_sensor *g_icm206xx_sensor;

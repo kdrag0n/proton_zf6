@@ -85,11 +85,6 @@ EXPORT_SYMBOL(disable_tp_flag);
 extern bool g_Charger_mode;
 //extern bool pmode_tp_flag;
 
-/* +++ asus add for print touch location +++ */
-int report_touch_locatoin_count[10];
-/* --- asus add for print touch location --- */
-static bool touch_down_up_status;
-
 /*****************************************************************************
 *  Name: fts_wait_tp_to_valid
 *  Brief: Read chip id until TP FW become valid(Timeout: TIMEOUT_READ_REG),
@@ -105,7 +100,6 @@ int fts_wait_tp_to_valid(struct i2c_client *client)
     u8 reg_value = 0;
     u8 chip_id = fts_data->ic_info.ids.chip_idh;
 
-    printk("[FTS][touch] %s \n",__func__);
     do {
         ret = fts_i2c_read_reg(client, FTS_REG_CHIP_ID, &reg_value);
         if ((ret < 0) || (reg_value != chip_id)) {
@@ -178,7 +172,6 @@ static int fts_get_ic_information(struct fts_ts_data *ts_data)
     u32 id_cmd_len = 0;
     struct i2c_client *client = ts_data->client;
 
-    printk("[FTS][touch] %s \n",__func__);
     ts_data->ic_info.is_incell = FTS_CHIP_IDC;
     ts_data->ic_info.hid_supported = FTS_HID_SUPPORTTED;
     do {
@@ -287,7 +280,6 @@ int fts_reset_proc(int hdelayms)
 
 void ftxxxx_reset_tp(int HighOrLow)
 {
-	pr_info("[Focal][Touch] %s : set tp reset pin to %d\n", __func__, HighOrLow);
 	if (HighOrLow)
 		gpio_direction_output(fts_data->pdata->reset_gpio, 1);
 	else
@@ -300,10 +292,8 @@ void ftxxxx_disable_touch(bool flag)
 		if (flag) {
 			disable_tp_flag = true;
 			fts_release_all_finger();
-			printk("[Focal][Touch] %s: proximity trigger disable touch !\n", __func__);
 		} else {
 			disable_tp_flag = false;
-			printk("[Focal][Touch] %s: proximity trigger enable touch  !\n", __func__);
 		}
 	}
 	/*else{
@@ -368,7 +358,6 @@ static int fts_power_source_init(struct fts_ts_data *data)
     int ret = 0;
 
     FTS_FUNC_ENTER();
-    printk("[FTS][touch] %s: regulator init\n", __func__);
 
 
     //pm8150_l14
@@ -416,7 +405,6 @@ static int fts_power_source_init(struct fts_ts_data *data)
         }
     }
 
-    printk("[FTS][touch] %s: pm8150_l14 regulator_enable\n", __func__);
     ret = regulator_enable(data->vcc_i2c);
     if (ret) {
 	FTS_ERROR("enable vcc_i2c regulator failed,ret=%d", ret);
@@ -474,7 +462,6 @@ static int fts_power_source_ctrl(struct fts_ts_data *data, int enable)
     if (enable) {
         if (data->power_disabled) {
             FTS_DEBUG("regulator enable !");
-            printk("[FTS][touch] %s: lab ibb regulator enable\n", __func__);
 
             ret = regulator_enable(data->lab);
             if (ret) {
@@ -491,7 +478,6 @@ static int fts_power_source_ctrl(struct fts_ts_data *data, int enable)
     } else {
         if (!data->power_disabled) {
             FTS_DEBUG("regulator disable !");
-            printk("[FTS][touch] %s: lab ibb regulator disable\n", __func__);
 
             ret = regulator_disable(data->lab);
             if (ret) {
@@ -762,21 +748,10 @@ static int fts_input_report_b(struct fts_ts_data *data)
 
             touchs |= BIT(events[i].id);
             data->touchs |= BIT(events[i].id);
-            /* +++ asus add for print touch location +++ */
-            if ((report_touch_locatoin_count[i] % 200) == 0) {
-                printk("[Focal][Touch] report id=%d x=%d y=%d\n", events[i].id,
-                events[i].x, events[i].y);
-                report_touch_locatoin_count[i] = 1;
-            }
-            report_touch_locatoin_count[i] += 1;
-            /* --- asus jacob add for print touch location --- */
             FTS_DEBUG("[B]P%d(%d, %d)[p:%d,tm:%d] DOWN!", events[i].id, events[i].x,
                       events[i].y, events[i].p, events[i].area);
         } else {
             uppoint++;
-            /* +++ asus add for print touch location +++ */
-            report_touch_locatoin_count[i] = 0;
-            /* --- asus add for print touch location --- */
             input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, false);
             data->touchs &= ~BIT(events[i].id);
             FTS_DEBUG("[B]P%d UP!", events[i].id);
@@ -797,25 +772,10 @@ static int fts_input_report_b(struct fts_ts_data *data)
 
     if (va_reported) {
         /* touchs==0, there's no point but key */
-        if (EVENT_NO_DOWN(data) || (!touchs)) {
-            FTS_DEBUG("[B]Points All Up!");
-            if (touch_down_up_status == 1) {
-                printk("[Focal][Touch] touch up !\n");
-                touch_down_up_status = 0;
-            }
-            /* +++ asus jacob add for print touch location +++ */
-            memset(report_touch_locatoin_count, 0, sizeof(report_touch_locatoin_count));
-            /* --- asus jacob add for print touch location --- */
+        if (EVENT_NO_DOWN(data) || (!touchs))
             input_report_key(data->input_dev, BTN_TOUCH, 0);
-        } else {
-            if (touch_down_up_status == 0) {
-                touch_down_up_status = 1;
-                printk("[Focal][Touch] touch down !\n");
-                printk("[Focal][Touch] id=%d x=%d y=%d\n", events[0].id,
-                events[0].x, events[0].y);
-            }
+        else
             input_report_key(data->input_dev, BTN_TOUCH, 1);
-        }
     }
 
     input_sync(data->input_dev);
@@ -853,25 +813,11 @@ static int fts_input_report_a(struct fts_ts_data *data)
 
             input_report_abs(data->input_dev, ABS_MT_POSITION_X, events[i].x);
             input_report_abs(data->input_dev, ABS_MT_POSITION_Y, events[i].y);
-            /* +++ asus add for print touch location +++ */
-            if ((report_touch_locatoin_count[i] % 200) == 0) {
-                printk("[Focal][Touch] report id=%d x=%d y=%d\n", events[i].id,
-                events[i].x, events[i].y);
-                report_touch_locatoin_count[i] = 1;
-            }
-            report_touch_locatoin_count[i] += 1;
-            /* --- asus jacob add for print touch location --- */
             input_mt_sync(data->input_dev);
 
             FTS_DEBUG("[A]P%d(%d, %d)[p:%d,tm:%d] DOWN!", events[i].id, events[i].x,
                       events[i].y, events[i].p, events[i].area);
             touchs++;
-        }
-        else
-        {
-            /* +++ asus add for print touch location +++ */
-            report_touch_locatoin_count[i] = 0;
-            /* --- asus add for print touch location --- */
         }
     }
 
@@ -883,24 +829,10 @@ static int fts_input_report_a(struct fts_ts_data *data)
 
     if (va_reported) {
         if (EVENT_NO_DOWN(data)) {
-            //FTS_DEBUG("[A]Points All Up!");
-            if (touch_down_up_status == 1) {
-       	        touch_down_up_status = 0;
-   	            printk("[Focal][Touch] touch up !\n");
-            }
-            /* +++ asus jacob add for print touch location +++ */
-            memset(report_touch_locatoin_count, 0, sizeof(report_touch_locatoin_count));
-            /* --- asus jacob add for print touch location --- */
             input_report_key(data->input_dev, BTN_TOUCH, 0);
             input_mt_sync(data->input_dev);
         } else {
             input_report_key(data->input_dev, BTN_TOUCH, 1);
-            if (touch_down_up_status == 0) {
-                touch_down_up_status = 1;
-                printk("[Focal][Touch] touch down !\n");
-                printk("[Focal][Touch] id=%d x=%d y=%d\n", events[0].id,
-                events[0].x, events[0].y);
-            }
         }
     }
 
@@ -1286,13 +1218,11 @@ static int fts_get_dt_coords(struct device *dev, char *name,
     }
 
     if (!strcmp(name, "focaltech,display-coords")) {
-	printk("[FTS][touch]fts_get_dt_coords : kirin_panel\n");
         pdata->x_min = coords[0];
         pdata->y_min = coords[1];
         pdata->x_max = coords[2];
         pdata->y_max = coords[3];
     } else if (!strcmp(name, "focaltech,display-coords-ara")){
-        printk("[FTS][touch]fts_get_dt_coords : ara_panel\n");
         pdata->x_min = coords[0];
         pdata->y_min = coords[1];
         pdata->x_max = coords[2];
@@ -1383,7 +1313,6 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
         pdata->max_touch_number = FTS_MAX_POINTS_SUPPORT;
     }
 
-    printk("[FTS][touch] fts_parse_dt : reset = %d !!!\n", gpio_get_value(pdata->reset_gpio));
     FTS_INFO("max touch number:%d, irq gpio:%d, reset gpio:%d",
              pdata->max_touch_number, pdata->irq_gpio, pdata->reset_gpio);
 
@@ -1466,14 +1395,8 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
     struct fts_ts_data *ts_data;
     //char val;
 
-    printk("[Focal_ft8719][touch]fts_ts_probe start !!!!!\n");
-
-    if(g_Charger_mode) {
-	printk("[Focal_ft8719][touch]%s : In COS, Skip Probe\n", __func__);
+    if(g_Charger_mode)
 	return -ENODEV;
-    }
-
-    printk("[Focal_ft8719] is_kirin_panel is %d\n", is_kirin_panel);
 
     FTS_FUNC_ENTER();
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -1684,8 +1607,6 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 
     focal_init_success = 1;
     //printk("[FTS][touch] irq = %d !!!\n", gpio_get_value(ts_data->pdata->irq_gpio));
-    printk("[FTS][touch] reset = %d !!!\n", gpio_get_value(ts_data->pdata->reset_gpio));
-    printk("[FTS][touch] fts_ts_prob end !!!\n");
     FTS_FUNC_EXIT();
     return 0;
 
@@ -1836,8 +1757,6 @@ static void focal_suspend_work(struct work_struct *work)
 {
 	int retval = 0;
 
-	printk("[FTS][touch] %s ++++++++++ \n", __func__);
-
 	mutex_lock(&fts_data->suspend_mutex);
 	if (fts_data->suspended)
 	{
@@ -1860,20 +1779,15 @@ static void focal_suspend_work(struct work_struct *work)
 				printk("[FTS][touch]%s: set_irq_wake failed \n", __func__);
 			fts_data->suspended = true;
 			mutex_unlock(&fts_data->suspend_mutex);
-			printk("[FTS][touch] %s ---------- \n", __func__);
 			return ;
 		}
 	}
 #endif
-	/* +++ asus add for print touch location +++ */
-	memset(report_touch_locatoin_count, 0, sizeof(report_touch_locatoin_count));
-	/* --- asus add for print touch location --- */
 #if FTS_ESDCHECK_EN
 	fts_esdcheck_suspend();
 #endif
 	fts_irq_disable();
 	fts_release_all_finger();
-	printk("[FTS][touch] %s: TP A5 wriite 03\n", __func__);
 	retval = fts_i2c_write_reg(fts_data->client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
 	if (retval < 0)
 		FTS_ERROR("set TP to sleep mode fail, ret=%d", retval);
@@ -1881,8 +1795,6 @@ static void focal_suspend_work(struct work_struct *work)
 	fts_power_source_ctrl(fts_data, DISABLE);
 	fts_data->suspended = true;
 	mutex_unlock(&fts_data->suspend_mutex);
-	printk("[FTS][touch] %s ---------- \n", __func__);
-	touch_down_up_status = 0;
 	return ;
 }
 
@@ -1898,12 +1810,9 @@ static void focal_resume_work(struct work_struct *work)
 	int err;
 	char val;
 
-	printk("[FTS][touch] %s ++++++++++ \n", __func__);
-
 	mutex_lock(&fts_data->suspend_mutex);
 	if (!fts_data->suspended)
 	{
-		printk("[FTS][touch] %s:Already in awake state exit resume function", __func__);
 		mutex_unlock(&fts_data->suspend_mutex);
 		return ;
 	}
@@ -1928,7 +1837,6 @@ static void focal_resume_work(struct work_struct *work)
 		fts_data->suspended = false;
 		fts_irq_enable();
 		mutex_unlock(&fts_data->suspend_mutex);
-		printk("[FTS][touch] %s ---------- \n", __func__);
 		return ;
 	}
 #endif
@@ -1945,7 +1853,6 @@ static void focal_resume_work(struct work_struct *work)
 //#endif
 	fts_tp_state_recovery(fts_data->client);
 	err = fts_i2c_read_reg(fts_data->client, 0xA6, &val);
-	printk("[FTS][Touch] %s:read 0xA6: %02X, ret: %d", __func__, val, err);
 	//printk("focal_resume_work pmode_tp_flag = %d\n", pmode_tp_flag);
 	if (fts_data->systemui_skiptouch_eable) {
 		g_pmode_tp_en(fts_data->client, true);
@@ -1961,20 +1868,14 @@ static void focal_resume_work(struct work_struct *work)
 	fts_esdcheck_resume();
 #endif
 
-	printk("[FTS][touch] %s ---------- \n", __func__);
 	return ;
 }
 
 int fts_ts_suspend(void)
 {
 	//printk("[FTS][touch] %s\n", __func__);
-	if(is_kirin_panel != 1){
-		printk("[FTS][touch]%s: ara panel skip suspend \n", __func__);
+	if(is_kirin_panel != 1)
 		return 0;
-	}
-	if (focal_init_success==0){
-		printk("[FTS][touch]%s: focal touch not work skip suspend \n", __func__);
-	}
 	else if (focal_init_success==1) {
 		//printk("[FTS][touch]%s: schedule a suspend wq\n", __func__);
 		queue_work(fts_data->suspend_resume_wq, &fts_data->suspend_work);
@@ -1986,13 +1887,8 @@ EXPORT_SYMBOL(fts_ts_suspend);
 int fts_ts_resume(void)
 {
 	//printk("[FTS][touch] %s\n", __func__);
-	if(is_kirin_panel != 1){
-		printk("[FTS][touch]%s: ara panel skip resume \n", __func__);
+	if(is_kirin_panel != 1)
 		return 0;
-	}
-	if (focal_init_success==0){
-		printk("[FTS][touch]%s: focal touch not work skip resume \n", __func__);
-	}
 	else if (focal_init_success==1) {
 		//printk("[FTS][touch]%s: schedule a resume wq\n", __func__);
 		queue_work(fts_data->suspend_resume_wq, &fts_data->resume_work);

@@ -273,7 +273,6 @@ static void fts_gesture_report(struct input_dev *input_dev, int gesture_id)
     bool Ps_status = false;
 
     FTS_FUNC_ENTER();
-    printk("[Focal][Touch] %s :  gesture_id = 0x%x\n ", __func__, gesture_id);
     //FTS_INFO("fts gesture_id==0x%x ", gesture_id);
     Ps_status = proximity_check_status();
     pr_err("[touch]check proximity status = %d !\n", Ps_status);
@@ -448,10 +447,8 @@ static ssize_t switch_dclick_mode_store(struct device *dev, struct device_attrib
 
 	if (tmp == 0) {
 		fts_data->dclick_mode_eable = 0;
-		printk("[Focal][Touch] dclick_mode_disable ! \n");
 	} else if (tmp == 1) {
 		fts_data->dclick_mode_eable = 1;
-		printk("[Focal][Touch] dclick_mode_enable ! \n");
 	}
 
 	return count;
@@ -469,10 +466,8 @@ static ssize_t switch_swipeup_mode_store(struct device *dev, struct device_attri
 
 	if (tmp == 0) {
 		fts_data->swipeup_mode_eable = 0;
-		printk("[Focal][Touch] swipeup_mode_disable ! \n");
 	} else if (tmp == 1) {
 		fts_data->swipeup_mode_eable = 1;
-		printk("[Focal][Touch] swipeup_mode_enable ! \n");
 	}
 
 	return count;
@@ -489,17 +484,14 @@ static ssize_t systemui_skiptouch_store(struct device *dev, struct device_attrib
 	int tmp = 0;
 	tmp = buf[0] - 48;
 
-	printk("[Focal][Touch] systemui_skiptouch_store tmp=%d\n", tmp);
 	if (tmp == 0) {
 		fts_data->systemui_skiptouch_eable = 0;
 		g_pmode_tp_en(fts_data->client, false);
 		pmode_tp_flag = false;
-		printk("[Focal][Touch] systemui_skiptouch_disable ! \n");
 	} else if (tmp == 1) {
 		fts_data->systemui_skiptouch_eable = 1;
 		g_pmode_tp_en(fts_data->client, true);
 		pmode_tp_flag = true;
-		printk("[Focal][Touch] systemui_skiptouch_enable ! \n");
 	}
 
 	return count;
@@ -541,11 +533,9 @@ static ssize_t switch_gesture_mode_store(struct device *dev, struct device_attri
 	sprintf(gesture_buf, "%s", buf);
 	gesture_buf[count+1] = '\0';
 
-	pr_err("[Focal][Touch] gesture_mode_store %s ! \n", gesture_buf);
 
 	if (gesture_buf[0] == cmpchar) {
 		fts_data->gesture_mode_eable = true;
-		printk("[Focal][Touch] gesture_mode enable ! \n");
 	} else
 		fts_data->gesture_mode_eable = false;
 
@@ -585,18 +575,13 @@ static ssize_t switch_gesture_mode_store(struct device *dev, struct device_attri
 			FTS_gesture_register_d2 |= 0x02;
 		else
 			FTS_gesture_register_d2 &= 0xfd;
-
-		printk("[Focal][Touch] gesture_mode_enable type = %x ! \n", fts_data->gesture_mode_type);
 	} else {
 		fts_data->gesture_mode_eable = 0;
 		fts_data->gesture_mode_type = 0;
 		FTS_gesture_register_d2 = 0;
 		FTS_gesture_register_d6 = 0;
 		FTS_gesture_register_d7 = 0;
-		printk("[Focal][Touch] gesture_mode_disable ! \n");
 		}
-	printk("[Focal][Touch] %s : open gesture mode d2 = %x d5 = %x d6 = %x d7 = %x \n",
-		__func__, FTS_gesture_register_d2, FTS_gesture_register_d5, FTS_gesture_register_d6, FTS_gesture_register_d7);
 	return count;
 }
 
@@ -645,7 +630,6 @@ int fts_gesture_suspend(struct i2c_client *client)
     int i;
     u8 state;
 
-    printk("[Focal][Touch] %s : gesture suspend\n", __func__);
     //FTS_INFO("gesture suspend...");
     /* gesture not enable, return immediately */
     if (fts_gesture_data.mode == DISABLE) {
@@ -656,36 +640,27 @@ int fts_gesture_suspend(struct i2c_client *client)
     fts_i2c_write_reg(client, FTS_REG_GESTURE_EN, 0x01);
 
 	if (fts_data->gesture_mode_eable == 1) {
-		printk("[Focal][Touch] %s : open zenmotion mode =1 \n", __func__);
 		if (fts_data->dclick_mode_eable == 1) {
 			if (fts_data->swipeup_mode_eable == 1) {
 				FTS_gesture_register_d1 = 0x34;
-				pr_err("[Focal][Touch] %s : open dclick and swipe mode d1= 34 \n", __func__);
 			} else {
 				FTS_gesture_register_d1 = 0x30;
-				pr_err("[Focal][Touch] %s : open dclick and disable swipe mode d1= 30 \n", __func__);
 			}
 		} else if (fts_data->swipeup_mode_eable == 1) {
 			FTS_gesture_register_d1 = 0x24;
-			pr_err("[Focal][Touch] %s : open swipe mode and disable dclick mode d1= 24 \n", __func__);
 		} else {
 			FTS_gesture_register_d1 = 0x20;
-			pr_err("[Focal][Touch] %s : only open gesture mode d1= 20 \n", __func__);
 		}
 	} else {
-		printk("[Focal][Touch] %s : disable gesture mode ", __func__);
 		if (fts_data->dclick_mode_eable == 1) {
 			if (fts_data->swipeup_mode_eable == 1) {
 				FTS_gesture_register_d1 = 0x14;
-				pr_err("[Focal][Touch] %s : open dclick and swipe mode d1= 14 \n", __func__);
 			} else {
 				FTS_gesture_register_d1 = 0x10;
-				pr_err("[Focal][Touch] %s : open dclick mode and disable swipe mode d1= 10 \n", __func__);
 			}
 		} else {
 			if (fts_data->swipeup_mode_eable == 1) {
 				FTS_gesture_register_d1 = 0x04;
-				pr_err("[Focal][Touch] %s : disable  dclick and open swipe mode d1= 04 \n", __func__);
 			}
 		}
 	}
@@ -698,9 +673,6 @@ int fts_gesture_suspend(struct i2c_client *client)
 		} else
 			break;
 	}
-
-	pr_err("[Focal][Touch] %s : open gesture mode d2 = %x d5 = %x d6 = %x d7 = %x \n",
-		__func__, FTS_gesture_register_d2, FTS_gesture_register_d5, FTS_gesture_register_d6, FTS_gesture_register_d7);
 
 	for (i = 0; i < 5; i++) {
 		state = fts_i2c_write_reg(client, 0xd2, FTS_gesture_register_d2);
@@ -770,7 +742,6 @@ int fts_gesture_resume(struct i2c_client *client)
     }
 
     if (fts_gesture_data.active == DISABLE) {
-	printk("[FTS][touch] %s: no gesture mode in suspend, no need running fts_gesture_resume\n", __func__);
         FTS_DEBUG("gesture in suspend is failed, no running fts_gesture_resume");
         return -EINVAL;
     }

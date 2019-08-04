@@ -102,7 +102,7 @@ enum print_reason {
 #define CHARGER_TAG "[BAT][CHG]"
 #define ERROR_TAG "[ERR]"
 #define AUTO_TAG "[AUTO]"
-#define CHG_DBG(fmt, ...) printk(KERN_INFO CHARGER_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
+#define CHG_DBG(fmt, ...) do {} while (0)
 #define CHG_DBG_E(fmt, ...)  printk(KERN_ERR CHARGER_TAG ERROR_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
 #define CHG_DBG_AT(fmt, ...)  printk(KERN_WARNING CHARGER_TAG AUTO_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
 #define THERMAL_ALERT_NONE	0

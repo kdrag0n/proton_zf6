@@ -41,7 +41,7 @@
 #include <linux/of_gpio.h>
 #endif
 
-#define D(x...) pr_info(x)
+#define D(x...) do {} while (0)
 
 #define I2C_RETRY_COUNT 3
 #define UPDATE_FW_RETRY_COUNT 3
@@ -92,18 +92,8 @@ static void waitDelayAndShowText(char * s) {
 
 int iProgrammingCounter=0;
 int iProgrammingFail=0;
-void dumpI2CData(char *s, uint8_t slave_addr, uint8_t* writeBuffer,  
+static inline void dumpI2CData(char *s, uint8_t slave_addr, uint8_t* writeBuffer,
     uint32_t numOfWriteBytes ) {
-    char buf[10];
-	char line[1024];
-	uint8_t loop_i;
-	line[0]=0;
-	for (loop_i=0;loop_i<numOfWriteBytes;loop_i++) {
-		sprintf(buf, " %X", writeBuffer[loop_i]);
-		strcat(line, buf);
-	}
-	
-	pr_err("[MCU] %s [0x%X] : len=%d, %s", s, slave_addr, numOfWriteBytes, line);
 }
 
 
@@ -303,7 +293,6 @@ static int parse_param(char* buf, const char* title, uint16_t* target, int count
 					snprintf(value, sizeof(value), " " PARSE_DIG_PARAM_1, cali_item[i]);
 					strncat(parseLine, value, sizeof(parseLine)-1);
 				}
-				pr_err("[MCU] read %s", parseLine);
 			} 
 		}
 
@@ -327,10 +316,6 @@ MANUAL_GEAR_RATIO=166/100
 char* start_buf=buf;
 do {
 	while (buf[0]==0xd || buf[0]==0xa) buf++;
-	
-	{  //debug
-			pr_info("[MCU] >>> %s", buf);
-	}
 
 	parse_param(buf, "CONST_FRQ_SPEED", &ConstSpeedMode[1], 12);
 	parse_param(buf, "CONVERT_FRQ_SMALL_ANGLE", &ConvertFRQModeForSmallAngle[1], 12);
@@ -603,7 +588,6 @@ int MSP430FR2311_Get_Steps() {
 		return -1;
 	}
 
-	pr_err("[MCU] Current Steps=%d", steps[1]<<1);
 	return steps[1];
 }
 
@@ -628,7 +612,6 @@ void MSP430FR2311_wakeup(uint8_t enable) {
 
 int MSP430FR2311_Get_Version(char * version) {
 	char i2cfwversion[] = { 0xAA, 0x55, 0x0A};
-	pr_info("[MSP430FR2311] %s +\n", __func__);
 	
 	MSP430FR2311_wakeup(1);
 	if (!MSP430_I2CWriteA(MSP430_READY_I2C, i2cfwversion, sizeof(i2cfwversion))  | !MSP430_I2CWriteReadA(MSP430_READY_I2C, i2cfwversion, sizeof(i2cfwversion), version, 4)) {
@@ -637,7 +620,6 @@ int MSP430FR2311_Get_Version(char * version) {
 		return -1;
 	}
 	MSP430FR2311_wakeup(0);
-	pr_info("[MSP430FR2311] %s -\n", __func__);
 	return 0;
 }
 
@@ -692,7 +674,6 @@ int MSP430FR2311_Check_Version(void) {
 
 			MCUState=MCU_READY;			
 			g_motor_status = 1; //probe success
-			pr_err("[MCU] Firmware is up to date, no update is needed\n"); 
 
 			read_cali_file();
 			
@@ -732,8 +713,7 @@ void mcu_loop_test(void) {
 }
 
 int MSP430FR2311_Pulldown_Drv_Power() {
-	char MSP430PullDownDrvMode[]={0xAA, 0x55, 0x0E, 0x00};	
-	pr_info("[MSP430FR2311] %s +\n", __func__);
+	char MSP430PullDownDrvMode[]={0xAA, 0x55, 0x0E, 0x00};
 	if (MCUState<MCU_READY) {
 		pr_err("[MCU] Not ready!, state=%d", MCUState);
 		return -MCUState;
@@ -741,8 +721,7 @@ int MSP430FR2311_Pulldown_Drv_Power() {
 	if (!MSP430_I2CWriteA(MSP430_READY_I2C, MSP430PullDownDrvMode, sizeof(MSP430PullDownDrvMode))) {
 		pr_err("[MCU] I2C error!");
 		return -1;
-	}			
-	pr_info("[MSP430FR2311] %s -\n", __func__);
+	}
 	return 0;
 	
 }
@@ -754,11 +733,8 @@ void mcu_do_later_power_down() {
 	if (iCloseCounter!=0) {
 		MSP430FR2311_Pulldown_Drv_Power();
 		gpio_set_value(mcu_info->mcu_wakeup, 1);
-		pr_err("[MCU] motor power down, OpenClient=%d, CloseClient=%d", iOpenCounter, iCloseCounter);	
 		iCloseCounter=0;
 		iOpenCounter=0;
-	} else {
-		pr_err("[MCU] motor power down Ignore, OpenClient=%d, CloseClient=%d", iOpenCounter, iCloseCounter);	
 	}
 	mutex_unlock(&MSP430FR2311_control_mutex);		
 
@@ -1203,7 +1179,6 @@ int MSP430FR2311_Set_ParamMode(const uint16_t* vals) {
 		return 0;
 	}
 	#endif
-		pr_info("[MSP430FR2311] %s +\n", __func__);
 		mutex_lock(&MSP430FR2311_control_mutex);
 		MSP430FR2311_wakeup(1);
 		if (MCUState<MCU_READY) {
@@ -1246,7 +1221,6 @@ int MSP430FR2311_Set_ParamMode(const uint16_t* vals) {
 			powerDownDuration+=(vals[i+6]-((i==1)?0:vals[i+5]))*2400*500/speed/300;
 //			pr_err("[MCU] Power duration += (%d-%d)*2400*500/%d/300 =   %d", vals[i+6], ((i==1)?0:vals[i+5]), speed, powerDownDuration);
 		};
-		pr_err("[MCU] Power duration=%d(ms), reference only", powerDownDuration);
 		powerDownDuration=DEFAULT_POWERDOWNDURATION;
 		bShowStopInfoOnce=1;
 		
@@ -1273,8 +1247,7 @@ int MSP430FR2311_Set_ParamMode(const uint16_t* vals) {
 	//	if (MCUState != MCU_LOOP_TEST) MSP430FR2311_power_control(0);
 		MSP430FR2311_wakeup(0);
 		mutex_unlock(&MSP430FR2311_control_mutex);
-	
-		pr_info("[MSP430FR2311] %s -\n", __func__);
+
 		return 0;
 }
 
@@ -1372,16 +1345,13 @@ int ManualMode_AfterAndPR2(int dir, int angle, int speed) {
 		if (old_dir!=dir) {
 			gearStep+=LEAD_DELTA;
 //			old_dir=dir;
-		} 	
-		pr_err("[MCU] PR2 manual control (D=%d, A=%d, S=%d, gear step=%d), M[12]=%d", dir, angle, speed, gearStep, MotorDefault[12]);	
+		}
 		MotorDefault[7]=MotorDefault[7]*angle/180+gearStep;
 		MotorDefault[8]=MotorDefault[8]*angle/180+gearStep;
 		MotorDefault[9]=MotorDefault[9]*angle/180+gearStep;
 		MotorDefault[10]=MotorDefault[10]*angle/180+gearStep;
 		MotorDefault[11]=MotorDefault[11]*angle/180+gearStep;
 		MotorDefault[12]=MotorDefault[12]*angle/180+gearStep;
-	}  else {
-		pr_err("[MCU] PR2 manual control (D=%d, A=%d, S=%d)", dir, angle, speed);
 	}
 	old_dir=dir;	
 
@@ -1405,7 +1375,6 @@ int ManualMode_AfterAndPR2(int dir, int angle, int speed) {
 int MSP430FR2311_Stop(void) {
 
 	char MSP430Stop[]={0xAA, 0x55, 0x08, 00, 00};
-	pr_info("[MSP430FR2311] %s +\n", __func__);
 	if (MCUState<MCU_CHECKING_READY) {
 		pr_err("[MCU] Not ready!");
 		return -MCUState;
@@ -1425,7 +1394,6 @@ int MSP430FR2311_Stop(void) {
 	}
 	MSP430FR2311_wakeup(0);
 	mutex_unlock(&MSP430FR2311_control_mutex);
-	pr_info("[MSP430FR2311] %s -\n", __func__);
 	return 0;
 	
 }

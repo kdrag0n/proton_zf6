@@ -267,7 +267,6 @@ msm_disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 		 * Each encoder has at most one connector (since we always steal
 		 * it away), so we won't call disable hooks twice.
 		 */
-		printk("[Display] msm_disable_outputs: calling drm_bridge_disable\n");
 		if (connector->state->crtc) {
 			if (connector->state->crtc->index == asus_lcd_crtc_id) {
 				asus_lcd_bridge_enable = 0;
@@ -523,7 +522,6 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 		}
 
 		if (display_early_init == 0) {
-			printk ("[Display] init from regular resume() \n");
 			drm_bridge_pre_enable(encoder->bridge);
 			++bridge_enable_count;
 		}

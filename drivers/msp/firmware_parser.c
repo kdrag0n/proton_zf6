@@ -72,7 +72,6 @@ int parseItems=0;
 	   if (buf[offset]=='@') {
 			parseItems = sscanf(buf+offset, "@%4x",&address);
 			if (parseItems) {
-				pr_err("[MCU] get Address=0x%X, item=%d",address, parseItems);
 				offset+=5;
 				segmentIndex++;
 				MSPMemory[segmentIndex].ui32MemoryStartAddr =address;
@@ -113,18 +112,6 @@ int parseItems=0;
 		}
 	}
 
-	for (offset=0;offset<MAX_MSP_SEGMENT;offset++)
-	{	
-		pr_err("[MCU] MSPMemory @%4X, size = %d, = { 0x%X, 0x%X, ... 0x%X, 0x%X }",
-			MSPMemory[offset].ui32MemoryStartAddr, 
-			MSPMemory[offset].ui32MemoryLength, 
-			MSPMemory[offset].ui8Buffer[0],
-			MSPMemory[offset].ui8Buffer[1],
-			MSPMemory[offset].ui8Buffer[MSPMemory[offset].ui32MemoryLength-2],
-			MSPMemory[offset].ui8Buffer[MSPMemory[offset].ui32MemoryLength-1]
-		);
-	}
-
 }
 
 bool read_kernel_file(const char* fileName, void (*process)(char*, unsigned int) ) {
@@ -132,7 +119,6 @@ bool read_kernel_file(const char* fileName, void (*process)(char*, unsigned int)
 	int n=0;
 	loff_t file_offset = 0;
 	uint8_t* mybuf=NULL;
-	pr_info("[MCU] read_kernel_file++");
 	mybuf = kzalloc(sizeof(uint8_t)*DEFAULT_ONE_LINE_MAX_SIZE, GFP_KERNEL);
 	file = filp_open(fileName, O_RDONLY | O_LARGEFILE, 0);
 	if (IS_ERR(file)) {
@@ -142,7 +128,6 @@ bool read_kernel_file(const char* fileName, void (*process)(char*, unsigned int)
 
 	n = kernel_read(file, mybuf, DEFAULT_ONE_LINE_MAX_SIZE, &file_offset);
 	if (n < DEFAULT_ONE_LINE_MAX_SIZE) {
-		pr_info("[MCU]:Done  exit since EOF from file(%s)\n",fileName);
 		// END_OF_FILE;
 		(*process)(mybuf, n);
 		goto EOF;
@@ -153,7 +138,6 @@ bool read_kernel_file(const char* fileName, void (*process)(char*, unsigned int)
 EOF:
 	fput(file);
 	kfree(mybuf);
-	pr_info("[MCU] read_kernel_file--");
 	return n < DEFAULT_ONE_LINE_MAX_SIZE;
 }
 

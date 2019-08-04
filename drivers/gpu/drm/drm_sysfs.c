@@ -62,7 +62,6 @@ static ssize_t hdr_mode_show(struct class *class,
 					struct class_attribute *attr,
 					char *buf)
 {
-	printk("[Display] show HDR mode %d\n", gHDRMode);
 	return snprintf(buf, 8, "%d\n", gHDRMode);
 }
 
@@ -74,16 +73,14 @@ static ssize_t hdr_mode_store(struct class *class,
 		return -EINVAL;
 
 	if (!strncmp(buf, "1", 1)) {
-		printk("[Display] store HDR mode 1\n");
 		gLastCABCMode = asus_lcd_cabc_get();
 		asus_lcd_cabc_set(0);
 		gHDRMode = 1;
 	} else if (!strncmp(buf, "0", 1)) {
-		printk("[Display] store HDR mode 0\n");
 		asus_lcd_cabc_set(gLastCABCMode);
 		gHDRMode = 0;
 	} else {
-		printk("[Display] unknown HDR mode\n");
+		printk("%s: unknown HDR mode %s\n", __func__, buf);
 	}
 
 	return count;
@@ -118,7 +115,7 @@ int drm_sysfs_init(void)
 
 	err = class_create_file(drm_class, &class_attr_hdr_mode);
 	if (err) {
-		printk("[Display] Fail to create hdr_mode file node\n");
+		printk("%s: Fail to create hdr_mode file node\n", __func__);
 		class_destroy(drm_class);
 		drm_class = NULL;
 		return err;

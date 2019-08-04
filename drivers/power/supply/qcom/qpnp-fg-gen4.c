@@ -295,7 +295,7 @@ struct bias_config {
 //[+++]ASUS : Add debug log
 #define BAT_TAG "[BAT][BMS]"
 #define ERROR_TAG "[ERR]"
-#define BAT_DBG(fmt, ...) printk(KERN_INFO BAT_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
+#define BAT_DBG(fmt, ...) do {} while (0)
 #define BAT_DBG_E(fmt, ...)  printk(KERN_ERR BAT_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
 //[---]ASUS : Add debug log
 

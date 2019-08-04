@@ -73,7 +73,6 @@ static ssize_t touch_charger_mode_proc_write(struct file *filp, const char *buff
     struct i2c_client *client;
     char messages[256];
 
-    printk("[FTS][touch] touch_charger_mode_proc_write !!!!!!!!!\n");
     client = ts_data->client;
     memset(messages, 0, sizeof(messages));
 
@@ -83,13 +82,11 @@ static ssize_t touch_charger_mode_proc_write(struct file *filp, const char *buff
         return -EFAULT;
 
     if (strncmp(messages, "0", 1) == 0) {
-	printk("[FTS][touch] charger_mode = 0 \n");
         ret = fts_enter_charger_mode(client, false);
         if (ret >= 0) {
 		g_fts_mode_flag.fts_charger_mode_flag = false;
         }
     } else if (strncmp(messages, "1", 1) == 0) {
-	printk("[FTS][touch] charger_mode = 1 \n");
         ret = fts_enter_charger_mode(client, true);
         if (ret >= 0) {
                 g_fts_mode_flag.fts_charger_mode_flag = true;

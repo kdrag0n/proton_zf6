@@ -37,7 +37,7 @@ static struct class *g_property_class = NULL;
 #else
 	#define dbg(fmt, args...)
 #endif
-#define log(fmt, args...) printk(KERN_INFO "[%s]"fmt,MODULE_NAME,##args)
+#define log(fmt, args...) do {} while (0)
 #define err(fmt, args...) printk(KERN_ERR "[%s]"fmt,MODULE_NAME,##args)
 
 static int ASH_class_open(struct inode * inode, struct file * file)

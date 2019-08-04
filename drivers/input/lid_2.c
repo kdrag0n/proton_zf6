@@ -77,13 +77,10 @@ static ssize_t store_lid2_count(struct device *dev,
 	int tmp = 0;
 	struct asustek_lid2_drvdata *ddata = dev_get_drvdata(dev);
 
-	printk("[lid2] %s \n", __func__);
 	tmp = buf[0] - 48;
 
-	if (tmp == 0) {
-		printk("[lid2] count = 0 \n", __func__);
+	if (tmp == 0)
 		ddata->count_low = 0;
-	}
 
 	return count;
 }
@@ -127,8 +124,6 @@ static void lid2_report_function(struct work_struct *work)
 			ddata->count_low = 1;
 		}
 	}
-
-	pr_info("[lid2] %s : SW_LID report value = %d\n",  __func__, value);
 }
 
 /* translate openfirmware node properties */
@@ -138,7 +133,6 @@ static int __init asustek_lid2_get_devtree(struct device *dev)
 	struct device_node *node;
 	enum of_gpio_flags flags;
 
-	printk("[lid2] %s \n", __func__);
 	node = dev->of_node;
 	if (!node)
 		return -ENODEV;
@@ -164,7 +158,6 @@ static int asustek_lid2_pinctrl_configure(struct pinctrl *key_pinctrl,
 
 	int retval;
 
-	printk("[lid2] %s \n", __func__);
 	if (active) {
 		set_state = pinctrl_lookup_state(key_pinctrl,
 						"asustek_lid2_active");
@@ -197,7 +190,6 @@ static int __init lid2_driver_probe(struct platform_device *pdev)
 	struct input_dev *input;
 	static const char lid2_probe[] __initconst = "ASUSTek: %s\n";
 
-	printk("[lid2] %s : Hall Sensor for Camera Start !!!\n", __func__);
 	if (!pdev)
 		return -EINVAL;
 
@@ -221,7 +213,6 @@ static int __init lid2_driver_probe(struct platform_device *pdev)
 	input->phys = LID_PHYS;
 	set_bit(EV_SW, input->evbit);
 	set_bit(SW_LID, input->swbit);
-	printk("[lid2] %s : set ket capabilities\n", __func__);
 
 	/* Get pinctrl if target uses pinctrl */
 	ddata->key_pinctrl = devm_pinctrl_get(dev);
@@ -249,7 +240,6 @@ static int __init lid2_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, ret);
 		return ret;
 	}
-	printk("[lid2] %s : input register ok\n", __func__);
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &lid2_attr_group);
 	if (ret) {
@@ -258,7 +248,6 @@ static int __init lid2_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, ret);
 		return ret;
 	}
-	printk("[lid2] %s : create sysfs ok\n", __func__);
 
 	INIT_DELAYED_WORK(&ddata->dwork, lid2_report_function);
 
@@ -278,7 +267,6 @@ static int __init lid2_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, ddata->gpio);
 		goto fail_remove_group;
 	}
-	printk("[lid2] %s : request gpio-irq ok\n", __func__);
 
 	ret = gpio_direction_input(ddata->gpio);
 	if (ret < 0) {
@@ -306,30 +294,21 @@ static int __init lid2_driver_probe(struct platform_device *pdev)
 		dev_err(dev, errmsg, irq);
 		goto fail_remove_group;
 	}
-	printk("[lid2] %s : request irq handler ok\n", __func__);
 
 	ddata->hallsensor_edev = extcon_dev_allocate(asus_hallsensor);
 	ddata->hallsensor_edev->fnode_name = "hallsensor";
 	if (extcon_dev_register(ddata->hallsensor_edev) < 0)
-	{
-		printk("[lid2][ERR] %s: failed to register extcon_dev \n", __func__);
 		goto fail_remove_group;
-	}
-	printk("[lid2] %s : request asus_hallsensor extcon ok\n", __func__);
 
 	ddata->hallsensor_edev->name = "hallsensor2";
-	printk("[lid2] extcon->name=%s \n", ddata->hallsensor_edev->name);
 
 	value = !!gpio_get_value_cansleep(ddata->gpio) ^ ddata->active_low;
 	asus_extcon_set_state_sync(ddata->hallsensor_edev, value);
-	printk("[lid2] extcon->state=%d \n", ddata->hallsensor_edev->state);
 
 	if (ddata->wakeup) {
 		device_init_wakeup(&pdev->dev, 1);
 		enable_irq_wake(irq);
 	}
-
-	printk("[lid2] %s : End !!!\n", __func__);
 
 	return ret;
 

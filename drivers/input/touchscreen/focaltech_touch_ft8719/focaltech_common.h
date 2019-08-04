@@ -153,7 +153,7 @@ struct ts_ic_info {
 #define FTS_FUNC_EXIT()
 #endif
 
-#define FTS_INFO(fmt, args...) printk(KERN_INFO "[FTS][Info]"fmt"\n", ##args)
+#define FTS_INFO(fmt, args...) do {} while (0)
 #define FTS_ERROR(fmt, args...) printk(KERN_ERR "[FTS][Error]"fmt"\n", ##args)
 
 #endif /* __LINUX_FOCALTECH_COMMON_H__ */

@@ -2239,7 +2239,6 @@ static int wled_configure(struct wled *wled, struct device *dev)
 	for (i = 0; i < size; ++i) {
 		rc = of_property_read_u32(dev->of_node, u32_opts[i].name, &val);
 		if (rc == -EINVAL) {
-			printk("[Display] wled property %s does not declare\n", u32_opts[i].name);
 			continue;
 		} else if (rc < 0) {
 			pr_err("error reading '%s'\n", u32_opts[i].name);
@@ -2309,8 +2308,6 @@ static int wled5_set_hybrid_thres(struct wled *wled, int thres)
 		return -1;
 	}
 
-	printk("[Display] WLED hybrid threshold is set to %d\n", thres);
-
 	addr = wled->sink_addr + WLED_SINK_HYBRID_DIMMING_TRESH;
 	rc = regmap_update_bits(wled->regmap, addr, WLED_SINK_HYBRID_DIM_THR_MASK, thres);
 	if (rc < 0) {
@@ -2349,7 +2346,6 @@ static int wled5_set_fsc(struct wled *wled, int level)
 
 	string_cfg = wled->cfg.string_cfg;
 	wled->cfg.fs_current = level;
-	printk("[Display] WLED fsc is set to %d\n", level);
 
 	for (i = 0; (string_cfg >> i) != 0; i++) {
 		if (string_cfg & BIT(i)) {
@@ -2491,8 +2487,6 @@ void asus_wled_fsc_validate(void)
 {
 	int ret = 0;
 	if (g_wled) {
-		printk("[Display] asus_wled_fsc_validate to set correct wled fs-current\n");
-
 		ret = wled5_set_hybrid_thres(g_wled, hyb_thre);
 		if (ret) {
 			printk("[Display] Setting WLED hybrid threshold failed: %d\n", ret);
@@ -2632,8 +2626,6 @@ static int wled_probe(struct platform_device *pdev)
 	if (wled->pmic_rev_id->rev4 == PM8150L_V1P0_REV4 &&
 		wled->cfg.fs_current > 8)
 		wled->cfg.fs_current = 8;
-
-	printk("[Display] WLED fs_current is set to %d\n", wled->cfg.fs_current);
 
 	if (is_wled4(wled))
 		rc = wled4_setup(wled);

@@ -75,7 +75,6 @@ static ssize_t store_googlekey_enable(struct device *dev,
 	struct asustek_googlekey_drvdata *ddata = dev_get_drvdata(dev);
 
 	ret = sscanf(buf, "%d", &state);
-	printk("[keypad] googlekey: buffer: %s\n",buf);
 
 	if (ret != 1)
 		return -EINVAL;
@@ -83,39 +82,25 @@ static ssize_t store_googlekey_enable(struct device *dev,
 	{
 		g_googlekey_enable=state;
 		if(g_googlekey_enable == 0) {
-			printk("[keypad] googlekey: disable\n");
 			if(googlekey_irq_wakup)
 			{
 				disable_irq_wake(ddata->irq);
 				googlekey_irq_wakup=0;
-				pr_info("[keypad] disable googlekey wakeup \n");
-			}
-			else
-			{
-				pr_info("[keypad] googlekey_irq_wakup=%d \n",googlekey_irq_wakup);
 			}
 			g_google_key_code = KEY_ASUS_GOOGLE_ASSISTANT;
 			ddata->key_press_queued = false;
 			ddata->key_release_queued = false;
 		} else if(g_googlekey_enable == 1) {
-			printk("[keypad] googlekey: enable\n");
-			if(googlekey_irq_wakup)
-				pr_info("[keypad] googlekey_irq_wakup=%d \n",googlekey_irq_wakup);
-			else
-			{
+			if(!googlekey_irq_wakup) {
 				enable_irq_wake(ddata->irq);
 				googlekey_irq_wakup=1;
-				pr_info("[keypad] enable googlekey wakeup \n");
 			}
 			g_google_key_code = KEY_ASUS_GOOGLE_ASSISTANT;
 			ddata->key_press_queued = false;
 			ddata->key_release_queued = false;
 		} else if(g_googlekey_enable == 2) {
 			printk("[keypad] googlekey: atd test mode\n");
-			if(googlekey_irq_wakup)
-				pr_info("[keypad] googlekey_irq_wakup=%d \n",googlekey_irq_wakup);
-			else
-			{
+			if(!googlekey_irq_wakup) {
 				enable_irq_wake(ddata->irq);
 				googlekey_irq_wakup=1;
 				pr_info("[keypad] enable googlekey wakeup \n");
@@ -179,16 +164,11 @@ static irqreturn_t googlekey_interrupt_handler(int irq, void *dev_id)
 		if(key_duration < DEBOUNCE_TIME_MS)
 			return IRQ_HANDLED;
 
-		printk("[keypad] googlekey gpio: %d \n",gpiovalue); // press is 0, release is 1
-
 		if (ddata->oldGpioValue == gpiovalue){
-			if (gpiovalue == 0 ){
+			if (gpiovalue == 0 )
 				gpiovalue=1; 
-				printk("[keypad] googlekey should be Release, inverse for report correct key !!!\n");
-			}else if(gpiovalue == 1){
-				printk("[keypad] googlekey lost Press, send virtual press !!!\n");
+			else if(gpiovalue == 1)
 				ddata->sendVirtualPress = true;
-			}
 		}
 		ddata->oldGpioValue = gpiovalue;
 		if (gpiovalue)
@@ -285,7 +265,6 @@ static void googlekey_report_function(struct work_struct *work)
 		input_sync(ddata->input);
 		ddata->key_press_queued = false;
 		ddata->keyState = 1;
-		pr_info("[keypad] googlekey EV_KEY report = %d\n",  1);
 		if(ddata->key_release_queued)
 			msleep(15);
 		else
@@ -297,7 +276,6 @@ static void googlekey_report_function(struct work_struct *work)
 		input_sync(ddata->input);
 		ddata->key_release_queued = false;
 		ddata->keyState = 0;
-		pr_info("[keypad] googlekey EV_KEY report = %d\n",  0);
 	}
 
 	spin_unlock_irqrestore(&googlekey_slock, flags);

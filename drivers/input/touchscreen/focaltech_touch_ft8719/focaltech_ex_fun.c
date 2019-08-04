@@ -100,7 +100,6 @@ static ssize_t fts_debug_write(struct file *filp, const char __user *buff, size_
     struct fts_ts_data *ts_data = fts_data;
     struct i2c_client *client = ts_data->client;
 
-    printk("[FTS][touch][apk]fts_debug_write");
     if ((count == 0) || (count > PROC_WRITE_BUF_SIZE)) {
         FTS_ERROR("apk proc wirte count(%d) fail", (int)count);
         return -EINVAL;

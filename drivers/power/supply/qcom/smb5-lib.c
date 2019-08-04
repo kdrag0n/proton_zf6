@@ -2250,7 +2250,6 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 
 	if (usb_thermal_once_flag && g_Charger_mode) {
 		val->intval = POWER_SUPPLY_STATUS_THERMAL_ALERT;
-		printk("[BAT][CHG] Batt_status = %s\n", bat_status_text[val->intval]);
 		return 0;
 	}
 
@@ -2388,9 +2387,6 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 
 	now_bat_status = val->intval;
 	now_chg_status = stat;
-	if ((now_bat_status != pre_bat_status) || (now_chg_status != pre_chg_status)) {  //Trim the log of status
-		printk("[BAT][CHG] Batt_status = %s, Charger_status = %s\n", bat_status_text[now_bat_status], chg_status_text[now_chg_status]);
-	}
 
 	if (is_charging_paused(chg)) {
 		val->intval = POWER_SUPPLY_STATUS_CHARGING;
@@ -5204,7 +5200,6 @@ void asus_batt_RTC_work(struct work_struct *dat)
 	RTCSetInterval = 60;
 
 	new_batAlarm_time.tv_sec = mtNow.tv_sec + RTCSetInterval;
-	printk("[BAT][CHG] %s: alarm start after %ds\n", __FUNCTION__, RTCSetInterval);
 	spin_lock_irqsave(&bat_alarm_slock, batflags);
 	alarm_start(&bat_alarm, timespec_to_ktime(new_batAlarm_time));
 	spin_unlock_irqrestore(&bat_alarm_slock, batflags);

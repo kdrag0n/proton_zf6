@@ -4718,13 +4718,10 @@ int dsi_display_splash_res_cleanup(struct  dsi_display *display)
 // ASUS BSP Display, panel register read/write +++
 void asus_lcd_set_tcon_cmd(char *cmd, short len)
 {
-	int i = 0, rc = 0;
+	int rc = 0;
 	struct dsi_cmd_desc cmds;
 	struct mipi_dsi_msg tcon_cmd = {0, 0x15, 0, 0, 0, len, cmd, 0, NULL};
 	struct dsi_display_ctrl *mctrl;
-
-	for(i = 0; i < 1 /*len*/; i++)
-		pr_info("[Display] cmd%d (0x%02x)\n", i, cmd[i]);
 
 	if(len > 2)
 		tcon_cmd.type = 0x39;
