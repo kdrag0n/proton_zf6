@@ -217,19 +217,20 @@ function sktest() {
 	local fn="${1:-kernel.zip}"
 	local hostname="${2:-$lan_ssh_host}"
 	local target_fn="${3:-$(basename "$fn")}"
+	local backslash='\'
 
 	# Push package
 	msg "Pushing kernel package..."
 	scp "$fn" "$hostname:$target_fn" && \
 
 	# Execute flasher script
-	msg "Executing flasher on device..."
+	msg "Executing flasher on device..." && \
 	cat <<-END | ssh "$hostname" su -c sh -
 	export PATH=/sbin/.core/busybox:\$PATH
 	am broadcast -a net.dinglisch.android.tasker.ACTION_TASK --es task_name "Kernel Flash Warning" &
 
-	unzip -p "$target_fn" META-INF/com/google/android/update-binary | \\
-	/system/bin/sh /proc/self/fd/0 "" "" "\$(readlink -f "$target_fn")" && \
+	unzip -p "$target_fn" META-INF/com/google/android/update-binary | $backslash
+	/system/bin/sh /proc/self/fd/0 "" "" "\$(readlink -f "$target_fn")" && $backslash
 	{ { /system/bin/svc power reboot || reboot; } & exit; }
 	END
 }
