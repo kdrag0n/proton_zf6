@@ -30,6 +30,12 @@ export PATH="$clang_bin:$PATH"
 
 kmake_flags+=(
 	CC="clang"
+	AR="llvm-ar"
+	NM="llvm-nm"
+	OBJCOPY="llvm-objcopy"
+	OBJDUMP="llvm-objdump"
+	STRIP="llvm-strip"
+
 	CROSS_COMPILE="$gcc_prefix64"
 	CROSS_COMPILE_ARM32="$gcc_prefix32"
 	CLANG_TRIPLE="aarch64-linux-gnu-"
