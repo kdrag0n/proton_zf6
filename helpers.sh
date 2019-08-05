@@ -178,6 +178,7 @@ function dbuild() {
 # Flash the given kernel package (defaults to latest) on the device via ADB
 function ktest() {
 	local fn="${1:-kernel.zip}"
+	local backslash='\'
 
 	# Wait for device to show up on ADB
 	adb wait-for-any
@@ -195,8 +196,8 @@ function ktest() {
 		cat <<-END | adb shell su -c sh -
 		export PATH=/sbin/.core/busybox:\$PATH
 
-		unzip -p /data/local/tmp/kernel.zip META-INF/com/google/android/update-binary | \\
-		/system/bin/sh /proc/self/fd/0 "" "" /data/local/tmp/kernel.zip && \\
+		unzip -p /data/local/tmp/kernel.zip META-INF/com/google/android/update-binary | $backslash
+		/system/bin/sh /proc/self/fd/0 "" "" /data/local/tmp/kernel.zip && $backslash
 		{ /system/bin/svc power reboot || reboot; }
 		END
 	else
