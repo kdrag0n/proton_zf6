@@ -2134,9 +2134,6 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	pdata->largeaddressbus =
 		of_property_read_bool(np, "qcom,large-address-bus");
 
-	if (of_property_read_bool(np, "qcom,wakeup-on-idle"))
-		msm_host->mmc->wakeup_on_idle = true;
-
 	sdhci_msm_pm_qos_parse(dev, pdata);
 
 	if (of_get_property(np, "qcom,core_3_0v_support", NULL))

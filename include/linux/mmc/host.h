@@ -695,7 +695,6 @@ struct mmc_host {
 #endif
 	struct mmc_trace_buffer trace_buf;
 	enum dev_state dev_status;
-	bool			wakeup_on_idle;
 	struct mmc_cmdq_context_info	cmdq_ctx;
 	int num_cq_slots;
 	int dcmd_cq_slot;

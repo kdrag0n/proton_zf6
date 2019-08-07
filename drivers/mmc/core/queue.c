@@ -137,8 +137,6 @@ static int mmc_cmdq_thread(void *d)
 	struct mmc_host *host = card->host;
 
 	current->flags |= PF_MEMALLOC;
-	if (card->host->wakeup_on_idle)
-		set_wake_up_idle(true);
 
 	while (1) {
 		int ret = 0;

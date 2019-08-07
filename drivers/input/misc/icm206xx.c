@@ -1024,13 +1024,8 @@ static int gyro_poll_thread(void *data)
 			break;
 
 		mutex_lock(&sensor->op_lock);
-		if (sensor->gyro_delay_change) {
-			if (sensor->gyro_poll_ms <= POLL_MS_100HZ)
-				set_wake_up_idle(true);
-			else
-				set_wake_up_idle(false);
+		if (sensor->gyro_delay_change)
 			sensor->gyro_delay_change = false;
-		}
 		mutex_unlock(&sensor->op_lock);
 
 		timestamp = ktime_get_boottime();
@@ -1078,13 +1073,8 @@ static int accel_poll_thread(void *data)
 			break;
 
 		mutex_lock(&sensor->op_lock);
-		if (sensor->accel_delay_change) {
-			if (sensor->accel_poll_ms <= POLL_MS_100HZ)
-				set_wake_up_idle(true);
-			else
-				set_wake_up_idle(false);
+		if (sensor->accel_delay_change)
 			sensor->accel_delay_change = false;
-		}
 		mutex_unlock(&sensor->op_lock);
 
 		timestamp = ktime_get_boottime();
