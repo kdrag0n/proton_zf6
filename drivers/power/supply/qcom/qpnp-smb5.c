@@ -724,8 +724,9 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 	struct smb_charger *chg = &chip->chg;
 	union power_supply_propval pval;
 	int rc = 0;
-	val->intval = 0;
 	u8 stat;  //Add the interface for charging debug apk
+
+	val->intval = 0;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
