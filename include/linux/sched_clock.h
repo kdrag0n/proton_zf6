@@ -13,8 +13,6 @@ extern void sched_clock_postinit(void);
 
 extern void sched_clock_register(u64 (*read)(void), int bits,
 				 unsigned long rate);
-extern int sched_clock_suspend(void);
-extern void sched_clock_resume(void);
 #else
 static inline void sched_clock_postinit(void) { }
 
@@ -23,8 +21,6 @@ static inline void sched_clock_register(u64 (*read)(void), int bits,
 {
 	;
 }
-static inline int sched_clock_suspend(void) { return 0; }
-static inline void sched_clock_resume(void) { }
 #endif
 
 #endif

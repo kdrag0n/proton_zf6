@@ -303,7 +303,6 @@ static int init_rootdomain(struct root_domain *rd)
 		goto free_cpudl;
 
 	rd->max_cap_orig_cpu = rd->min_cap_orig_cpu = -1;
-	rd->mid_cap_orig_cpu = -1;
 
 	init_max_cpu_capacity(&rd->max_cpu_capacity);
 
@@ -975,19 +974,16 @@ build_sched_groups(struct sched_domain *sd, int cpu)
  * group having more cpu_capacity will pickup more load compared to the
  * group having less cpu_capacity.
  */
-void init_sched_groups_capacity(int cpu, struct sched_domain *sd)
+static void init_sched_groups_capacity(int cpu, struct sched_domain *sd)
 {
 	struct sched_group *sg = sd->groups;
-	cpumask_t avail_mask;
 
 	WARN_ON(!sg);
 
 	do {
 		int cpu, max_cpu = -1;
 
-		cpumask_andnot(&avail_mask, sched_group_span(sg),
-							cpu_isolated_mask);
-		sg->group_weight = cpumask_weight(&avail_mask);
+		sg->group_weight = cpumask_weight(sched_group_span(sg));
 
 		if (!(sd->flags & SD_ASYM_PACKING))
 			goto next;
@@ -1100,11 +1096,11 @@ static void init_sched_groups_energy(int cpu, struct sched_domain *sd,
 		if (energy_eff(sge, i) > energy_eff(sge, i+1))
 			continue;
 #ifdef CONFIG_SCHED_DEBUG
-		pr_debug("WARN: cpu=%d, domain=%s: incr. energy eff %lu[%d]->%lu[%d]\n",
+		pr_warn("WARN: cpu=%d, domain=%s: incr. energy eff %lu[%d]->%lu[%d]\n",
 			cpu, sd->name, energy_eff(sge, i), i,
 			energy_eff(sge, i+1), i+1);
 #else
-		pr_debug("WARN: cpu=%d: incr. energy eff %lu[%d]->%lu[%d]\n",
+		pr_warn("WARN: cpu=%d: incr. energy eff %lu[%d]->%lu[%d]\n",
 			cpu, energy_eff(sge, i), i, energy_eff(sge, i+1), i+1);
 #endif
 	}
@@ -1889,20 +1885,6 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 			WRITE_ONCE(d.rd->min_cap_orig_cpu, i);
 
 		cpu_attach_domain(sd, d.rd, i);
-	}
-
-	/* set the mid capacity cpu (assumes only 3 capacities) */
-	for_each_cpu(i, cpu_map) {
-		int max_cpu = READ_ONCE(d.rd->max_cap_orig_cpu);
-		int min_cpu = READ_ONCE(d.rd->min_cap_orig_cpu);
-
-		if ((cpu_rq(i)->cpu_capacity_orig
-				!=  cpu_rq(min_cpu)->cpu_capacity_orig) &&
-			(cpu_rq(i)->cpu_capacity_orig
-				!=  cpu_rq(max_cpu)->cpu_capacity_orig)) {
-			WRITE_ONCE(d.rd->mid_cap_orig_cpu, i);
-			break;
-		}
 	}
 	rcu_read_unlock();
 

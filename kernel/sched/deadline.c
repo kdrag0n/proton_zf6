@@ -16,7 +16,6 @@
  *                    Fabio Checconi <fchecconi@gmail.com>
  */
 #include "sched.h"
-#include "walt.h"
 
 #include <linux/slab.h>
 #include <uapi/linux/sched/types.h>
@@ -2347,9 +2346,6 @@ const struct sched_class dl_sched_class = {
 	.switched_to		= switched_to_dl,
 
 	.update_curr		= update_curr_dl,
-#ifdef CONFIG_SCHED_WALT
-	.fixup_walt_sched_stats	= fixup_walt_sched_stats_common,
-#endif
 };
 
 int sched_dl_global_validate(void)

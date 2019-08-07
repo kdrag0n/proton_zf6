@@ -25,7 +25,6 @@
 #include <linux/cpuset.h>
 
 DEFINE_PER_CPU(unsigned long, freq_scale) = SCHED_CAPACITY_SCALE;
-DEFINE_PER_CPU(unsigned long, efficiency) = SCHED_CAPACITY_SCALE;
 DEFINE_PER_CPU(unsigned long, max_cpu_freq);
 DEFINE_PER_CPU(unsigned long, max_freq_scale) = SCHED_CAPACITY_SCALE;
 
@@ -181,9 +180,10 @@ int detect_share_cap_flag(void)
 		if (!policy)
 			return 0;
 
-		if (cpumask_equal(cpu_cpu_mask(cpu),
+		if (share_cap_level < share_cap_thread &&
+			cpumask_equal(topology_sibling_cpumask(cpu),
 				  policy->related_cpus)) {
-			share_cap_level = share_cap_die;
+			share_cap_level = share_cap_thread;
 			continue;
 		}
 
@@ -193,9 +193,9 @@ int detect_share_cap_flag(void)
 			continue;
 		}
 
-		if (cpumask_equal(topology_sibling_cpumask(cpu),
+		if (cpumask_equal(cpu_cpu_mask(cpu),
 				  policy->related_cpus)) {
-			share_cap_level = share_cap_thread;
+			share_cap_level = share_cap_die;
 			continue;
 		}
 	}
@@ -291,7 +291,7 @@ int topology_smt_flags(void)
 	if (asym_cpucap == asym_thread)
 		flags |= SD_ASYM_CPUCAPACITY;
 
-	if (share_cap >= share_cap_thread)
+	if (share_cap == share_cap_thread)
 		flags |= SD_SHARE_CAP_STATES;
 
 	return flags;
@@ -304,7 +304,7 @@ int topology_core_flags(void)
 	if (asym_cpucap == asym_core)
 		flags |= SD_ASYM_CPUCAPACITY;
 
-	if (share_cap >= share_cap_core)
+	if (share_cap == share_cap_core)
 		flags |= SD_SHARE_CAP_STATES;
 
 	return flags;
@@ -317,7 +317,7 @@ int topology_cpu_flags(void)
 	if (asym_cpucap == asym_die)
 		flags |= SD_ASYM_CPUCAPACITY;
 
-	if (share_cap >= share_cap_die)
+	if (share_cap == share_cap_die)
 		flags |= SD_SHARE_CAP_STATES;
 
 	return flags;
@@ -345,7 +345,7 @@ static void update_topology_flags_workfn(struct work_struct *work)
 static u32 capacity_scale;
 static u32 *raw_capacity;
 
-static int free_raw_capacity(void)
+static int __init free_raw_capacity(void)
 {
 	kfree(raw_capacity);
 	raw_capacity = NULL;
@@ -386,7 +386,6 @@ bool __init topology_parse_cpu_capacity(struct device_node *cpu_node, int cpu)
 	ret = of_property_read_u32(cpu_node, "capacity-dmips-mhz",
 				   &cpu_capacity);
 	if (!ret) {
-		per_cpu(efficiency, cpu) = cpu_capacity;
 		if (!raw_capacity) {
 			raw_capacity = kcalloc(num_possible_cpus(),
 					       sizeof(*raw_capacity),
