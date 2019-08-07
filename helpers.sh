@@ -178,6 +178,7 @@ function dbuild() {
 # Flash the given kernel package (defaults to latest) on the device via ADB
 function ktest() {
 	local fn="${1:-kernel.zip}"
+	local target_fn="${2:-/data/local/tmp/$(basename "$fn")}"
 	local backslash='\'
 
 	# Wait for device to show up on ADB
@@ -189,15 +190,15 @@ function ktest() {
 
 		# Push package
 		msg "Pushing kernel package..."
-		adb push "$fn" /data/local/tmp/kernel.zip && \
+		adb push "$fn" "$target_fn" && \
 
 		# Execute flasher script
 		msg "Executing flasher on device..."
 		cat <<-END | adb shell su -c sh -
-		export PATH=/sbin/.core/busybox:\$PATH
+		export PATH="/sbin/.core/busybox:\$PATH"
 
-		unzip -p /data/local/tmp/kernel.zip META-INF/com/google/android/update-binary | $backslash
-		/system/bin/sh /proc/self/fd/0 "" "" /data/local/tmp/kernel.zip && $backslash
+		unzip -p "$target_fn" META-INF/com/google/android/update-binary | $backslash
+		/system/bin/sh /proc/self/fd/0 "" "" "$target_fn" && $backslash
 		{ /system/bin/svc power reboot || reboot; }
 		END
 	else
@@ -227,7 +228,7 @@ function sktest() {
 	# Execute flasher script
 	msg "Executing flasher on device..." && \
 	cat <<-END | ssh "$hostname" su -c sh -
-	export PATH=/sbin/.core/busybox:\$PATH
+	export PATH="/sbin/.core/busybox:\$PATH"
 	am broadcast -a net.dinglisch.android.tasker.ACTION_TASK --es task_name "Kernel Flash Warning" &
 
 	unzip -p "$target_fn" META-INF/com/google/android/update-binary | $backslash
@@ -247,6 +248,14 @@ function vsktest() {
 # Build & flash an incremental working-copy kernel on the device via ADB
 function inc() {
 	incbuild "$@" && ktest
+}
+
+# Build & flash an incremental test kernel on the device via ADB and keep a copy
+# of the package in /sdcard
+function pinc() {
+	dbuild "$@" && \
+	local fn="builds/$kernel_name-$device_name-test$(buildnum).zip" && \
+	ktest "$fn" "/sdcard/$(basename "$fn")"
 }
 
 # Build & flash an incremental working-copy kernel on the device via SSH over LAN
