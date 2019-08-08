@@ -41,6 +41,55 @@ vpn_ssh_host="vzenfone6"
 
 #### BASE ####
 
+# Index of all variables and functions we set
+# This allows us to clean up later without restarting the shell
+_ksetup_vars+=(
+	kernel_name
+	defconfig
+	arch
+	kmake_flags
+	device_name
+	lan_ssh_host
+	vpn_ssh_host
+	kroot
+	_ksetup_vars
+	_ksetup_functions
+)
+_ksetup_functions+=(
+	msg
+	croot
+	get_clang_version
+	get_gcc_version
+	buildnum
+	zerover
+	zver
+	kmake
+	mkzip
+	dzip
+	rel
+	crel
+	cleanbuild
+	incbuild
+	dbuild
+	ktest
+	sktest
+	vsktest
+	inc
+	pinc
+	sinc
+	vsinc
+	psinc
+	pvsinc
+	dc
+	cpc
+	mc
+	cf
+	ec
+	osize
+	glink
+	unsetup
+)
+
 # Get kernel repository root for later use
 kroot="$PWD/$(dirname "$0")"
 
@@ -325,4 +374,24 @@ function osize() {
 # Create a link to a commit on GitHub
 function glink() {
 	echo "https://github.com/kdrag0n/proton_$device_name/commit/$1"
+}
+
+# Clean up shell environment and remove all traces of ksetup
+function unsetup() {
+	# unset calls are silenced to prevent error spam when elements are
+	# repeated, which can happen if ksetup is sourced more than once
+
+	# Unset functions
+	for func in "${_ksetup_functions[@]}"; do
+		unset -f "$func" > /dev/null 2>&1
+	done
+
+	# Restore PATH and LD_LIBRARY_PATH if they were modified
+	[[ -z "$_ksetup_old_path" ]] && export PATH="$_ksetup_old_path"
+	[[ -z "$_ksetup_old_ld_path" ]] && export LD_LIBRARY_PATH="$_ksetup_old_ld_path"
+
+	# Unset variables
+	for var in "${_ksetup_vars[@]}"; do
+		unset -v "$var" > /dev/null 2>&1
+	done
 }

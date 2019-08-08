@@ -22,6 +22,14 @@ jobs=$(nproc)
 # Load the shared helpers
 source helpers.sh
 
+# Index of variables for cleanup in unsetup
+_ksetup_vars+=(
+	gcc_prefix64
+	gcc_prefix32
+	jobs
+	kmake_flags
+)
+
 kmake_flags+=(
 	CROSS_COMPILE="$gcc_prefix64"
 	CROSS_COMPILE_ARM32="$gcc_prefix32"

@@ -25,8 +25,21 @@ jobs=$(nproc)
 # Load the shared helpers
 source helpers.sh
 
+_ksetup_old_ld_path="$LD_LIBRARY_PATH"
+_ksetup_old_path="$PATH"
 export LD_LIBRARY_PATH="$clang_bin/../lib:$clang_bin/../lib64:$LD_LIBRARY_PATH"
 export PATH="$clang_bin:$PATH"
+
+# Index of variables for cleanup in unsetup
+_ksetup_vars+=(
+	clang_bin
+	gcc_prefix64
+	gcc_prefix32
+	jobs
+	kmake_flags
+	_ksetup_old_ld_path
+	_ksetup_old_path
+)
 
 kmake_flags+=(
 	CC="clang"
