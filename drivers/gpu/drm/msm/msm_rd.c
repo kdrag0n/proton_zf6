@@ -240,6 +240,7 @@ static int rd_release(struct inode *inode, struct file *file)
 		return -EINVAL;
 
 	rd = inode->i_private;
+
 	rd->open = false;
 	wake_up_all(&rd->fifo_event);
 

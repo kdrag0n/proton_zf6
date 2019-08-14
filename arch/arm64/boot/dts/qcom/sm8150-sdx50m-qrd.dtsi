@@ -48,6 +48,7 @@
 	qcom,battery-data = <&fusion_qrd_batterydata>;
 	qcom,hold-soc-while-full;
 	qcom,linearize-soc;
+	qcom,cl-wt-enable;
 	/* ESR fast calibration */
 	qcom,fg-esr-timer-chg-fast = <0 7>;
 	qcom,fg-esr-timer-dischg-fast = <0 7>;
@@ -88,6 +89,9 @@
 };
 
 &qupv3_se17_i2c {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
 	status = "ok";
 
 	st_fts@49 {
@@ -108,6 +112,9 @@
 };
 
 &qupv3_se9_i2c {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
 	status = "ok";
 	nq@28 {
 		compatible = "qcom,nq-nci";
@@ -191,6 +198,9 @@
 };
 
 &qupv3_se4_i2c {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
 	status = "ok";
 	redriver@19 {
 		compatible = "onnn,redriver";
@@ -593,6 +603,8 @@
 };
 
 &smb1390_charger {
+	/delete-property/ compatible;
+	compatible = "qcom,smb1390-charger-psy";
 	io-channels = <&pm8150b_vadc ADC_AMUX_THM2>;
 	io-channel-names = "cp_die_temp";
 	status = "ok";
