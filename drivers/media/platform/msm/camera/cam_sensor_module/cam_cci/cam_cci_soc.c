@@ -442,10 +442,9 @@ int cam_cci_soc_release(struct cci_device *cci_dev)
 	cci_dev->cci_state = CCI_STATE_DISABLED;
 	cci_dev->cycles_per_us = 0;
 
-	cam_cpas_stop(cci_dev->cpas_handle);
-	CAM_INFO(CAM_CCI, "cci release, rw_cnt=(%d,%d,%d,%d),(%d,%d,%d,%d).",
-		cci_dev->rw_cnt[0],cci_dev->rw_cnt[1],cci_dev->rw_cnt[2],cci_dev->rw_cnt[3],
-		cci_dev->rw_cnt[4],cci_dev->rw_cnt[5],cci_dev->rw_cnt[6],cci_dev->rw_cnt[7]);
+	rc = cam_cpas_stop(cci_dev->cpas_handle);
+	if (rc)
+		CAM_ERR(CAM_CCI, "cpas stop failed %d", rc);
 
 	cci_dev->rw_cnt[0]=0;
 	cci_dev->rw_cnt[1]=0;
@@ -457,5 +456,6 @@ int cam_cci_soc_release(struct cci_device *cci_dev)
 	cci_dev->rw_cnt[7]=0;
 
 	mutex_unlock(&cci_dev->mutex_for_init);
+
 	return rc;
 }
