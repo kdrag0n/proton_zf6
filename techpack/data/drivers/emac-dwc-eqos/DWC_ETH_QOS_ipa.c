@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are
@@ -967,6 +967,7 @@ static int DWC_ETH_QOS_ipa_offload_connect(struct DWC_ETH_QOS_prv_data *pdata)
 	struct ipa_perf_profile profile;
 	int ret = 0;
 	int i = 0;
+	u32 reg_val;
 
 
 	EMACINFO("%s - begin\n", __func__);
@@ -1083,6 +1084,13 @@ static int DWC_ETH_QOS_ipa_offload_connect(struct DWC_ETH_QOS_prv_data *pdata)
 		EMACERR("Could not connect IPA Offload Pipes %d\n", ret);
 		ret = -1;
 		goto mem_free;
+	}
+
+	/* Mapped RX queue 0 to DMA channel 0 on successful IPA offload connect */
+	if (pdata->res_data->early_eth_en) {
+		MTL_RQDCM0R_RGRD(reg_val);
+		reg_val &= ~IPA_RX_TO_DMA_CH_MAP_NUM;
+		MTL_RQDCM0R_RGWR(reg_val);
 	}
 
     ntn_ipa->uc_db_rx_addr = out.u.ntn.ul_uc_db_pa;
