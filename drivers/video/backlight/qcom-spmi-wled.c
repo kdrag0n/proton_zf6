@@ -1721,8 +1721,6 @@ static int wled_flash_set_fsc(struct wled *wled, enum led_brightness brightness,
 	if (fs_current > fs_current_max)
 		fs_current = fs_current_max;
 
-	printk("[Display] Wled set fsc to %d / max: %d \n", fs_current, fs_current_max);
-
 	/* Each LSB is 5 mA */
 	val = DIV_ROUND_CLOSEST(fs_current, 5);
 	rc = regmap_update_bits(wled->regmap,
@@ -1923,10 +1921,8 @@ static int wled_flash_configure(struct wled *wled)
 			 * As per the hardware recommendation, FS current should
 			 * be limited to 20 mA for PM8150L v1.0.
 			 */
-			if (wled->pmic_rev_id->rev4 == PM8150L_V1P0_REV4) {
-				printk("[Display] chip is PM8150L_V1P0_REV4, fs curent is set to 20mA\n");
+			if (wled->pmic_rev_id->rev4 == PM8150L_V1P0_REV4)
 				wled->fparams.fs_current = 20;
-			}
 
 			/* Value read in us */
 			wled->fparams.step_delay = 200;
@@ -2303,10 +2299,8 @@ static int wled5_set_hybrid_thres(struct wled *wled, int thres)
 	u16 addr;
 	//u8 sink_en = 0;
 
-	if (!wled) {
-		printk("[Display] broken wled structure.\n");
+	if (!wled)
 		return -1;
-	}
 
 	addr = wled->sink_addr + WLED_SINK_HYBRID_DIMMING_TRESH;
 	rc = regmap_update_bits(wled->regmap, addr, WLED_SINK_HYBRID_DIM_THR_MASK, thres);
@@ -2339,10 +2333,8 @@ static int wled5_set_fsc(struct wled *wled, int level)
 	u8 string_cfg;
 	u8 sink_en = 0;
 
-	if (!wled) {
-		printk("[Display] broken wled structure.\n");
+	if (!wled)
 		return -1;
-	}
 
 	string_cfg = wled->cfg.string_cfg;
 	wled->cfg.fs_current = level;
@@ -2426,8 +2418,6 @@ static ssize_t asus_wled_fsc_proc_write(struct file *filp, const char *buff, siz
 
 	if (ret) {
 		printk("[Display] Setting WLED fs-current failed: %d\n", ret);
-	} else {
-		printk("[Display] write fsc: %d\n", level);
 	}
 
 	return len;
@@ -2608,13 +2598,10 @@ static int wled_probe(struct platform_device *pdev)
 	wled->max_brightness = val;
 
 	rc = of_property_read_u32(pdev->dev.of_node, "qcom,fs-current", &val);
-	if (rc < 0) {
-		pr_err("[Display] WLED: qcom,fs-current is not set, set it to 8(20mA)\n");
+	if (rc < 0)
 		val = 8;
-	}
 	wled->cfg.fs_current = val;
 
-	pr_err("%s: cabc_sel is %d, cabc_en is %d\n", __func__, wled->cfg.cabc_sel, wled->cfg.en_cabc);
 	/* For WLED5, when CABC is enabled, max brightness is 4095. */
 	if (is_wled5(wled) && wled->cfg.cabc_sel) {
 		wled->max_brightness = WLED_MAX_BRIGHTNESS_12B;

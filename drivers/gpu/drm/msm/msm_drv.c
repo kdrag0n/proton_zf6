@@ -289,8 +289,6 @@ static int msm_drm_uninit(struct device *dev)
 	struct msm_gpu *gpu = priv->gpu;
 	int i;
 
-	printk("[Display] msm_drm_uninit\n");
-
 	/* clean up display commit/event worker threads */
 	for (i = 0; i < priv->num_crtcs; i++) {
 		if (priv->disp_thread[i].thread) {
@@ -1744,12 +1742,7 @@ struct work_struct early_on_for_phone_call_work;
 
 static bool is_in_phone_call(void)
 {
-	if (pmode_tp_flag) {
-		printk("[Display] In phone call\n");
-		return true;
-	}
-
-	return false;
+	return pmode_tp_flag;
 }
 
 void dsi_suspend(void);
@@ -1760,7 +1753,6 @@ void dsi_resume_work(struct work_struct *work)
 	struct msm_drm_private *priv;
 	struct msm_kms *kms;
 
-	printk("[Display] doing resume from PM wq\n");
 	asus_lcd_bridge_enable = 1;
 	if (g_dev) {
 		ddev = dev_get_drvdata(g_dev);
@@ -1782,9 +1774,7 @@ void dsi_resume_work(struct work_struct *work)
 
 void dsi_early_on_for_phone_call_work(struct work_struct *work)
 {
-	printk("[Display] WQ: early on +++ \n");
 	dsi_resume();
-	printk("[Display] WQ: early on --- \n");
 }
 
 void asus_lcd_trigger_early_on_wq(void)
@@ -1793,8 +1783,6 @@ void asus_lcd_trigger_early_on_wq(void)
 	if (!asus_lcd_bridge_enable) {
 		asus_lcd_bridge_enable = 1;
 		queue_work(resume_wq, &early_on_for_phone_call_work);
-	} else {
-		printk("[Display] current enable is ongoing, abort here\n");
 	}
 }
 EXPORT_SYMBOL(asus_lcd_trigger_early_on_wq);
@@ -1814,7 +1802,6 @@ static int msm_pm_suspend(struct device *dev)
 	struct msm_drm_private *priv;
 	struct msm_kms *kms;
 
-	pr_err("going to suspend\n");
 	dsi_suspend();
 
 	if (!dev)

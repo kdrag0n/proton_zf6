@@ -622,7 +622,6 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 	for (j = 0; j < config->groups; ++j) {
 		for (i = 0; i < len; ++i) {
 			if (config->status_value[group + i] == 0xff) {
-				pr_debug("[Display] check kirin display ESD status\n");
 				if (config->return_buf[i] & 0x01 || asus_lcd_esd_debug) {
 					printk("[Display] ESD detected\n");
 					asus_lcd_esd_debug = 0;
@@ -4780,7 +4779,6 @@ void asus_lcd_set_tcon_cmd(char *cmd, short len)
 		mutex_unlock(&asus_lcd_tcon_cmd_mutex);
 		return;
 	} else {
-		pr_err("[Display] %s: panel is off,  asus_lcd_bridge_enable is %d\n", __func__, asus_lcd_bridge_enable);
 		return;
 	}
 
@@ -4856,7 +4854,6 @@ void asus_lcd_get_tcon_cmd(char cmd, int rlen)
 
 			for(i=0; i<rlen; i++) {
 				memset(tmp, 0, 256*sizeof(char));
-				printk("[Display] read parameter: 0x%02x = 0x%02x\n", cmd, return_buf[i]);
 				snprintf(tmp, sizeof(tmp), "0x%02x = 0x%02x\n", cmd, return_buf[i]);
 				strcat(asus_lcd_reg_buffer,tmp);
 			}
@@ -4867,7 +4864,6 @@ void asus_lcd_get_tcon_cmd(char cmd, int rlen)
 		mutex_unlock(&asus_lcd_tcon_cmd_mutex);
 		return;
 	} else {
-		pr_err("[Display] %s: panel is off\n", __func__);
 		return;
 	}
 
@@ -5045,11 +5041,8 @@ static ssize_t asus_lcd_dim_conf_proc_write(struct file *filp, const char *buff,
 	if (parse_result < 0) {
 		printk("[Display] unknown dimming configure.\n");
 	} else {
-		printk("[Display] parse to 0x%x\n", data);
 		asus_lcd_dimming_conf = data;
 	}
-
-	printk("[Display] %s: dimming conf flag select to: %d\n", __func__, asus_lcd_dimming_conf);
 
 	return len;
 }
@@ -5092,7 +5085,6 @@ static ssize_t asus_lcd_esd_proc_write(struct file *filp, const char *buff, size
 		return -EFAULT;
 
 	asus_lcd_esd_debug = 1;
-	printk("[Display] Trigger ESD on next checking\n");
 
 	return len;
 }
@@ -5113,7 +5105,6 @@ static ssize_t asus_lcd_early_on_write(struct file *filp, const char *buff, size
 	if (copy_from_user(messages, buff, len))
 		return -EFAULT;
 
-	printk("[Display] Trigger early on by process\n");
 	asus_lcd_trigger_early_on_wq();
 
 	return len;
@@ -5139,7 +5130,6 @@ static ssize_t asus_lcd_bklt_control_proc_write(struct file *filp, const char *b
 	if (sscanf(messages, "%d", &value) <= 0) {
 		printk("[Display] parsed failed: %s", messages);
 	} else {
-		printk("[Display] manully setting display backlight to %d\n", value);
 		asus_lcd_blkt_ctrl = value;
 		asus_lcd_trigger_early_backlight_wq(asus_lcd_blkt_ctrl);
 	}
@@ -5257,8 +5247,6 @@ static ssize_t asus_lcd_reg_write(struct file *filp, const char *buff, size_t le
 	cur = messages;
 	*(cur + len - 1) = '\0';
 
-	printk("[Display] %s (%s) +++\n", __func__, cur);
-
 	if (strncmp(cur, "w", 1) == 0) { //write
 		flag = true;
 	} else if(strncmp(cur, "r", 1) == 0) { //read
@@ -5310,10 +5298,8 @@ static ssize_t asus_lcd_reg_write(struct file *filp, const char *buff, size_t le
 				put_cmd[i] = store[i] & 0xff;
 
 			if(flag) {
-				printk("[Display] write panel command\n");
 				asus_lcd_set_tcon_cmd(put_cmd, cnt);
 			} else {
-				printk("[Display] read panel command\n");
 				if (store[1] < ASUS_LCD_REG_RW_READ_MAX) {
 					asus_lcd_get_tcon_cmd(put_cmd[0], store[1]);
 				} else {
@@ -5346,7 +5332,6 @@ static ssize_t asus_lcd_reg_write(struct file *filp, const char *buff, size_t le
 	ret = len;
 
 error:
-	printk("[Display] %s(%d) ---\n", __func__, ret);
 	kfree(messages);
 	kfree(tmp);
 	kfree(store);

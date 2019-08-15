@@ -525,10 +525,8 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 	fts_ts_suspend();
 	msleep(3);//power down after reset larger than 3ms
 
-	if (g_msm_drv_shutdown_in_progress) {
-		printk("[Display] shutdown in progress, pull down TP power rail\n");
+	if (g_msm_drv_shutdown_in_progress)
 		fts_power_source_ctrl_global(0);
-	}
 
 	if (!fts_gesture_check()) {
 		rc = dsi_pwr_enable_regulator(&panel->power_info, false);
@@ -702,7 +700,6 @@ void dsi_panel_set_backlight_asus_logic(struct dsi_panel *panel, u32 bl_level)
 		g_bl_full_dcs = false;
 	} else if (bl_level < g_bl_threshold) { /*wled control*/
 		if (g_last_bl == 0) {
-			printk("[Display] system resume set BL wled directly\n");
 			backlight_device_set_brightness(bl->raw_bd, 4095 * bl_level / g_bl_threshold);
 			dsi_panel_update_backlight(panel, g_bl_threshold);
 		} else if (bl_level < g_last_bl) {
@@ -873,12 +870,9 @@ void dsi_panel_set_backlight_work(struct work_struct *work)
 	struct dsi_panel *panel;
 
 	panel = container_of(work, struct dsi_panel, early_bl_work);
-	if (!panel) {
-		printk("[Display] cannot get panel struct from work\n");
+	if (!panel)
 		return;
-	}
 
-	printk("[Display] try to set early backlight\n");
 	dsi_panel_set_backlight(panel, panel->early_bl_level);
 }
 
@@ -4244,7 +4238,6 @@ int dsi_panel_enable(struct dsi_panel *panel)
 	if (asus_lcd_dimming_on) {
 		cmd_type = DSI_CMD_SET_DIM_ON;
 	} else {
-		printk("[Display] using no dimming on-command\n");
 		cmd_type = DSI_CMD_SET_ON;
 	}
 

@@ -979,21 +979,17 @@ int display_early_init = 0;
 
 void dsi_suspend (void)
 {
-	pr_err("dsi_suspend++\n");
 	dsi_bridge_disable(bridge4pm);
 	dsi_bridge_post_disable(bridge4pm);
 	display_early_init = 0;
-	pr_err("dsi_suspend--\n");
 }
 EXPORT_SYMBOL(dsi_suspend);
 
 void dsi_resume (void)
 {
-	pr_err("dsi_resume++\n");
 	display_early_init = 1;
 	dsi_bridge_pre_enable(bridge4pm);
 	dsi_bridge_enable(bridge4pm);
-	pr_err("dsi_resume---\n");
 }
 EXPORT_SYMBOL(dsi_resume);
 
