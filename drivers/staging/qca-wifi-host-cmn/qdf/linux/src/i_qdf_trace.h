@@ -45,7 +45,7 @@
  * This allows us to build 'performance' builds where we can measure performance
  * without being bogged down by all the tracing in the code
  */
-#if defined(WLAN_DEBUG) && defined(DEBUG)
+#if defined(WLAN_DEBUG) || defined(DEBUG)
 #define QDF_TRACE qdf_trace_msg
 #define QDF_VTRACE qdf_vtrace_msg
 #define QDF_TRACE_HEX_DUMP qdf_trace_hex_dump
@@ -71,10 +71,10 @@
 		} \
 	} while (0)
 #else
-#define QDF_TRACE(arg ...)
-#define QDF_VTRACE(arg ...)
-#define QDF_TRACE_HEX_DUMP(arg ...)
-#define __QDF_TRACE_RATE_LIMITED(arg ...)
+#define QDF_TRACE(x...) ((void)0)
+#define QDF_VTRACE(x...) ((void)0)
+#define QDF_TRACE_HEX_DUMP(x...) ((void)0)
+#define __QDF_TRACE_RATE_LIMITED(x...) ((void)0)
 #endif
 #else /* CONFIG_MCL */
 

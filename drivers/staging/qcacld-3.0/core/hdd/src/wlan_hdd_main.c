@@ -8422,7 +8422,6 @@ void wlan_hdd_deinit_tx_rx_histogram(struct hdd_context *hdd_ctx)
 	hdd_ctx->hdd_txrx_hist = NULL;
 }
 
-#ifdef WLAN_DEBUG
 static uint8_t *convert_level_to_string(uint32_t level)
 {
 	switch (level) {
@@ -8439,8 +8438,6 @@ static uint8_t *convert_level_to_string(uint32_t level)
 		return "INVAL";
 	}
 }
-#endif
-
 
 /**
  * wlan_hdd_display_tx_rx_histogram() - display tx rx histogram
@@ -13407,13 +13404,13 @@ static void hdd_driver_unload(void)
  */
 static int hdd_module_init(void)
 {
-	int errno;
+	int ret;
 
-	errno = wlan_hdd_state_ctrl_param_create();
-	if (errno)
-		hdd_fln("Failed to create ctrl param; errno:%d", errno);
+	ret = wlan_hdd_state_ctrl_param_create();
+	if (ret)
+		pr_err("wlan_hdd_state_create:%x\n", ret);
 
-	return errno;
+	return ret;
 }
 
 /**
