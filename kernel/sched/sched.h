@@ -26,6 +26,7 @@
 #include <linux/kernel_stat.h>
 #include <linux/binfmts.h>
 #include <linux/mutex.h>
+#include <linux/psi.h>
 #include <linux/spinlock.h>
 #include <linux/stop_machine.h>
 #include <linux/irq_work.h>
@@ -337,6 +338,7 @@ extern bool dl_cpu_busy(unsigned int cpu);
 #ifdef CONFIG_CGROUP_SCHED
 
 #include <linux/cgroup.h>
+#include <linux/psi.h>
 
 struct cfs_rq;
 struct rt_rq;
@@ -876,7 +878,6 @@ struct rq {
 	int cstate, wakeup_latency, wakeup_energy;
 	u64 window_start;
 	s64 cum_window_start;
-	unsigned long walt_flags;
 
 	u64 cur_irqload;
 	u64 avg_irqload;
@@ -903,6 +904,8 @@ struct rq {
 	u64 last_cc_update;
 	u64 cycles;
 #endif /* CONFIG_SCHED_WALT */
+
+	unsigned long extra_flags;
 
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
 	u64 prev_irq_time;
@@ -2141,10 +2144,17 @@ cpu_util_freq(int cpu, struct sched_walt_cpu_load *walt_load)
 
 #else
 
+static inline unsigned long cpu_util_rt(int cpu)
+{
+	struct rt_rq *rt_rq = &(cpu_rq(cpu)->rt);
+
+	return rt_rq->avg.util_avg;
+}
+
 static inline unsigned long
 cpu_util_freq(int cpu, struct sched_walt_cpu_load *walt_load)
 {
-	return cpu_util(cpu);
+	return min(cpu_util(cpu) + cpu_util_rt(cpu), capacity_orig_of(cpu));
 }
 
 #define sched_ravg_window TICK_NSEC
@@ -2837,8 +2847,6 @@ static inline int same_freq_domain(int src_cpu, int dst_cpu)
 	return cpumask_test_cpu(dst_cpu, &rq->freq_domain_cpumask);
 }
 
-#define	CPU_RESERVED	1
-
 extern enum sched_boost_policy boost_policy;
 static inline enum sched_boost_policy sched_boost_policy(void)
 {
@@ -2885,27 +2893,6 @@ extern int alloc_related_thread_groups(void);
 extern unsigned long all_cluster_ids[];
 
 extern void check_for_migration(struct rq *rq, struct task_struct *p);
-
-static inline int is_reserved(int cpu)
-{
-	struct rq *rq = cpu_rq(cpu);
-
-	return test_bit(CPU_RESERVED, &rq->walt_flags);
-}
-
-static inline int mark_reserved(int cpu)
-{
-	struct rq *rq = cpu_rq(cpu);
-
-	return test_and_set_bit(CPU_RESERVED, &rq->walt_flags);
-}
-
-static inline void clear_reserved(int cpu)
-{
-	struct rq *rq = cpu_rq(cpu);
-
-	clear_bit(CPU_RESERVED, &rq->walt_flags);
-}
 
 static inline bool
 task_in_cum_window_demand(struct rq *rq, struct task_struct *p)
@@ -3065,7 +3052,6 @@ static inline int same_freq_domain(int src_cpu, int dst_cpu)
 	return 1;
 }
 
-static inline void clear_reserved(int cpu) { }
 static inline int alloc_related_thread_groups(void) { return 0; }
 
 #define trace_sched_cpu_load(...)
@@ -3086,11 +3072,6 @@ static inline unsigned long thermal_cap(int cpu)
 #endif
 
 static inline void clear_walt_request(int cpu) { }
-
-static inline int is_reserved(int cpu)
-{
-	return 0;
-}
 
 static inline enum sched_boost_policy sched_boost_policy(void)
 {
@@ -3117,6 +3098,29 @@ static inline void note_task_waking(struct task_struct *p, u64 wallclock) { }
 static inline void walt_map_freq_to_load(void) { }
 static inline void walt_update_min_max_capacity(void) { }
 #endif	/* CONFIG_SCHED_WALT */
+
+#define	CPU_RESERVED	1
+
+static inline int is_reserved(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	return test_bit(CPU_RESERVED, &rq->extra_flags);
+}
+
+static inline int mark_reserved(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	return test_and_set_bit(CPU_RESERVED, &rq->extra_flags);
+}
+
+static inline void clear_reserved(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	clear_bit(CPU_RESERVED, &rq->extra_flags);
+}
 
 static inline bool energy_aware(void)
 {

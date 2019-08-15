@@ -9743,8 +9743,8 @@ static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 		mcc->cpu = cpu;
 #ifdef CONFIG_SCHED_DEBUG
 		raw_spin_unlock_irqrestore(&mcc->lock, flags);
-		printk_deferred("CPU%d: update max cpu_capacity %lu\n",
-							cpu, capacity);
+		printk_deferred(KERN_INFO "CPU%d: update max cpu_capacity %lu\n",
+				cpu, capacity);
 		goto skip_unlock;
 #endif
 	}
@@ -10824,6 +10824,13 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			continue;
 		}
 
+		/*
+		 * Ignore cpu, which is undergoing active_balance and doesn't
+		 * have more than 2 tasks.
+		 */
+		if (rq->active_balance && rq->nr_running <= 2)
+			continue;
+
 		capacity = capacity_of(i);
 
 		/*
@@ -10900,6 +10907,7 @@ static int need_active_balance(struct lb_env *env)
 	 * available on dst_cpu.
 	 */
 	if ((env->idle != CPU_NOT_IDLE) &&
+	    (env->src_grp_nr_running == 1) &&
 	    (env->src_rq->cfs.h_nr_running == 1)) {
 		if ((check_cpu_capacity(env->src_rq, sd)) &&
 		    (capacity_of(env->src_cpu)*sd->imbalance_pct < capacity_of(env->dst_cpu)*100))
@@ -10909,6 +10917,7 @@ static int need_active_balance(struct lb_env *env)
 	if ((env->idle != CPU_NOT_IDLE) &&
 		(capacity_of(env->src_cpu) < capacity_of(env->dst_cpu)) &&
 	    ((capacity_orig_of(env->src_cpu) < capacity_orig_of(env->dst_cpu))) &&
+				(env->src_grp_nr_running == 1) &&
 				env->src_rq->cfs.h_nr_running == 1 &&
 				cpu_overutilized(env->src_cpu) &&
 				!cpu_overutilized(env->dst_cpu)) {
@@ -11048,8 +11057,14 @@ redo:
 more_balance:
 		rq_lock_irqsave(busiest, &rf);
 
-		/* The world might have changed. Validate assumptions */
-		if (busiest->nr_running <= 1) {
+		/*
+		 * The world might have changed. Validate assumptions.
+		 * And also, if the busiest cpu is undergoing active_balance,
+		 * it doesn't need help if it has less than 2 tasks on it.
+		 */
+
+		if (busiest->nr_running <= 1 ||
+		    (busiest->active_balance && busiest->nr_running <= 2)) {
 			rq_unlock_irqrestore(busiest, &rf);
 			env.flags &= ~LBF_ALL_PINNED;
 			goto no_move;
@@ -11204,6 +11219,7 @@ no_move:
 				busiest->active_balance = 1;
 				busiest->push_cpu = this_cpu;
 				active_balance = 1;
+				mark_reserved(this_cpu);
 			}
 			raw_spin_unlock_irqrestore(&busiest->lock, flags);
 
@@ -11376,7 +11392,9 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 * Force higher capacity CPUs doing load balance, when the lower
 	 * capacity CPUs has some misfit tasks.
 	 */
-	if (!is_min_capacity_cpu(this_cpu) && min_cap_cluster_has_misfit_task())
+	if (!is_min_capacity_cpu(this_cpu) &&
+		(atomic_read(&this_rq->nr_iowait) == 0) &&
+		min_cap_cluster_has_misfit_task())
 		force_lb = true;
 
 	/*
@@ -11586,6 +11604,7 @@ out_unlock:
 	busiest_rq->active_balance = 0;
 	push_task = busiest_rq->push_task;
 	target_cpu = busiest_rq->push_cpu;
+	clear_reserved(target_cpu);
 
 	if (push_task)
 		busiest_rq->push_task = NULL;
@@ -11596,7 +11615,6 @@ out_unlock:
 		if (push_task_detached)
 			attach_one_task(target_rq, push_task);
 		put_task_struct(push_task);
-		clear_reserved(target_cpu);
 	}
 
 	if (p)

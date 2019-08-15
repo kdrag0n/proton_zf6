@@ -1707,6 +1707,9 @@ static void adreno_fault_header(struct kgsl_device *device,
 		struct adreno_context *drawctxt =
 			ADRENO_CONTEXT(drawobj->context);
 
+		drawctxt->base.total_fault_count++;
+		drawctxt->base.last_faulted_cmd_ts = drawobj->timestamp;
+
 		trace_adreno_gpu_fault(drawobj->context->id,
 			drawobj->timestamp,
 			status, rptr, wptr, ib1base, ib1sz,
@@ -2110,7 +2113,7 @@ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
 	}
 
 	/* Mask all GMU interrupts */
-	if (gmu_core_isenabled(device)) {
+	if (gmu_core_gpmu_isenabled(device)) {
 		adreno_write_gmureg(adreno_dev,
 			ADRENO_REG_GMU_AO_HOST_INTERRUPT_MASK,
 			0xFFFFFFFF);
@@ -2181,6 +2184,15 @@ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
 				adreno_dev->prev_rb = adreno_dev->cur_rb;
 				adreno_dev->cur_rb = hung_rb;
 			}
+		}
+
+		/*
+		 * Make sure to unhalt the dispatcher in case if it is halted
+		 * because of starved ringbuffer.
+		 */
+		if (rb->starve_state == ADRENO_STARVE_EXPIRED) {
+			adreno_put_gpu_halt(adreno_dev);
+			rb->starve_state = ADRENO_STARVE_OFF;
 		}
 	}
 

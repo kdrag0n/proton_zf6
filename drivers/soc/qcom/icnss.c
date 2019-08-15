@@ -35,6 +35,9 @@
 #include <linux/ipc_logging.h>
 #include <linux/thread_info.h>
 #include <linux/uaccess.h>
+#include <linux/adc-tm-clients.h>
+#include <linux/iio/consumer.h>
+#include <dt-bindings/iio/qcom,spmi-vadc.h>
 #include <linux/etherdevice.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
@@ -67,7 +70,11 @@
 #define ICNSS_QUIRKS_DEFAULT		BIT(FW_REJUVENATE_ENABLE)
 #define ICNSS_MAX_PROBE_CNT		2
 
-#define PROBE_TIMEOUT			5000
+#define SUBSYS_INTERNAL_MODEM_NAME	"modem"
+#define SUBSYS_EXTERNAL_MODEM_NAME	"esoc0"
+
+#define PROBE_TIMEOUT			15000
+#define FW_READY_TIMEOUT		50000
 
 static struct icnss_priv *penv;
 
@@ -817,6 +824,136 @@ int icnss_call_driver_uevent(struct icnss_priv *priv,
 	return priv->ops->uevent(&priv->pdev->dev, &uevent_data);
 }
 
+
+static int icnss_get_phone_power(struct icnss_priv *priv, uint64_t *result_uv)
+{
+	int ret = 0;
+	int result;
+
+	if (!priv->channel) {
+		icnss_pr_err("Channel doesn't exists\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = iio_read_channel_processed(penv->channel, &result);
+	if (ret < 0) {
+		icnss_pr_err("Error reading channel, ret = %d\n", ret);
+		goto out;
+	}
+
+	*result_uv = (uint64_t) result;
+out:
+	return ret;
+}
+
+static void icnss_vph_notify(enum adc_tm_state state, void *ctx)
+{
+	struct icnss_priv *priv = ctx;
+	uint64_t vph_pwr = 0;
+	uint64_t vph_pwr_prev;
+	int ret = 0;
+	bool update = true;
+
+	if (!priv) {
+		icnss_pr_err("Priv pointer is NULL\n");
+		return;
+	}
+
+	vph_pwr_prev = priv->vph_pwr;
+
+	ret = icnss_get_phone_power(priv, &vph_pwr);
+	if (ret < 0)
+		return;
+
+	if (vph_pwr < ICNSS_THRESHOLD_LOW) {
+		if (vph_pwr_prev < ICNSS_THRESHOLD_LOW)
+			update = false;
+		priv->vph_monitor_params.state_request =
+			ADC_TM_HIGH_THR_ENABLE;
+		priv->vph_monitor_params.high_thr = ICNSS_THRESHOLD_LOW +
+			ICNSS_THRESHOLD_GUARD;
+		priv->vph_monitor_params.low_thr = 0;
+	} else if (vph_pwr > ICNSS_THRESHOLD_HIGH) {
+		if (vph_pwr_prev > ICNSS_THRESHOLD_HIGH)
+			update = false;
+		priv->vph_monitor_params.state_request =
+			ADC_TM_LOW_THR_ENABLE;
+		priv->vph_monitor_params.low_thr = ICNSS_THRESHOLD_HIGH -
+			ICNSS_THRESHOLD_GUARD;
+		priv->vph_monitor_params.high_thr = 0;
+	} else {
+		if (vph_pwr_prev > ICNSS_THRESHOLD_LOW &&
+		    vph_pwr_prev < ICNSS_THRESHOLD_HIGH)
+			update = false;
+		priv->vph_monitor_params.state_request =
+			ADC_TM_HIGH_LOW_THR_ENABLE;
+		priv->vph_monitor_params.low_thr = ICNSS_THRESHOLD_LOW;
+		priv->vph_monitor_params.high_thr = ICNSS_THRESHOLD_HIGH;
+	}
+
+	priv->vph_pwr = vph_pwr;
+
+	if (update) {
+		icnss_send_vbatt_update(priv, vph_pwr);
+		icnss_pr_dbg("set low threshold to %d, high threshold to %d Phone power=%llu\n",
+			     priv->vph_monitor_params.low_thr,
+			     priv->vph_monitor_params.high_thr, vph_pwr);
+	}
+
+	ret = adc_tm5_channel_measure(priv->adc_tm_dev,
+				      &priv->vph_monitor_params);
+	if (ret)
+		icnss_pr_err("TM channel setup failed %d\n", ret);
+}
+
+static int icnss_setup_vph_monitor(struct icnss_priv *priv)
+{
+	int ret = 0;
+
+	if (!priv->adc_tm_dev) {
+		icnss_pr_err("ADC TM handler is NULL\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	priv->vph_monitor_params.low_thr = ICNSS_THRESHOLD_LOW;
+	priv->vph_monitor_params.high_thr = ICNSS_THRESHOLD_HIGH;
+	priv->vph_monitor_params.state_request = ADC_TM_HIGH_LOW_THR_ENABLE;
+	priv->vph_monitor_params.channel = ADC_VBAT_SNS;
+	priv->vph_monitor_params.btm_ctx = priv;
+	priv->vph_monitor_params.threshold_notification = &icnss_vph_notify;
+	icnss_pr_dbg("Set low threshold to %d, high threshold to %d\n",
+		     priv->vph_monitor_params.low_thr,
+		     priv->vph_monitor_params.high_thr);
+
+	ret = adc_tm5_channel_measure(priv->adc_tm_dev,
+				      &priv->vph_monitor_params);
+	if (ret)
+		icnss_pr_err("TM channel setup failed %d\n", ret);
+out:
+	return ret;
+}
+
+static int icnss_init_vph_monitor(struct icnss_priv *priv)
+{
+	int ret = 0;
+
+	ret = icnss_get_phone_power(priv, &priv->vph_pwr);
+	if (ret < 0)
+		goto out;
+
+	icnss_pr_dbg("Phone power=%llu\n", priv->vph_pwr);
+
+	icnss_send_vbatt_update(priv, priv->vph_pwr);
+
+	ret = icnss_setup_vph_monitor(priv);
+	if (ret)
+		goto out;
+out:
+	return ret;
+}
+
 static int icnss_driver_event_server_arrive(void *data)
 {
 	int ret = 0;
@@ -834,6 +971,13 @@ static int icnss_driver_event_server_arrive(void *data)
 		goto fail;
 
 	set_bit(ICNSS_WLFW_CONNECTED, &penv->state);
+
+	if (penv->clk_monitor_enable &&
+	    !test_bit(ICNSS_CLK_UP, &penv->state)) {
+		reinit_completion(&penv->clk_complete);
+		icnss_pr_dbg("Waiting for CLK up notification\n");
+		wait_for_completion(&penv->clk_complete);
+	}
 
 	ret = icnss_hw_power_on(penv);
 	if (ret)
@@ -886,6 +1030,9 @@ static int icnss_driver_event_server_arrive(void *data)
 	if (!penv->fw_early_crash_irq)
 		register_early_crash_notifications(&penv->pdev->dev);
 
+	if (penv->vbatt_supported)
+		icnss_init_vph_monitor(penv);
+
 	return ret;
 
 err_setup_msa:
@@ -908,6 +1055,10 @@ static int icnss_driver_event_server_exit(void *data)
 	icnss_pr_info("WLAN FW Service Disconnected: 0x%lx\n", penv->state);
 
 	icnss_clear_server(penv);
+
+	if (penv->adc_tm_dev && penv->vbatt_supported)
+		adc_tm5_disable_chan_meas(penv->adc_tm_dev,
+					  &penv->vph_monitor_params);
 
 	return 0;
 }
@@ -1038,6 +1189,12 @@ static int icnss_driver_event_fw_ready_ind(void *data)
 
 	set_bit(ICNSS_FW_READY, &penv->state);
 	clear_bit(ICNSS_MODE_ON, &penv->state);
+	if (penv->clk_monitor_enable)
+		/*
+		 * Safe to release ESOC as WLAN FW
+		 * stage-2 recover is finished.
+		 */
+		complete(&penv->notif_complete);
 
 	icnss_pr_info("WLAN FW is ready: 0x%lx\n", penv->state);
 
@@ -1047,6 +1204,19 @@ static int icnss_driver_event_fw_ready_ind(void *data)
 		icnss_pr_err("Device is not ready\n");
 		ret = -ENODEV;
 		goto out;
+	}
+
+	if (penv->clk_monitor_enable) {
+		/* Wait for clock up notification if ESOC is off */
+		if (test_bit(ICNSS_ESOC_OFF, &penv->state) ||
+		    !test_bit(ICNSS_CLK_UP, &penv->state)) {
+			reinit_completion(&penv->clk_complete);
+			icnss_pr_dbg("Waiting for ESOC recovery 0x%lx\n",
+				     penv->state);
+			wait_for_completion(&penv->clk_complete);
+			clear_bit(ICNSS_ESOC_OFF, &penv->state);
+			set_bit(ICNSS_CLK_UP, &penv->state);
+		}
 	}
 
 	if (test_bit(ICNSS_PD_RESTART, &penv->state))
@@ -1423,8 +1593,8 @@ static int icnss_modem_notifier_nb(struct notifier_block *nb,
 	if (code == SUBSYS_BEFORE_SHUTDOWN && !notif->crashed &&
 	    test_bit(ICNSS_BLOCK_SHUTDOWN, &priv->state)) {
 		if (!wait_for_completion_timeout(&priv->unblock_shutdown,
-						 PROBE_TIMEOUT))
-			icnss_pr_err("wlan driver probe timeout\n");
+				msecs_to_jiffies(PROBE_TIMEOUT)))
+			icnss_pr_err("modem block shutdown timeout\n");
 	}
 
 	if (code == SUBSYS_BEFORE_SHUTDOWN && !notif->crashed) {
@@ -1479,6 +1649,160 @@ static int icnss_modem_notifier_nb(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+static int icnss_ext_modem_notifier_nb(struct notifier_block *nb,
+				       unsigned long code,
+				       void *data)
+{
+	struct icnss_priv *priv = container_of(nb, struct icnss_priv,
+					       ext_modem_ssr_nb);
+	icnss_pr_dbg("EXT-Modem-Notify: event %lu\n", code);
+
+
+	if (code == SUBSYS_AFTER_POWERUP) {
+		clear_bit(ICNSS_ESOC_OFF, &priv->state);
+		set_bit(ICNSS_CLK_UP, &priv->state);
+		complete(&priv->clk_complete);
+	}
+
+	return NOTIFY_OK;
+}
+
+static int icnss_ext_modem_ssr_register_notifier(struct icnss_priv *priv)
+{
+	int ret = 0;
+
+	priv->ext_modem_ssr_nb.notifier_call = icnss_ext_modem_notifier_nb;
+
+	priv->ext_modem_notify_handler =
+		subsys_notif_register_notifier(SUBSYS_EXTERNAL_MODEM_NAME,
+					       &priv->ext_modem_ssr_nb);
+
+	if (IS_ERR_OR_NULL(priv->ext_modem_notify_handler)) {
+		ret = PTR_ERR(priv->ext_modem_notify_handler);
+		icnss_pr_err("External Modem register notifier failed %d\n",
+			     ret);
+		priv->ext_modem_notify_handler = NULL;
+		/* In NULL case */
+		if (ret == 0)
+			ret = -EINVAL;
+		return ret;
+	}
+
+	init_completion(&priv->clk_complete);
+
+	return ret;
+}
+
+static int icnss_ext_modem_ssr_unregister_notifier(struct icnss_priv *priv)
+{
+	int ret = 0;
+
+	if (!priv->ext_modem_notify_handler)
+		return 0;
+
+	complete_all(&priv->clk_complete);
+	ret = subsys_notif_unregister_notifier(priv->ext_modem_notify_handler,
+					       &priv->ext_modem_ssr_nb);
+	if (ret)
+		icnss_pr_err("Fail to unregister external Modem notifier %d\n",
+			     ret);
+
+	priv->ext_modem_notify_handler = NULL;
+
+	return 0;
+}
+
+static void icnss_esoc_ops_power_off(void *data, unsigned int flags)
+{
+	int ret = 0;
+	struct icnss_priv *priv = data;
+
+	icnss_pr_dbg("ESOC_POWER_OFF notify: %u\n", flags);
+
+	if (!(flags & ESOC_HOOK_MDM_DOWN))
+		return;
+
+	set_bit(ICNSS_ESOC_OFF, &priv->state);
+	if (test_bit(ICNSS_CLK_UP, &priv->state)) {
+		if (test_bit(ICNSS_PD_RESTART, &priv->state))
+			goto out;
+
+		ret = icnss_trigger_recovery(&priv->pdev->dev);
+		if (ret < 0) {
+			icnss_fatal_err("Fail to trigger PDR: ret: %d, state: 0x%lx\n",
+					ret, priv->state);
+			goto out;
+		}
+
+		reinit_completion(&priv->notif_complete);
+		ret = wait_for_completion_timeout
+			(&priv->notif_complete,
+			 msecs_to_jiffies(FW_READY_TIMEOUT));
+		if (!ret) {
+			icnss_fatal_err("Timeout waiting for FW ready notification\n");
+			goto out;
+		}
+	}
+
+out:
+	clear_bit(ICNSS_CLK_UP, &priv->state);
+}
+
+static int icnss_register_esoc_client(struct icnss_priv *priv)
+{
+	int ret = 0;
+	struct esoc_client_hook *esoc_ops = NULL;
+
+	priv->esoc_client =
+		devm_register_esoc_client(&priv->pdev->dev, "mdm");
+
+	if (IS_ERR_OR_NULL(priv->esoc_client)) {
+		ret = PTR_ERR(priv->esoc_client);
+		icnss_pr_err("Failed to register esoc client: %d\n", ret);
+		if (ret == 0)
+			ret = -EPROBE_DEFER;
+		return ret;
+	}
+
+	esoc_ops = &priv->esoc_ops;
+	esoc_ops->priv = priv;
+	esoc_ops->prio = ESOC_CNSS_HOOK;
+	esoc_ops->esoc_link_power_off =
+		icnss_esoc_ops_power_off;
+
+	ret = esoc_register_client_hook(priv->esoc_client,
+					esoc_ops);
+	if (ret) {
+		icnss_pr_err("Failed to register esoc ops: %d\n", ret);
+		goto unregister_esoc_client;
+	}
+
+	init_completion(&priv->notif_complete);
+
+	return ret;
+
+unregister_esoc_client:
+	devm_unregister_esoc_client(&priv->pdev->dev,
+				    priv->esoc_client);
+	return ret;
+}
+
+static int icnss_unregister_esoc_client(struct icnss_priv *priv)
+{
+	if (!priv->esoc_client)
+		return 0;
+
+	complete_all(&priv->notif_complete);
+
+	esoc_unregister_client_hook(priv->esoc_client,
+				    &priv->esoc_ops);
+	devm_unregister_esoc_client(&priv->pdev->dev,
+				    priv->esoc_client);
+	priv->esoc_client = NULL;
+
+	return 0;
+}
+
 static int icnss_modem_ssr_register_notifier(struct icnss_priv *priv)
 {
 	int ret = 0;
@@ -1486,7 +1810,8 @@ static int icnss_modem_ssr_register_notifier(struct icnss_priv *priv)
 	priv->modem_ssr_nb.notifier_call = icnss_modem_notifier_nb;
 
 	priv->modem_notify_handler =
-		subsys_notif_register_notifier("modem", &priv->modem_ssr_nb);
+		subsys_notif_register_notifier(SUBSYS_INTERNAL_MODEM_NAME,
+					       &priv->modem_ssr_nb);
 
 	if (IS_ERR(priv->modem_notify_handler)) {
 		ret = PTR_ERR(priv->modem_notify_handler);
@@ -2787,6 +3112,12 @@ static int icnss_stats_show_state(struct seq_file *s, struct icnss_priv *priv)
 		case ICNSS_PDR:
 			seq_puts(s, "PDR TRIGGERED");
 			continue;
+		case ICNSS_CLK_UP:
+			seq_puts(s, "CLK UP");
+			continue;
+		case ICNSS_ESOC_OFF:
+			seq_puts(s, "ESOC_OFF");
+			continue;
 		case ICNSS_MODEM_CRASHED:
 			seq_puts(s, "MODEM CRASHED");
 		}
@@ -3247,6 +3578,44 @@ static void icnss_sysfs_destroy(struct icnss_priv *priv)
 		kobject_put(icnss_kobject);
 }
 
+static int icnss_get_vbatt_info(struct icnss_priv *priv)
+{
+	struct adc_tm_chip *adc_tm_dev = NULL;
+	struct iio_channel *channel = NULL;
+	int ret = 0;
+
+	adc_tm_dev = get_adc_tm(&priv->pdev->dev, "icnss");
+	if (PTR_ERR(adc_tm_dev) == -EPROBE_DEFER) {
+		icnss_pr_err("adc_tm_dev probe defer\n");
+		return -EPROBE_DEFER;
+	}
+
+	if (IS_ERR(adc_tm_dev)) {
+		ret = PTR_ERR(adc_tm_dev);
+		icnss_pr_err("Not able to get ADC dev, VBATT monitoring is disabled: %d\n",
+			     ret);
+		return ret;
+	}
+
+	channel = iio_channel_get(&priv->pdev->dev, "icnss");
+	if (PTR_ERR(channel) == -EPROBE_DEFER) {
+		icnss_pr_err("channel probe defer\n");
+		return -EPROBE_DEFER;
+	}
+
+	if (IS_ERR(channel)) {
+		ret = PTR_ERR(channel);
+		icnss_pr_err("Not able to get VADC dev, VBATT monitoring is disabled: %d\n",
+			     ret);
+		return ret;
+	}
+
+	priv->adc_tm_dev = adc_tm_dev;
+	priv->channel = channel;
+
+	return 0;
+}
+
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -3275,6 +3644,13 @@ static int icnss_probe(struct platform_device *pdev)
 	priv->pdev = pdev;
 
 	priv->vreg_info = icnss_vreg_info;
+
+	if (of_property_read_bool(pdev->dev.of_node, "qcom,icnss-adc_tm")) {
+		ret = icnss_get_vbatt_info(priv);
+		if (ret == -EPROBE_DEFER)
+			goto out;
+		priv->vbatt_supported = true;
+	}
 
 	for (i = 0; i < ICNSS_VREG_INFO_SIZE; i++) {
 		ret = icnss_get_vreg_info(dev, &priv->vreg_info[i]);
@@ -3410,6 +3786,22 @@ static int icnss_probe(struct platform_device *pdev)
 		}
 	}
 
+	if (of_property_read_bool(pdev->dev.of_node,
+				  "qcom,clk-monitor-enable")) {
+		priv->clk_monitor_enable = true;
+		icnss_pr_dbg("CLK monitor is enabled\n");
+	}
+
+	if (priv->clk_monitor_enable) {
+		ret = icnss_ext_modem_ssr_register_notifier(priv);
+		if (ret)
+			goto out_smmu_deinit;
+
+		ret = icnss_register_esoc_client(priv);
+		if (ret)
+			goto out_unregister_ext_modem;
+	}
+
 	spin_lock_init(&priv->event_lock);
 	spin_lock_init(&priv->on_off_lock);
 	mutex_init(&priv->dev_lock);
@@ -3418,7 +3810,7 @@ static int icnss_probe(struct platform_device *pdev)
 	if (!priv->event_wq) {
 		icnss_pr_err("Workqueue creation failed\n");
 		ret = -EFAULT;
-		goto out_smmu_deinit;
+		goto out_unregister_esoc_client;
 	}
 
 	INIT_WORK(&priv->event_work, icnss_driver_event_work);
@@ -3451,6 +3843,10 @@ static int icnss_probe(struct platform_device *pdev)
 
 out_destroy_wq:
 	destroy_workqueue(priv->event_wq);
+out_unregister_esoc_client:
+	icnss_unregister_esoc_client(priv);
+out_unregister_ext_modem:
+	icnss_ext_modem_ssr_unregister_notifier(priv);
 out_smmu_deinit:
 	icnss_smmu_deinit(priv);
 out:
@@ -3480,6 +3876,10 @@ static int icnss_remove(struct platform_device *pdev)
 	icnss_unregister_fw_service(penv);
 	if (penv->event_wq)
 		destroy_workqueue(penv->event_wq);
+
+	icnss_unregister_esoc_client(penv);
+
+	icnss_ext_modem_ssr_unregister_notifier(penv);
 
 	icnss_hw_power_off(penv);
 

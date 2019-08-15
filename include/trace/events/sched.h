@@ -169,7 +169,7 @@ static inline long __trace_sched_switch_state(bool preempt, struct task_struct *
 		return TASK_REPORT_MAX;
 
 	/*
-	 * task_state_index() uses fls() and returns a value from 0-8 range.
+	 * __get_task_state() uses fls(), which considers LSB as 0. So
 	 * Decrement it by 1 (except TASK_RUNNING state i.e 0) before using
 	 * it for left shift operation to get the correct task->state
 	 * mapping.
@@ -965,7 +965,8 @@ TRACE_EVENT(sched_load_se,
 		__entry->cpu = __trace_sched_cpu(gcfs_rq, se);
 		__trace_sched_path(gcfs_rq, __get_dynamic_array(path),
 				   __get_dynamic_array_len(path));
-		memcpy(__entry->comm, p ? p->comm : "(null)", TASK_COMM_LEN);
+		memcpy(__entry->comm, p ? p->comm : "(null)",
+				      p ? TASK_COMM_LEN : sizeof("(null)"));
 		__entry->pid = p ? p->pid : -1;
 		__entry->load = se->avg.load_avg;
 		__entry->util = se->avg.util_avg;

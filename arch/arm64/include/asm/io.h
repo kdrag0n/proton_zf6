@@ -206,13 +206,13 @@ static inline u64 __raw_readq_no_log(const volatile void __iomem *addr)
 #define writeq(v,c)		({ __iowmb(); writeq_relaxed((v),(c)); })
 
 #define readb_no_log(c) \
-		({ u8  __v = readb_relaxed_no_log(c); __iormb(); __v; })
+		({ u8  __v = readb_relaxed_no_log(c); __iormb(__v); __v; })
 #define readw_no_log(c) \
-		({ u16 __v = readw_relaxed_no_log(c); __iormb(); __v; })
+		({ u16 __v = readw_relaxed_no_log(c); __iormb(__v); __v; })
 #define readl_no_log(c) \
-		({ u32 __v = readl_relaxed_no_log(c); __iormb(); __v; })
+		({ u32 __v = readl_relaxed_no_log(c); __iormb(__v); __v; })
 #define readq_no_log(c) \
-		({ u64 __v = readq_relaxed_no_log(c); __iormb(); __v; })
+		({ u64 __v = readq_relaxed_no_log(c); __iormb(__v); __v; })
 
 #define writeb_no_log(v, c) \
 		({ __iowmb(); writeb_relaxed_no_log((v), (c)); })

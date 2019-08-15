@@ -116,8 +116,13 @@ void free_buffer_page(struct ion_system_heap *heap,
 			ion_page_pool_free_immediate(pool, page);
 		else
 			ion_page_pool_free(pool, page);
+
+		mod_node_page_state(page_pgdat(page), NR_UNRECLAIMABLE_PAGES,
+				    -(1 << pool->order));
 	} else {
 		__free_pages(page, order);
+		mod_node_page_state(page_pgdat(page), NR_UNRECLAIMABLE_PAGES,
+				    -(1 << order));
 	}
 }
 
@@ -316,6 +321,10 @@ static int ion_system_heap_allocate(struct ion_heap *heap,
 		}
 
 		sz = (1 << info->order) * PAGE_SIZE;
+
+		mod_node_page_state(
+				page_pgdat(info->page), NR_UNRECLAIMABLE_PAGES,
+				(1 << (info->order)));
 
 		if (info->from_pool) {
 			list_add_tail(&info->list, &pages_from_pool);
@@ -624,7 +633,6 @@ static int ion_system_heap_create_pools(struct ion_page_pool **pools,
 					bool cached)
 {
 	int i;
-
 	for (i = 0; i < NUM_ORDERS; i++) {
 		struct ion_page_pool *pool;
 		gfp_t gfp_flags = low_order_gfp_flags;

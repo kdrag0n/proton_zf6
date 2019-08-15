@@ -32,6 +32,7 @@
 #include <linux/kthread.h>
 
 #include <asm/switch_to.h>
+#include <linux/msm_rtb.h>
 #include <asm/tlb.h>
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
@@ -767,8 +768,10 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 	if (!(flags & ENQUEUE_NOCLOCK))
 		update_rq_clock(rq);
 
-	if (!(flags & ENQUEUE_RESTORE))
+	if (!(flags & ENQUEUE_RESTORE)) {
 		sched_info_queued(rq, p);
+		psi_enqueue(p, flags & ENQUEUE_WAKEUP);
+	}
 
 	p->sched_class->enqueue_task(rq, p, flags);
 	walt_update_last_enqueue(p);
@@ -780,8 +783,10 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	if (!(flags & DEQUEUE_NOCLOCK))
 		update_rq_clock(rq);
 
-	if (!(flags & DEQUEUE_SAVE))
+	if (!(flags & DEQUEUE_SAVE)) {
 		sched_info_dequeued(rq, p);
+		psi_dequeue(p, flags & DEQUEUE_SLEEP);
+	}
 
 	p->sched_class->dequeue_task(rq, p, flags);
 #ifdef CONFIG_SCHED_WALT
@@ -2162,6 +2167,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags,
 			     sibling_count_hint);
 	if (task_cpu(p) != cpu) {
 		wake_flags |= WF_MIGRATED;
+		psi_ttwu_dequeue(p);
 		set_task_cpu(p, cpu);
 	}
 
@@ -2916,7 +2922,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 */
 	rq_unpin_lock(rq, rf);
 	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
-
+	uncached_logk(LOGK_CTXID, (void *)(u64)next->pid);
 	/* Here we just switch the register state and the stack. */
 	switch_to(prev, next, prev);
 	barrier();
@@ -3157,6 +3163,7 @@ void scheduler_tick(void)
 	curr->sched_class->task_tick(rq, curr, 0);
 	cpu_load_update_active(rq);
 	calc_global_load_tick(rq);
+	psi_task_tick(rq);
 
 	early_notif = early_detection_notify(rq, wallclock);
 	if (early_notif)
@@ -4889,6 +4896,9 @@ again:
 		retval = -EINVAL;
 	}
 
+	if (!retval && !(p->flags & PF_KTHREAD))
+		cpumask_and(&p->cpus_requested, in_mask, cpu_possible_mask);
+
 out_free_new_mask:
 	free_cpumask_var(new_mask);
 out_free_cpus_allowed:
@@ -6246,6 +6256,7 @@ int sched_cpu_starting(unsigned int cpu)
 {
 	set_cpu_rq_start_time(cpu);
 	sched_rq_cpu_starting(cpu);
+	clear_walt_request(cpu);
 	return 0;
 }
 
@@ -6306,6 +6317,7 @@ void __init sched_init_smp(void)
 	/* Move init over to a non-isolated CPU */
 	if (set_cpus_allowed_ptr(current, non_isolated_cpus) < 0)
 		BUG();
+	cpumask_copy(&current->cpus_requested, cpu_possible_mask);
 	sched_init_granularity();
 	free_cpumask_var(non_isolated_cpus);
 
@@ -6477,6 +6489,7 @@ void __init sched_init(void)
 		rq->avg_idle = 2*sysctl_sched_migration_cost;
 		rq->max_idle_balance_cost = sysctl_sched_migration_cost;
 		rq->push_task = NULL;
+		rq->extra_flags = 0;
 		walt_sched_init_rq(rq);
 
 		INIT_LIST_HEAD(&rq->cfs_tasks);
@@ -6526,6 +6539,8 @@ void __init sched_init(void)
 	init_sched_fair_class();
 
 	init_schedstats();
+
+	psi_init();
 
 	scheduler_running = 1;
 }
