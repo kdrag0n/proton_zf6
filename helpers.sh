@@ -395,3 +395,12 @@ function unsetup() {
 		unset -v "$var" > /dev/null 2>&1
 	done
 }
+
+# Update CAF subtrees to a given tag
+function utree() {
+        git subtree pull --prefix techpack/audio audio-kernel "$1"
+        git subtree pull --prefix techpack/data data-kernel "$1"
+        git subtree pull --prefix drivers/staging/qcacld-3.0 qcacld-3.0 "$1"
+        git subtree pull --prefix drivers/staging/qca-wifi-host-cmn qca-wifi-host-cmn "$1"
+        git subtree pull --prefix drivers/staging/fw-api fw-api "$1"
+}
