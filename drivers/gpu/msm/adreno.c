@@ -835,9 +835,6 @@ adreno_identify_gpu(struct adreno_device *adreno_dev)
 
 	adreno_dev->gmem_size = adreno_dev->gpucore->gmem_size;
 
-	/* UCHE to GMEM base address requires 1MB alignment */
-	adreno_dev->uche_gmem_base = ALIGN(adreno_dev->gmem_size, SZ_1M);
-
 	/*
 	 * Initialize uninitialzed gpu registers, only needs to be done once
 	 * Make all offsets that are not initialized to ADRENO_REG_UNUSED
@@ -2558,7 +2555,7 @@ static int adreno_getproperty(struct kgsl_device *device,
 
 			if (adreno_is_a5xx(adreno_dev) ||
 					adreno_is_a6xx(adreno_dev))
-				gmem_vaddr = adreno_dev->uche_gmem_base;
+				gmem_vaddr = ADRENO_UCHE_GMEM_BASE;
 			if (sizebytes != sizeof(uint64_t)) {
 				status = -EINVAL;
 				break;
