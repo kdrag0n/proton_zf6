@@ -193,11 +193,6 @@ static const uint8_t *lim_trace_tdls_action_string(uint8_t tdlsActionCode)
 	}
 	return (const uint8_t *)"UNKNOWN";
 }
-#else
-static inline const uint8_t *lim_trace_tdls_action_string(uint8_t tdlsActionCode)
-{
-	return "";
-}
 #endif
 
 /*
