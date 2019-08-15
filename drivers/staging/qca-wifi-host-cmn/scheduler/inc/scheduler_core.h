@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -32,7 +32,7 @@
 #endif
 #define SCHEDULER_NUMBER_OF_MSG_QUEUE 6
 #define SCHEDULER_WRAPPER_MAX_FAIL_COUNT (SCHEDULER_CORE_MAX_MESSAGES * 3)
-#define SCHEDULER_WATCHDOG_TIMEOUT (10 * 1000) /* 10s */
+#define SCHEDULER_WATCHDOG_TIMEOUT (30 * 1000) /* 30s */
 
 #define __sched_log(level, format, args...) \
 	QDF_TRACE(QDF_MODULE_ID_SCHEDULER, level, FL(format), ## args)
