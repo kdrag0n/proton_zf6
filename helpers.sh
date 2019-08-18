@@ -54,6 +54,8 @@ _ksetup_vars+=(
 	kroot
 	_ksetup_vars
 	_ksetup_functions
+	_ksetup_old_ld_path
+	_ksetup_old_path
 )
 _ksetup_functions+=(
 	msg
@@ -88,6 +90,7 @@ _ksetup_functions+=(
 	osize
 	glink
 	unsetup
+	utree
 )
 
 # Get kernel repository root for later use
@@ -387,8 +390,8 @@ function unsetup() {
 	done
 
 	# Restore PATH and LD_LIBRARY_PATH if they were modified
-	[[ -z "$_ksetup_old_path" ]] && export PATH="$_ksetup_old_path"
-	[[ -z "$_ksetup_old_ld_path" ]] && export LD_LIBRARY_PATH="$_ksetup_old_ld_path"
+	[[ ! -z "$_ksetup_old_path" ]] && export PATH="$_ksetup_old_path"
+	[[ ! -z "$_ksetup_old_ld_path" ]] && export LD_LIBRARY_PATH="$_ksetup_old_ld_path"
 
 	# Unset variables
 	for var in "${_ksetup_vars[@]}"; do

@@ -37,8 +37,6 @@ _ksetup_vars+=(
 	gcc_prefix32
 	jobs
 	kmake_flags
-	_ksetup_old_ld_path
-	_ksetup_old_path
 )
 
 kmake_flags+=(
