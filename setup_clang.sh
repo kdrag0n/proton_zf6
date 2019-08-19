@@ -7,13 +7,13 @@
 #
 
 # Path to executables in Clang toolchain
-clang_bin="$HOME/toolchains/proton_clang-10.0.0-20190806/bin"
+clang_bin="$HOME/toolchains/proton_clang-10.0.0-20190818/bin"
 
 # 64-bit GCC toolchain prefix
-gcc_prefix64="$HOME/toolchains/proton_clang-10.0.0-20190806/bin/aarch64-linux-gnu-"
+gcc_prefix64="$HOME/toolchains/proton_clang-10.0.0-20190818/bin/aarch64-linux-gnu-"
 
 # 32-bit GCC toolchain prefix
-gcc_prefix32="$HOME/toolchains/proton_clang-10.0.0-20190806/bin/arm-linux-gnueabi-"
+gcc_prefix32="$HOME/toolchains/proton_clang-10.0.0-20190818/bin/arm-linux-gnueabi-"
 
 # Number of parallel jobs to run
 # Do not remove; set to 1 for no parallelism.
