@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1054,6 +1054,7 @@ end:
 	if (blen <= 0)
 		return 0;
 
+	blen = min_t(size_t, MAX_BUFFER_SIZE, count);
 	if (copy_to_user(buf, buffer, blen))
 		return -EFAULT;
 
@@ -1147,6 +1148,7 @@ end:
 	if (blen <= 0)
 		return 0;
 
+	blen = min_t(size_t, MAX_BUFFER_SIZE, count);
 	if (copy_to_user(buf, buffer, blen))
 		return -EFAULT;
 
