@@ -18,6 +18,15 @@
 #include "cam_common_util.h"
 
 #include "asus_flash.h"
+
+#include <linux/workqueue.h>
+#include <linux/timer.h>
+
+#define DELAY_TIME 500
+static struct delayed_work *current_flash_off_work = NULL;
+static DEFINE_MUTEX(g_flash_mutex);
+static void cam_delay_flash_off(struct work_struct *work);
+
 static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		void *arg, struct cam_flash_private_soc *soc_private)
 {
@@ -36,7 +45,7 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 			cmd->handle_type);
 		return -EINVAL;
 	}
-
+	mutex_lock(&g_flash_mutex);
 	mutex_lock(&(fctrl->flash_mutex));
 	switch (cmd->op_code) {
 	case CAM_ACQUIRE_DEV: {
@@ -93,6 +102,7 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 			goto release_mutex;
 		}
 		fctrl->flash_state = CAM_FLASH_STATE_ACQUIRE;
+		cam_flash_copy_fctrl(fctrl);
 		break;
 	}
 	case CAM_RELEASE_DEV: {
@@ -122,6 +132,20 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 			rc = -EAGAIN;
 			goto release_mutex;
 		}
+
+		if(!current_flash_off_work) {
+			CAM_DBG(CAM_FLASH, "CAM_RELEASE_DEV current_flash_off_work is NULL");
+		}
+		else {
+			CAM_DBG(CAM_FLASH, "CAM_RELEASE_DEV fctrl: %p ax_flash_type: %d current_flash_off_work: %p",
+			fctrl,
+			fctrl->ax_flash_type,
+			current_flash_off_work);
+		}
+
+		if (CAMERA_SENSOR_FLASH_OP_OFF != fctrl->ax_flash_type)
+			cam_flash_off(fctrl);
+		cam_cancel_delay_flash(fctrl);
 
 		if ((fctrl->flash_state == CAM_FLASH_STATE_CONFIG) ||
 			(fctrl->flash_state == CAM_FLASH_STATE_START))
@@ -185,7 +209,35 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 			goto release_mutex;
 		}
 
-		cam_flash_off(fctrl);
+		if(!current_flash_off_work) {
+			CAM_DBG(CAM_FLASH, "CAM_STOP_DEV current_flash_off_work is NULL");
+		}
+		else {
+			CAM_DBG(CAM_FLASH, "CAM_STOP_DEV fctrl: %p ax_flash_type: %d current_flash_off_work: %p",
+			fctrl,
+			fctrl->ax_flash_type,
+			current_flash_off_work);
+		}
+
+		if(fctrl->ax_flash_type == CAMERA_SENSOR_FLASH_OP_FIRELOW)
+		{
+			if (NULL != current_flash_off_work && delayed_work_pending(current_flash_off_work)) {
+				cancel_delayed_work(current_flash_off_work);
+				current_flash_off_work = NULL;
+				CAM_DBG(CAM_FLASH, "cancel previous delayed work");
+			}
+			if (!schedule_delayed_work(&fctrl->flash_off_work,msecs_to_jiffies(DELAY_TIME))) {
+				cam_flash_off(fctrl);
+				CAM_DBG(CAM_FLASH, "schedule delayed work failed");
+			}
+			else {
+				current_flash_off_work = &fctrl->flash_off_work;
+				CAM_DBG(CAM_FLASH, "schedule delayed work success current_flash_off_work %p",current_flash_off_work);
+			}
+		}
+		else
+			cam_flash_off(fctrl);
+
 		fctrl->func_tbl.flush_req(fctrl, FLUSH_ALL, 0);
 		fctrl->last_flush_req = 0;
 		fctrl->flash_state = CAM_FLASH_STATE_ACQUIRE;
@@ -207,6 +259,7 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 
 release_mutex:
 	mutex_unlock(&(fctrl->flash_mutex));
+	mutex_unlock(&g_flash_mutex);
 	return rc;
 }
 
@@ -506,8 +559,10 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 	mutex_init(&(fctrl->flash_mutex));
 
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+
+	fctrl->ax_flash_type = CAMERA_SENSOR_FLASH_OP_OFF;
+	INIT_DELAYED_WORK(&fctrl->flash_off_work, cam_delay_flash_off);
 	asus_flash_init(fctrl);//ASUS_BSP Zhengwei "porting flash"
-	cam_flash_copy_fctrl(fctrl);
 
 	CAM_INFO(CAM_FLASH, "Flash probe succeed");
 	return rc;
@@ -654,6 +709,58 @@ static void __exit cam_flash_exit_module(void)
 {
 	platform_driver_unregister(&cam_flash_platform_driver);
 	i2c_del_driver(&cam_flash_i2c_driver);
+}
+
+static void cam_delay_flash_off(struct work_struct *work)
+{
+	int flash_state;
+	struct cam_flash_ctrl *fctrl = container_of(to_delayed_work(work), struct cam_flash_ctrl, flash_off_work);
+
+	mutex_lock(&g_flash_mutex);
+	mutex_lock(&(fctrl->flash_mutex));
+	if(!fctrl || !current_flash_off_work) {
+		CAM_DBG(CAM_FLASH, "fctrl/current_flash_off_work is NULL");
+	}
+	else {
+		CAM_DBG(CAM_FLASH, "fctrl: %p, ax_flash_type: %d, current_flash_off_work: %p",
+		fctrl,
+		fctrl->ax_flash_type,
+		current_flash_off_work);
+
+		current_flash_off_work = NULL;
+		if (CAMERA_SENSOR_FLASH_OP_OFF != fctrl->ax_flash_type) {
+			flash_state = fctrl->flash_state;
+			if (!cam_flash_off(fctrl)) {
+				fctrl->flash_state = flash_state;
+			}
+		}
+	}
+	mutex_unlock(&(fctrl->flash_mutex));
+	mutex_unlock(&g_flash_mutex);
+}
+
+void cam_cancel_delay_flash(struct cam_flash_ctrl *fctrl)
+{
+	if(!fctrl || !current_flash_off_work) {
+		CAM_DBG(CAM_FLASH, "fctrl/current_flash_off_work is NULL");
+	}
+	else {
+		CAM_DBG(CAM_FLASH, "fctrl: %p, ax_flash_type: %d, current_flash_off_work: %p, flash_off_work: %p",
+		fctrl,
+		fctrl->ax_flash_type,
+		current_flash_off_work,
+		&fctrl->flash_off_work);
+	}
+
+	if (NULL != current_flash_off_work && delayed_work_pending(current_flash_off_work)) {
+		if (!cancel_delayed_work(current_flash_off_work)) {
+			CAM_DBG(CAM_FLASH, "cancel delayed work failed");
+		}
+		else {
+			current_flash_off_work = NULL;
+			CAM_DBG(CAM_FLASH, "cancel delayed work success");
+		}
+	}
 }
 
 module_init(cam_flash_init_module);

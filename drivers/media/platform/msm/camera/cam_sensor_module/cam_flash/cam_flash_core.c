@@ -22,8 +22,7 @@
 #define UINT uint32_t
 
 static int asus_bat_low = 0;
-static int asus_flash_state = 0;
-static struct cam_flash_ctrl *asus_fctrl;
+static struct cam_flash_ctrl *asus_fctrl = NULL;
 
 int cam_flash_prepare(struct cam_flash_ctrl *flash_ctrl,
 	bool regulator_enable)
@@ -459,6 +458,7 @@ static int cam_flash_ops(struct cam_flash_ctrl *flash_ctrl,
 				i, curr);
 			cam_res_mgr_led_trigger_event(
 				flash_ctrl->torch_trigger[i], curr);
+			flash_ctrl->ax_flash_type = CAMERA_SENSOR_FLASH_OP_FIRELOW;
 		}
 	} else if (op == CAMERA_SENSOR_FLASH_OP_FIREHIGH) {
 		for (i = 0; i < flash_ctrl->flash_num_sources; i++) {
@@ -474,6 +474,7 @@ static int cam_flash_ops(struct cam_flash_ctrl *flash_ctrl,
 				i, curr);
 			cam_res_mgr_led_trigger_event(
 				flash_ctrl->flash_trigger[i], curr);
+			flash_ctrl->ax_flash_type = CAMERA_SENSOR_FLASH_OP_FIREHIGH;
 		}
 	} else {
 		CAM_ERR(CAM_FLASH, "Wrong Operation: %d", op);
@@ -484,6 +485,10 @@ static int cam_flash_ops(struct cam_flash_ctrl *flash_ctrl,
 		cam_res_mgr_led_trigger_event(
 			flash_ctrl->switch_trigger,
 			(enum led_brightness)LED_SWITCH_ON);
+
+	CAM_DBG(CAM_FLASH, "fctrl: %p, ax_flash_type: %d",
+		flash_ctrl,
+		flash_ctrl->ax_flash_type);
 
 	return 0;
 }
@@ -500,6 +505,13 @@ int cam_flash_off(struct cam_flash_ctrl *flash_ctrl)
 			(enum led_brightness)LED_SWITCH_OFF);
 
 	flash_ctrl->flash_state = CAM_FLASH_STATE_START;
+
+	CAM_DBG(CAM_FLASH, "fctrl: %p, ax_flash_type: %d",
+		flash_ctrl,
+		flash_ctrl->ax_flash_type);
+
+	flash_ctrl->ax_flash_type = CAMERA_SENSOR_FLASH_OP_OFF;
+
 	return 0;
 }
 
@@ -1030,12 +1042,6 @@ int cam_flash_pmic_apply_setting(struct cam_flash_ctrl *fctrl,
 			goto apply_setting_err;
 		}
 	}
-
-	if ((flash_data->opcode == CAMERA_SENSOR_FLASH_OP_FIREHIGH) ||
-	(flash_data->opcode == CAMERA_SENSOR_FLASH_OP_FIRELOW))
-		asus_flash_state = 1;
-	else if(flash_data->opcode == CAMERA_SENSOR_FLASH_OP_OFF)
-		asus_flash_state = 0;
 
 nrt_del_req:
 	cam_flash_pmic_delete_req(fctrl, req_id);
@@ -1652,6 +1658,7 @@ int cam_flash_pmic_pkt_parser(struct cam_flash_ctrl *fctrl, void *arg)
 				goto rel_cmd_buf;
 			}
 
+			cam_cancel_delay_flash(fctrl);
 			flash_data->opcode = flash_operation_info->opcode;
 			flash_data->cmn_attr.count =
 				flash_operation_info->count;
@@ -1706,6 +1713,7 @@ int cam_flash_pmic_pkt_parser(struct cam_flash_ctrl *fctrl, void *arg)
 				rc = -EINVAL;
 				goto rel_pkt_buf;
 			}
+			cam_cancel_delay_flash(fctrl);
 			flash_operation_info =
 				(struct cam_flash_set_on_off *) cmd_buf;
 			if (!flash_operation_info) {
@@ -1997,17 +2005,17 @@ int cam_flash_battery_low(int enable)
 		return -EINVAL;
 
 	mutex_lock(&asus_fctrl->flash_mutex);
-	if(asus_flash_state && enable)
+	if((CAMERA_SENSOR_FLASH_OP_OFF != asus_fctrl->ax_flash_type) && enable)
 		cam_flash_off(asus_fctrl);
 	mutex_unlock(&asus_fctrl->flash_mutex);
 
-	CAM_DBG(CAM_FLASH, "enable:%d flash_state:%d",
-		asus_bat_low,asus_flash_state);
+	CAM_DBG(CAM_FLASH, "enable:%d ax_flash_type:%d fctrl: %p",
+		asus_bat_low, asus_fctrl->ax_flash_type, asus_fctrl);
 	return 0;
 }
 
 void cam_flash_copy_fctrl(struct cam_flash_ctrl * fctrl)
 {
-	if(fctrl)
+	if(NULL != fctrl && asus_fctrl != fctrl)
 		asus_fctrl = fctrl;
 }

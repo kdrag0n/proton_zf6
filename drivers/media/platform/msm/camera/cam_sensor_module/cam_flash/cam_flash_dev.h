@@ -185,6 +185,8 @@ struct cam_flash_func_tbl {
  * @io_master_info      : Information about the communication master
  * @i2c_data            : I2C register settings
  * @last_flush_req      : last request to flush
+ * @ax_flash_type      : current flash type
+ * @flash_off_work     : delayed flash work
  */
 struct cam_flash_ctrl {
 	char device_name[CAM_CTX_DEV_NAME_MAX_LENGTH];
@@ -212,6 +214,8 @@ struct cam_flash_ctrl {
 	struct camera_io_master             io_master_info;
 	struct i2c_data_settings            i2c_data;
 	uint32_t                            last_flush_req;
+	uint8_t                             ax_flash_type;
+	struct delayed_work             flash_off_work;
 };
 
 int cam_flash_pmic_pkt_parser(struct cam_flash_ctrl *fctrl, void *arg);
@@ -229,5 +233,5 @@ int cam_flash_pmic_flush_request(struct cam_flash_ctrl *fctrl,
 	enum cam_flash_flush_type, uint64_t req_id);
 void cam_flash_shutdown(struct cam_flash_ctrl *fctrl);
 int cam_flash_release_dev(struct cam_flash_ctrl *fctrl);
-
+void cam_cancel_delay_flash(struct cam_flash_ctrl *fctrl);
 #endif /*_CAM_FLASH_DEV_H_*/

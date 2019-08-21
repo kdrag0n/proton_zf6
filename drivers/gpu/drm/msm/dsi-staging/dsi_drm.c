@@ -976,20 +976,29 @@ int dsi_conn_post_kickoff(struct drm_connector *connector)
 
 struct drm_bridge *bridge4pm;
 int display_early_init = 0;
+extern struct mutex dsi_op_mutex;
 
 void dsi_suspend (void)
 {
+	mutex_lock(&dsi_op_mutex);
+
 	dsi_bridge_disable(bridge4pm);
 	dsi_bridge_post_disable(bridge4pm);
 	display_early_init = 0;
+
+	mutex_unlock(&dsi_op_mutex);
 }
 EXPORT_SYMBOL(dsi_suspend);
 
 void dsi_resume (void)
 {
+	mutex_lock(&dsi_op_mutex);
+
 	display_early_init = 1;
 	dsi_bridge_pre_enable(bridge4pm);
 	dsi_bridge_enable(bridge4pm);
+
+	mutex_unlock(&dsi_op_mutex);
 }
 EXPORT_SYMBOL(dsi_resume);
 

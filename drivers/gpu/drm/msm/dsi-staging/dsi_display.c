@@ -83,6 +83,7 @@ void asus_lcd_set_tcon_cmd(char *cmd, short len);
 
 struct dsi_display *g_display;
 static struct mutex asus_lcd_tcon_cmd_mutex;
+struct mutex dsi_op_mutex;
 char asus_lcd_reg_buffer[4095];
 char asus_lcd_cabc_mode[2] = {0x55, 0};
 int asus_lcd_dimming_on = 1; //default resume with dimming
@@ -5795,6 +5796,7 @@ static int dsi_display_bind(struct device *dev,
 	// ASUS BSP display features initialization +++
 	if (asus_lcd_procfs_registered == false) {
 		mutex_init(&asus_lcd_tcon_cmd_mutex);
+		mutex_init(&dsi_op_mutex);
 		proc_create(ASUS_CABC_PROC_FILE,  0777, NULL, &asus_lcd_cabc_proc_ops);
 		proc_create(ASUS_LCD_REGISTER_RW, 0666, NULL, &asus_lcd_reg_rw_ops);
 		proc_create(ASUS_DIM_PROC_FILE,   0666, NULL, &asus_lcd_dim_proc_ops);
