@@ -380,16 +380,16 @@
 			compatible = "qcom,fg-gen4";
 			#address-cells = <1>;
 			#size-cells = <1>;
-                        qcom,fg-esr-timer-awake = <96 96>;
-                        qcom,fg-esr-timer-asleep = <256 256>;
-                        qcom,fg-esr-timer-charging = <0 96>;
-        		/* ESR fast calibration */
-        		qcom,fg-esr-timer-chg-fast = <0 7>;
-        		qcom,fg-esr-timer-dischg-fast = <0 7>;
-        		qcom,fg-esr-timer-chg-slow = <0 96>;
-        		qcom,fg-esr-timer-dischg-slow = <0 96>;
-        		qcom,fg-esr-cal-soc-thresh = <26 230>;
-        		qcom,fg-esr-cal-temp-thresh = <10 40>;
+			qcom,fg-esr-timer-awake = <96 96>;
+			qcom,fg-esr-timer-asleep = <256 256>;
+			qcom,fg-esr-timer-charging = <0 96>;
+			/* ESR fast calibration */
+			qcom,fg-esr-timer-chg-fast = <0 7>;
+			qcom,fg-esr-timer-dischg-fast = <0 7>;
+			qcom,fg-esr-timer-chg-slow = <0 96>;
+			qcom,fg-esr-timer-dischg-slow = <0 96>;
+			qcom,fg-esr-cal-soc-thresh = <26 230>;
+			qcom,fg-esr-cal-temp-thresh = <10 40>;
 			qcom,pmic-revid = <&pm8150b_revid>;
 			status = "okay";
 
