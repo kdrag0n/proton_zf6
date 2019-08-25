@@ -889,8 +889,6 @@ static void process_tzcb_req(void *buf, size_t buf_len, struct file **arr_filp)
 	ret = wait_event_interruptible(srvr_info->rsp_wait_q,
 			(cb_txn->state == SMCINVOKE_REQ_PROCESSED) ||
 			(srvr_info->state == SMCINVOKE_SERVER_STATE_DEFUNCT));
-	if (ret)
-		pr_err("%s wait_event interrupted: ret = %d\n", __func__, ret);
 out:
 	/*
 	 * If we are here, either req is processed or not
@@ -1470,11 +1468,8 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 	do {
 		ret = wait_event_interruptible(server_info->req_wait_q,
 				!hash_empty(server_info->reqs_table));
-		if (ret) {
-			pr_err("%s wait_event interrupted: ret = %d\n",
-							__func__, ret);
+		if (ret)
 			goto out;
-		}
 
 		mutex_lock(&g_smcinvoke_lock);
 		cb_txn = find_cbtxn_locked(server_info,

@@ -136,7 +136,7 @@ extern int stmvl53l1_enable_debug;
 #endif
 
 #define vl53l1_info(str, args...) \
-	pr_info("%s: " str "\n", __func__, ##args)
+	pr_debug("%s: " str "\n", __func__, ##args)
 
 #define vl53l1_errmsg(str, args...) \
 	pr_err("%s: " str, __func__, ##args)

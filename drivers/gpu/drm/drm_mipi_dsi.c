@@ -1129,7 +1129,6 @@ int mipi_dsi_dcs_set_display_cabc(struct mipi_dsi_device *dsi)
 
 	err = mipi_dsi_dcs_write(dsi, MIPI_DCS_WRITE_POWER_SAVE,
 				 payload, sizeof(payload));
-	pr_err("%s: set tcon CABC function\n", __func__);
 	if (err < 0)
 		return err;
 

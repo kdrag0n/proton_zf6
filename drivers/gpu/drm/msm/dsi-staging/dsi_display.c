@@ -4877,8 +4877,6 @@ void asus_lcd_cabc_set(int mode)
 {
 	asus_lcd_cabc_mode[1] = mode;
 	asus_lcd_set_tcon_cmd(asus_lcd_cabc_mode, ARRAY_SIZE(asus_lcd_cabc_mode));
-
-	printk("%s: write cabc: %d\n", __func__, asus_lcd_cabc_mode[1]);
 }
 EXPORT_SYMBOL(asus_lcd_cabc_set);
 

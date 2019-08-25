@@ -1034,7 +1034,6 @@ static void compareCameraSN()
 			otp_data_id[i][0], otp_data_id[i][1], otp_data_id[i][2], otp_data_id[i][3],
 			otp_data_id[i][4], otp_data_id[i][5], otp_data_id[i][6], otp_data_id[i][7],
 			otp_data_id[i][8], otp_data_id[i][9], otp_data_id[i][10], otp_data_id[i][11]);
-		pr_info("cameraidbuffer[%d]=%s", i, cameraidbuffer[i]);
 	}
 
 	memset(buf_cali_id, 0, 128);
@@ -1050,11 +1049,9 @@ static void compareCameraSN()
 	rc = vfs_read(fp, buf_cali_id, 128, &pos);
 	set_fs(fs);
 	filp_close(fp, NULL);
-	pr_info("buf_cali_id %s, pos %d", buf_cali_id, (int)pos);
 
 	memset(buf_cali_id0, 0, sizeof(buf_cali_id0));
 	sscanf(buf_cali_id+1, "%24s", buf_cali_id0);
-	pr_info("buf_cali_id0 %s", buf_cali_id0);
 	for (i = 0; i < OTP_ID_LEN; i++) {
 		if (buf_cali_id0[i] != cameraidbuffer[CAMERA_0][i])
 			module_change[CAMERA_0] = 1;
@@ -1066,7 +1063,6 @@ static void compareCameraSN()
 
 	memset(buf_cali_id2, 0, sizeof(buf_cali_id2));
 	sscanf(buf_cali_id+29, "%24s", buf_cali_id2);
-	pr_info("buf_cali_id2 %s", buf_cali_id2);
 	for (i = 0; i < OTP_ID_LEN; i++) {
 		if (buf_cali_id2[i] != cameraidbuffer[CAMERA_2][i])
 			module_change[CAMERA_2] = 1;
@@ -1075,8 +1071,6 @@ static void compareCameraSN()
 	}
 	for (i = 0; i < OTP_ID_LEN; i++)
 		pr_debug("buf_cali_id2[%d]=%x, cameraidbuffer[CAMERA_2][%d]=%x\n", i, buf_cali_id2[i], i, cameraidbuffer[CAMERA_2][i]);
-
-	pr_info("module_change %d, %d, %d, %d", module_change[0], module_change[1], module_change[2], module_change[3]);
 
 	DoOnce = true;
 }
@@ -1121,7 +1115,6 @@ static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_i
 			if (e_ctrl->cal_data.mapdata+i != NULL && e_ctrl->cal_data.mapdata+(i+1) != NULL)
 			{
 				check_data = (e_ctrl->cal_data.mapdata[i+1]<<8) + e_ctrl->cal_data.mapdata[i];
-				pr_info("[DIT_EEPROM]  (0x%04X 0x%04X)  data: 0x%04X ", i+1, i, check_data);
 
 				if (check_data == 0)
 				{
@@ -1143,11 +1136,8 @@ static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_i
 		wrong_data = 1;
 	}
 
-	pr_info("[DIT_EEPROM] module_change %d load_file_name %s", module_change[camera_id], load_file_name);
-
 	if(wrong_data == 0)
 	{
-		pr_info("[DIT_EEPROM] read %d bytes from %s",num,load_file_name);
 #ifdef DIT_CHKCALI
 	}else if(!g_module_changed[camera_id] && (num = read_file_into_buffer(dit_eeprom_golden_file_name[camera_id],e_ctrl->cal_data.mapdata,8192)) >0)
 #else
@@ -1160,7 +1150,6 @@ static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_i
 	}
 	if(camera_id == CAMERA_0 || camera_id == CAMERA_1)
 	{
-		pr_info("[DIT_EEPROM] camera %d Start", camera_id);
 		if(num<=0)
 		{/*If there is no dit bin ,set user space eeprom data to 0*/
 			memset(e_ctrl->cal_data.mapdata,0, e_ctrl->cal_data.num_data);
@@ -1409,8 +1398,6 @@ void eeprom_dump_create(struct cam_eeprom_ctrl_t * e_ctrl)
 			{
 				module_sn = (g_eeprom_info[camera_id].mapdata[14]<<24 | g_eeprom_info[camera_id].mapdata[15]<<16 |
 							 g_eeprom_info[camera_id].mapdata[16]<<8  | g_eeprom_info[camera_id].mapdata[17] );
-				pr_info("CAMERA %d: Module ID 0x%x, Vendor ID 0x%x\n, Module SN 0x%08x",
-						camera_id, g_eeprom_info[camera_id].mapdata[8],g_eeprom_info[camera_id].mapdata[9],module_sn);
 				/* Kirin no ois
 				set_ois_module_vendor_from_eeprom(g_eeprom_info[camera_id].mapdata[9]);
 				set_ois_module_sn_from_eeprom(module_sn);

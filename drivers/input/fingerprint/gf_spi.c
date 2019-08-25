@@ -391,8 +391,6 @@ static void gf_kernel_key_input(struct gf_dev *gf_dev, struct gf_key *gf_key)
 		/* add special key define */
 		key_input = gf_key->key;
 	}
-	pr_info("%s: received key event[%d], key=%d, value=%d\n",
-			__func__, key_input, gf_key->key, gf_key->value);
 
 	if ((GF_KEY_POWER == gf_key->key || GF_KEY_CAMERA == gf_key->key)
 			&& (gf_key->value == 1)) {
@@ -668,8 +666,6 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
 
 	if (val != MSM_DRM_EARLY_EVENT_BLANK)
 		return 0;
-	pr_info("%s: go to the goodix_fb_state_chg_callback value = %d\n",
-			__func__, (int)val);
 	gf_dev = container_of(nb, struct gf_dev, notifier);
 //	if (evdata && evdata->data && val == FB_EARLY_EVENT_BLANK && gf_dev) {
 	if (evdata && evdata->data && val == MSM_DRM_EARLY_EVENT_BLANK && gf_dev) {

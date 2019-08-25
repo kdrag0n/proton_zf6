@@ -1768,7 +1768,6 @@ static void focal_suspend_work(struct work_struct *work)
 
 #if FTS_GESTURE_EN
 	if ((fts_data->dclick_mode_eable == 1) | (fts_data->swipeup_mode_eable == 1) | (fts_data->gesture_mode_eable == 1)) {
-		printk("[FTS][touch]%s: gesture mode on \n", __func__);
 		fts_release_all_finger();
 		retval = fts_gesture_suspend(fts_data->client);
 		if (retval == 0)
@@ -1820,7 +1819,6 @@ static void focal_resume_work(struct work_struct *work)
 #if FTS_GESTURE_EN
 	if (fts_gesture_resume(fts_data->client) == 0)
 	{
-		printk("[FTS][touch]%s: gesture mode off\n", __func__);
 		err = disable_irq_wake(fts_data->irq);
 		if (err)
 			printk("[FTS_err][touch]%s: disable_irq_wake failed\n", __func__);

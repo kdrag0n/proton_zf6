@@ -744,7 +744,6 @@ void mcu_do_later_power_down() {
 static void mcu_do_work_later(struct work_struct *work)
 {
 	loopCounter++;
-	pr_err("Randy mcu, delay doing work, loopCounter=%d, state=%d", loopCounter, MCUState);	
 	if (MCUState!=MCU_READY) {
 		if (MCUState==MCU_EMPTY) { 
 			if (MSP430FR2311_Check_Version()) {
@@ -1679,7 +1678,6 @@ static int mcu_suspend(struct device *dev)
 {
 	struct mcu_info *mpi;
 	mpi = dev_get_drvdata(dev);
-	pr_err("[MCU] go to power off");
 	MSP430FR2311_power_control(0);
 
 	return 0;
@@ -1689,7 +1687,6 @@ static int mcu_resume(struct device *dev)
 {
 	struct mcu_info *mpi;
 	mpi = dev_get_drvdata(dev);
-	pr_err("[MCU] go to power on");
 	MSP430FR2311_power_control(1);
 
 
