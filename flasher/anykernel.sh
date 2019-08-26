@@ -12,6 +12,7 @@ device.name1=ASUS_I01WD
 device.name2=ZS630KL
 device.name3=I01WD
 device.name4=zenfone6
+device.name5=WW_I01WD
 supported.versions=
 '; } # end properties
 
