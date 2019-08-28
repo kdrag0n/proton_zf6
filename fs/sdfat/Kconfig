@@ -21,6 +21,13 @@ config SDFAT_USE_FOR_EXFAT
 	help
 	  If you want to register sdFAT as available for exFAT, say Y.
 
+config SDFAT_USE_FOR_TEXFAT
+	bool "Register sdFAT as Tuxera exFAT"
+	default n
+	depends on SDFAT_FS
+	help
+	  If you want to register sdFAT as available for Tuxera exFAT (texfat), say Y.
+
 config SDFAT_USE_FOR_VFAT
 	bool "Register sdFAT as VFAT"
 	default y
