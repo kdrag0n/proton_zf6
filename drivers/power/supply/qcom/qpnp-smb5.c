@@ -3782,14 +3782,6 @@ static ssize_t INOV_enable_show(struct device *dev, struct device_attribute *att
 	return sprintf(buf, "INOV_reg 0x1670 = 0x%x\n", reg);
 }
 
-static char *asus_id[] = {
-	"NONE",
-	"ASUS_750K",
-	"ASUS_200K",
-	"PB",
-	"OTHERS",
-	"ADC_NOT_READY"
-};
 static ssize_t adc_adapter_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {

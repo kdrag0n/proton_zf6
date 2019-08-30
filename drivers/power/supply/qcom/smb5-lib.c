@@ -142,15 +142,6 @@ enum ADAPTER_ID {
 	ADC_NOT_READY,
 };
 
-static char *asus_id[] = {
-	"NONE",
-	"ASUS_750K",
-	"ASUS_200K",
-	"PB",
-	"OTHERS",
-	"ADC_NOT_READY"
-};
-
 char *ufp_type[] = {
 	"NONE",
 	"DEFAULT",
