@@ -220,7 +220,6 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
  */
 asmlinkage notrace void secondary_start_kernel(void)
 {
-	u64 mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
 	struct mm_struct *mm = &init_mm;
 	unsigned int cpu;
 
