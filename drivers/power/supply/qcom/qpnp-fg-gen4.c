@@ -983,9 +983,6 @@ static int fg_gen4_get_prop_capacity_raw(struct fg_gen4_chip *chip, int *val)
 
 static int fg_gen4_get_prop_capacity_raw_max(struct fg_gen4_chip *chip, int *val)
 {
-	struct fg_dev *fg = &chip->fg;
-	int rc;
-
 	if (chip->dt.soc_hi_res)
 		*val = 65535;
 	else
