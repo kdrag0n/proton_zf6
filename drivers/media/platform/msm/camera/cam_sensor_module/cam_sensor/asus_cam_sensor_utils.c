@@ -90,31 +90,6 @@ static uint32_t get_sensor_test_reg_addr(uint16_t sensor_id)
 	return 0;
 }
 
-static const char * submodule2string(enum sensor_sub_module sub_module)
-{
-	switch(sub_module)
-	{
-		case SUB_MODULE_SENSOR:
-			return "SENSOR";
-		case SUB_MODULE_ACTUATOR:
-			return "ACTUATOR";
-		case SUB_MODULE_EEPROM:
-			return "EEPROM";
-		case SUB_MODULE_LED_FLASH:
-			return "FLASH";
-		case SUB_MODULE_CSID:
-			return "CSID";
-		case SUB_MODULE_CSIPHY:
-			return "CSIPHY";
-		case SUB_MODULE_OIS:
-			return "OIS";
-		case SUB_MODULE_EXT:
-			return "EXT";
-		case SUB_MODULE_MAX:
-		default:
-			return "InvalidSubModule";
-	}
-}
 //just for EEPROM and Actuator to determine file name
 int get_camera_id_for_submodule(enum sensor_sub_module sub_module, uint32_t index, uint32_t* camera_id)
 {
