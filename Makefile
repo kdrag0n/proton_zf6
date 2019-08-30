@@ -504,10 +504,6 @@ KBUILD_AFLAGS	+= $(CLANG_FLAGS) -no-integrated-as
 export CLANG_FLAGS
 endif
 
-KBUILD_CFLAGS	+=$(call cc-disable-warning, unused-value,) \
-	$(call cc-disable-warning, unused-variable,) \
-	$(call cc-disable-warning, format,)
-
 RETPOLINE_CFLAGS_GCC := -mindirect-branch=thunk-extern -mindirect-branch-register
 RETPOLINE_VDSO_CFLAGS_GCC := -mindirect-branch=thunk-inline -mindirect-branch-register
 RETPOLINE_CFLAGS_CLANG := -mretpoline-external-thunk
