@@ -107,7 +107,7 @@ static int get_hal_pixel_depth(u32 hfi_bit_depth)
 static inline int validate_pkt_size(u32 rem_size, u32 msg_size)
 {
 	if (rem_size < msg_size) {
-		dprintk(VIDC_ERR, "%s: bad_pkt_size: %d\n",
+		dprintk(VIDC_ERR, "%s: bad_packet_size: %d\n",
 			__func__, rem_size);
 		return false;
 	}
