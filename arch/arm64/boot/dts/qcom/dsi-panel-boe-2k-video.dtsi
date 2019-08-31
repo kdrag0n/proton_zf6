@@ -147,7 +147,6 @@
 					39 01 00 00 00 00 05 F7 5A A5 95 27];
 				qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 				qcom,mdss-dsi-off-command-state = "dsi_lp_mode";
-				qcom,mdss-dsi-h-sync-pulse = <1>;
 			};
 		};
 
