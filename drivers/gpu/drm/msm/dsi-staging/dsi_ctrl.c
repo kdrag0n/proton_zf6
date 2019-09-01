@@ -41,10 +41,6 @@
 
 #define CEIL(x, y)              (((x) + ((y)-1)) / (y))
 
-int print_underflow_limit = 0;
-int print_interrupt_limit = 0;
-int print_overflow_limit = 0;
-
 struct dsi_ctrl_list_item {
 	struct dsi_ctrl *ctrl;
 	struct list_head list;
@@ -2295,9 +2291,7 @@ static bool dsi_ctrl_check_for_spurious_error_interrupts(
 
 	if ((jiffies_now - dsi_ctrl->jiffies_start) < intr_check_interval) {
 		if (dsi_ctrl->error_interrupt_count > interrupt_threshold) {
-			if ((print_interrupt_limit%100)==0)
-				pr_warn("Detected spurious interrupts on dsi ctrl\n");
-			print_interrupt_limit++;
+			pr_warn("Detected spurious interrupts on dsi ctrl\n");
 			return true;
 		}
 	} else {
@@ -2360,9 +2354,7 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 						cb_info.event_idx,
 						dsi_ctrl->cell_index,
 						0, 0, 0, 0);
-			if ((print_overflow_limit%100)==0)
-				pr_err("dsi FIFO OVERFLOW error: 0x%lx\n", error);
-			print_overflow_limit++;
+			pr_err("dsi FIFO OVERFLOW error: 0x%lx\n", error);
 		}
 	}
 
@@ -2375,9 +2367,7 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 						dsi_ctrl->cell_index,
 						0, 0, 0, 0);
 		}
-		if ((print_underflow_limit%100)==0)
-			pr_err("dsi FIFO UNDERFLOW error: 0x%lx\n", error);
-		print_underflow_limit++;
+		pr_err("dsi FIFO UNDERFLOW error: 0x%lx\n", error);
 	}
 
 	/* DSI PLL UNLOCK error */
