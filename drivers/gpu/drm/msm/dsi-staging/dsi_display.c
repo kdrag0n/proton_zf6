@@ -88,12 +88,9 @@ char asus_lcd_cabc_mode[2] = {0x55, 0};
 int asus_lcd_dimming_on = 1; //default resume with dimming
 int asus_lcd_dimming_conf = 4;
 bool asus_lcd_procfs_registered = false;
-int asus_lcd_early_backlight = 0;
-int asus_lcd_blkt_ctrl = 1;
 
 extern int asus_lcd_bridge_enable;
 extern void asus_lcd_trigger_early_on_wq(void);
-extern void asus_lcd_trigger_early_backlight_wq(u32 level);
 //ASUS BSP Display features ---
 
 static void dsi_display_mask_ctrl_error_interrupts(struct dsi_display *display,
@@ -5085,53 +5082,6 @@ static struct file_operations asus_lcd_early_on_proc_ops = {
 	.write = asus_lcd_early_on_write,
 };
 
-static ssize_t asus_lcd_bklt_control_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
-{
-	char messages[256];
-	int value = 0;
-
-	memset(messages, 0, sizeof(messages));
-
-	if (len > 256)
-		len = 256;
-
-	if (copy_from_user(messages, buff, len))
-		return -EFAULT;
-
-	if (sscanf(messages, "%d", &value) <= 0) {
-		printk("[Display] parsed failed: %s", messages);
-	} else {
-		asus_lcd_blkt_ctrl = value;
-		asus_lcd_trigger_early_backlight_wq(asus_lcd_blkt_ctrl);
-	}
-
-	return len;
-}
-
-static ssize_t asus_lcd_bklt_control_proc_read(struct file *file, char __user *buf,
-                    size_t count, loff_t *ppos)
-{
-	int len = 0;
-	ssize_t ret = 0;
-	char *buff;
-
-	buff = kmalloc(100, GFP_KERNEL);
-	if (!buff)
-		return -ENOMEM;
-
-	len += sprintf(buff, "%d\n", asus_lcd_blkt_ctrl);
-
-	ret = simple_read_from_buffer(buf, count, ppos, buff, len);
-	kfree(buff);
-
-	return ret;
-}
-
-static struct file_operations asus_lcd_bklt_control_proc_ops = {
-	.write = asus_lcd_bklt_control_proc_write,
-	.read  = asus_lcd_bklt_control_proc_read,
-};
-
 /*
  * asus_lcd_reg_write
  * write command to tcon and save result to buffer
@@ -5722,7 +5672,6 @@ static int dsi_display_bind(struct device *dev,
 		proc_create(ASUS_DIM_PROC_FILE,   0666, NULL, &asus_lcd_dim_proc_ops);
 		proc_create(ASUS_DIM_CONF_PROC_FILE,   0666, NULL, &asus_lcd_dim_conf_proc_ops);
 		proc_create(ASUS_EARLY_ON_PROC_FILE,   0666, NULL, &asus_lcd_early_on_proc_ops);
-		proc_create(ASUS_BKLT_CTL_PROC_FILE,   0666, NULL, &asus_lcd_bklt_control_proc_ops);
 		asus_lcd_procfs_registered = true;
 	}
 
