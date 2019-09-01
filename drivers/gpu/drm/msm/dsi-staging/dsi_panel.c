@@ -711,8 +711,6 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		return 0;
 
 	pr_debug("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
-	if (bl_lvl >= 4079)
-		bl_lvl = 4079;
 
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
