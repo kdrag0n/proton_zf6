@@ -52,7 +52,6 @@ extern int g_msm_drv_shutdown_in_progress;
 
 extern char asus_lcd_cabc_mode[2];
 extern int asus_lcd_dimming_on;
-extern int asus_lcd_early_backlight;
 
 enum dsi_dsc_ratio_type {
 	DSC_8BPC_8BPP,
@@ -62,9 +61,7 @@ enum dsi_dsc_ratio_type {
 };
 
 int lastBL = 1023;
-bool first_boot = true;
 int asus_lcd_bridge_enable = 0;
-struct dsi_panel* g_panel = NULL;
 
 static u32 dsi_dsc_rc_buf_thresh[] = {0x0e, 0x1c, 0x2a, 0x38, 0x46, 0x54,
 		0x62, 0x69, 0x70, 0x77, 0x79, 0x7b, 0x7d, 0x7e};
@@ -724,17 +721,6 @@ void dsi_panel_set_backlight_asus_logic(struct dsi_panel *panel, u32 bl_level)
 	}
 }
 
-void asus_lcd_trigger_early_backlight_wq(u32 level)
-{
-	struct dsi_panel* panel = g_panel;
-
-	if (!g_panel)
-		return;
-
-	panel->early_bl_level = level;
-	queue_work(panel->early_bl_workqueue, &panel->early_bl_work);
-}
-
 static int dsi_panel_update_pwm_backlight(struct dsi_panel *panel,
 	u32 bl_lvl)
 {
@@ -788,44 +774,16 @@ error:
 
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 {
-	int rc = 0;
 	struct dsi_backlight_config *bl = &panel->bl_config;
 	struct mipi_dsi_device *dsi;
+	int rc;
 
 	if (panel->host_config.ext_bridge_num)
 		return 0;
 
-	mutex_lock(&panel->bl_lock);
-
 	pr_debug("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
-	if (first_boot) {
-		if (bl_lvl == 4095) {
-			goto finally;
-		}
-
-		asus_wled_fsc_validate();
-		dsi_panel_update_backlight(panel, bl_lvl);
-		rc = backlight_device_set_brightness(bl->raw_bd, bl->raw_bd->props.max_brightness);
-		first_boot = false;
-		g_last_bl = bl_lvl;
-		goto finally;
-	}
-
 	if (bl_lvl >= 4079)
 		bl_lvl = 4079;
-
-#if 0
-	/*
-	 * lcd birdge is going to enable and both bl level and last bl level
-	 * is zero means this is initialized from crtc
-	 * < this code is disabled, and should not be included in build >
-	 */
-	if (asus_lcd_bridge_enable && !bl_lvl && !g_last_bl) {
-		printk("[Display] this is backlight 0 from display initial, do early backlight here\n");
-		asus_lcd_trigger_early_backlight_wq(32);
-		goto finally;
-	}
-#endif
 
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
@@ -858,21 +816,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 
 	g_last_bl = bl_lvl;
 
-finally:
-	mutex_unlock(&panel->bl_lock);
-
-	return rc;
-}
-
-void dsi_panel_set_backlight_work(struct work_struct *work)
-{
-	struct dsi_panel *panel;
-
-	panel = container_of(work, struct dsi_panel, early_bl_work);
-	if (!panel)
-		return;
-
-	dsi_panel_set_backlight(panel, panel->early_bl_level);
+	return 0;
 }
 
 static u32 dsi_panel_get_brightness(struct dsi_backlight_config *bl)
@@ -3470,12 +3414,6 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	panel->power_mode = SDE_MODE_DPMS_OFF;
 	drm_panel_init(&panel->drm_panel);
 	mutex_init(&panel->panel_lock);
-
-	// for early backlight
-	mutex_init(&panel->bl_lock);
-	g_panel = panel;
-	panel->early_bl_workqueue = create_singlethread_workqueue("dsi_early_bl");
-	INIT_WORK(&(panel->early_bl_work), dsi_panel_set_backlight_work);
 
 	return panel;
 error:
