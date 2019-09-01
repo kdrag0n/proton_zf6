@@ -60,7 +60,6 @@ enum dsi_dsc_ratio_type {
 	DSC_RATIO_TYPE_MAX
 };
 
-int lastBL = 1023;
 int asus_lcd_bridge_enable = 0;
 
 static u32 dsi_dsc_rc_buf_thresh[] = {0x0e, 0x1c, 0x2a, 0x38, 0x46, 0x54,
@@ -113,18 +112,7 @@ static char dsi_dsc_rc_range_max_qp_1_1_scr1[][15] = {
 static char dsi_dsc_rc_range_bpg_offset[] = {2, 0, 0, -2, -4, -6, -8, -8,
 		-8, -10, -10, -12, -12, -12, -12};
 
-bool bl_off_to_wait_on = false;
-
 bool fts_gesture_check(void);
-
-// ASUS_BSP: low backlight controller switch
-#define WLED_MAX_LEVEL_ENABLE           4095
-#define WLED_MIN_LEVEL_DISABLE          0
-#define LCD_BL_THRESHOLD_BOE            80
-static bool g_bl_full_dcs = false;
-static int g_last_bl = 0x0;
-static int g_bl_threshold = LCD_BL_THRESHOLD_BOE;
-static int g_wled_dimming_div = 10;
 
 int dsi_dsc_create_pps_buf_cmd(struct msm_display_dsc_info *dsc, char *buf,
 				int pps_id)
@@ -660,65 +648,7 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 	if (rc < 0)
 		pr_err("failed to update dcs backlight:%d\n", bl_lvl);
 
-	/* ASUS BSP Display +++ */
-	if (bl_lvl != 0)
-		lastBL = (int)bl_lvl;
-	/* ASUS BSP Display +++ */
-
-	//pr_err("update dcs backlight:%d\n", bl_lvl);
-
 	return rc;
-}
-
-//
-// dimming WLED brightness change
-//
-static void asus_lcd_led_trigger_dim(struct dsi_backlight_config *bl, int from, int to)
-{
-	int temp;
-	int wled_level = 0;
-
-	for (temp = 0; temp <= g_wled_dimming_div; temp++) {
-		wled_level = (bl->raw_bd->props.max_brightness * (from * 10 + (to - from) * temp)) /\
-				(g_bl_threshold * g_wled_dimming_div);
-		backlight_device_set_brightness(bl->raw_bd, wled_level);
-		msleep(10);
-		pr_debug("[Display] wled set to %d/%d\n", wled_level, bl->raw_bd->props.max_brightness);
-	}
-}
-
-void dsi_panel_set_backlight_asus_logic(struct dsi_panel *panel, u32 bl_level)
-{
-	struct dsi_backlight_config *bl = &panel->bl_config;
-
-	if (bl_level == 0) {
-		backlight_device_set_brightness(bl->raw_bd, WLED_MIN_LEVEL_DISABLE);
-		g_bl_full_dcs = false;
-	} else if (bl_level < g_bl_threshold) { /*wled control*/
-		if (g_last_bl == 0) {
-			backlight_device_set_brightness(bl->raw_bd, 4095 * bl_level / g_bl_threshold);
-			dsi_panel_update_backlight(panel, g_bl_threshold);
-		} else if (bl_level < g_last_bl) {
-			if (g_bl_full_dcs) { // last backlight is full DCS control, set it to threshold
-				dsi_panel_update_backlight(panel, g_bl_threshold);
-			}
-			asus_lcd_led_trigger_dim(bl,
-				(g_last_bl >= g_bl_threshold) ? g_bl_threshold : g_last_bl, bl_level);
-		} else if (g_last_bl < bl_level) {
-			asus_lcd_led_trigger_dim(bl, g_last_bl, bl_level);
-		}
-		g_bl_full_dcs = false;
-	} else { /*dcs control*/
-		if (g_last_bl == 0) {
-			backlight_device_set_brightness(bl->raw_bd, WLED_MAX_LEVEL_ENABLE);
-			dsi_panel_update_backlight(panel, bl_level);
-		} else {
-			dsi_panel_update_backlight(panel, bl_level);
-			if (!g_bl_full_dcs) // last time is semi-WLED control
-				asus_lcd_led_trigger_dim(bl, g_last_bl, g_bl_threshold);
-		}
-		g_bl_full_dcs = true;
-	}
 }
 
 static int dsi_panel_update_pwm_backlight(struct dsi_panel *panel,
@@ -775,7 +705,6 @@ error:
 int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 {
 	struct dsi_backlight_config *bl = &panel->bl_config;
-	struct mipi_dsi_device *dsi;
 	int rc;
 
 	if (panel->host_config.ext_bridge_num)
@@ -790,8 +719,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		rc = backlight_device_set_brightness(bl->raw_bd, bl_lvl);
 		break;
 	case DSI_BACKLIGHT_DCS:
-		//rc = dsi_panel_update_backlight(panel, bl_lvl);
-		dsi_panel_set_backlight_asus_logic(panel, bl_lvl);
+		rc = dsi_panel_update_backlight(panel, bl_lvl);
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
 		break;
@@ -802,19 +730,6 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		pr_err("Backlight type(%d) not supported\n", bl->type);
 		rc = -ENOTSUPP;
 	}
-
-	if (bl_lvl == 0 && g_last_bl != 0)
-		bl_off_to_wait_on = true;
-
-	if (bl_off_to_wait_on && bl_lvl) {
-		dsi = &panel->mipi_device;
-		bl_off_to_wait_on = false;
-
-		if (asus_lcd_cabc_mode[1] == 3)
-			rc = mipi_dsi_dcs_set_display_cabc(dsi);
-	}
-
-	g_last_bl = bl_lvl;
 
 	return 0;
 }
@@ -884,7 +799,6 @@ static int dsi_panel_bl_register(struct dsi_panel *panel)
 		rc = dsi_panel_wled_register(panel, bl);
 		break;
 	case DSI_BACKLIGHT_DCS:
-		rc = dsi_panel_wled_register(panel, bl);
 		break;
 	case DSI_BACKLIGHT_EXTERNAL:
 		break;
