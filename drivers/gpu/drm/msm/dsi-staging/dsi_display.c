@@ -88,7 +88,6 @@ char asus_lcd_cabc_mode[2] = {0x55, 0};
 int asus_lcd_dimming_on = 1; //default resume with dimming
 int asus_lcd_dimming_conf = 4;
 bool asus_lcd_procfs_registered = false;
-int asus_lcd_esd_debug = 0;
 int asus_lcd_early_backlight = 0;
 int asus_lcd_blkt_ctrl = 1;
 
@@ -621,13 +620,10 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 	for (j = 0; j < config->groups; ++j) {
 		for (i = 0; i < len; ++i) {
 			if (config->status_value[group + i] == 0xff) {
-				if (config->return_buf[i] & 0x01 || asus_lcd_esd_debug) {
-					printk("[Display] ESD detected\n");
-					asus_lcd_esd_debug = 0;
+				if (config->return_buf[i] & 0x01)
 					break;
-				} else {
+				else
 					continue;
-				}
 			}
 			if (config->return_buf[i] !=
 				config->status_value[group + i]) {
@@ -5068,28 +5064,6 @@ static struct file_operations asus_lcd_dim_conf_proc_ops = {
 	.read = asus_lcd_dim_conf_proc_read,
 };
 
-
-static ssize_t asus_lcd_esd_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
-{
-	char messages[256];
-
-	memset(messages, 0, sizeof(messages));
-
-	if (len > 256)
-		len = 256;
-
-	if (copy_from_user(messages, buff, len))
-		return -EFAULT;
-
-	asus_lcd_esd_debug = 1;
-
-	return len;
-}
-
-static struct file_operations asus_lcd_esd_proc_ops = {
-	.write = asus_lcd_esd_proc_write,
-};
-
 static ssize_t asus_lcd_early_on_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
 	char messages[256];
@@ -5747,7 +5721,6 @@ static int dsi_display_bind(struct device *dev,
 		proc_create(ASUS_LCD_REGISTER_RW, 0666, NULL, &asus_lcd_reg_rw_ops);
 		proc_create(ASUS_DIM_PROC_FILE,   0666, NULL, &asus_lcd_dim_proc_ops);
 		proc_create(ASUS_DIM_CONF_PROC_FILE,   0666, NULL, &asus_lcd_dim_conf_proc_ops);
-		proc_create(ASUS_ESD_PROC_FILE,   0666, NULL, &asus_lcd_esd_proc_ops);
 		proc_create(ASUS_EARLY_ON_PROC_FILE,   0666, NULL, &asus_lcd_early_on_proc_ops);
 		proc_create(ASUS_BKLT_CTL_PROC_FILE,   0666, NULL, &asus_lcd_bklt_control_proc_ops);
 		asus_lcd_procfs_registered = true;
