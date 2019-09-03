@@ -98,8 +98,10 @@ fi
 
 # Use 60 Hz timing mode (timing 1) based on ZIP file name
 if [[ "$ZIPFILE" == *60hz* ]] || [[ "$ZIPFILE" == *60fps* ]]; then
+  ui_print "  • Setting 60 Hz refresh rate"
   patch_cmdline "msm_drm.timing_override" "msm_drm.timing_override=1"
 else
+  ui_print "  • Setting 75 Hz refresh rate"
   patch_cmdline "msm_drm.timing_override" ""
 fi
 
