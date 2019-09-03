@@ -5,7 +5,7 @@
 OUTFD=/proc/self/fd/$2;
 ZIPFILE="$3";
 
-pgrep gatekeeperd >/dev/null && BOOTMODE=true || BOOTMODE=false;
+pgrep gatekeeperd >/dev/null && export BOOTMODE=true || export BOOTMODE=false;
 
 $BOOTMODE && DIR=/sdcard || DIR=$(dirname "$ZIPFILE");
 
@@ -180,7 +180,7 @@ fi;
 ui_print "  • Installing kernel";
 core=$($bb grep -oE 'ak.*core.sh' anykernel.sh);
 test -f tools/$core || $bb ln -s $home/tools/ak*-core.sh $home/tools/$core;
-PATH="$home/bin:$PATH" BOOTMODE=$BOOTMODE home=$home $bb ash anykernel.sh $2;
+PATH="$home/bin:$PATH" home=$home $bb ash anykernel.sh $2;
 if [ $? != 0 ]; then
   abort "Failed to execute installer";
 fi;
