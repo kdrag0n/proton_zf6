@@ -96,6 +96,13 @@ if mountpoint -q /data; then
   done
 fi
 
+# Use 60 Hz timing mode (timing 1) based on ZIP file name
+if [[ "$ZIPFILE" == *60hz* ]] || [[ "$ZIPFILE" == *60fps* ]]; then
+  patch_cmdline "msm_drm.timing_override" "msm_drm.timing_override=1"
+else
+  patch_cmdline "msm_drm.timing_override" ""
+fi
+
 # end ramdisk changes
 
 write_boot;
