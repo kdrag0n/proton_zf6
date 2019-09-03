@@ -195,7 +195,7 @@ function rel() {
 	shift
 
 	# Compile kernel
-	kmake "$@" && \
+	kmake KBUILD_BUILD_VERSION="$ver" "$@" && \
 
 	# Create release package
 	RELEASE_VER="$ver" mkzip "builds/$kernel_name-$device_name-v$ver.zip"
