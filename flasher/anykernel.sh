@@ -70,10 +70,11 @@ if mountpoint -q /data; then
 
     echo "Clearing extension list"
 
-    hot_count="$(cat $list_path | grep -n 'hot file extension' | cut -d : -f 1)"
-    cold_count="$(($(cat $list_path | wc -l) - $hot_count))"
+    hot_count="$(grep -n 'hot file extens' $list_path | cut -d':' -f1)"
+    list_len="$(cat $list_path | wc -l)"
+    cold_count="$((list_len - hot_count))"
 
-    cold_list="$(head -n$(($hot_count - 1)) $list_path | grep -v ':')"
+    cold_list="$(head -n$((hot_count - 1)) $list_path | grep -v ':')"
     hot_list="$(tail -n$cold_count $list_path)"
 
     for ext in $cold_list; do
