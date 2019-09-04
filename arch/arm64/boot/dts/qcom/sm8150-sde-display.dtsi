@@ -959,8 +959,8 @@
 &dsi_boe_2k_vid {
 	qcom,mdss-dsi-display-timings {
 		timing@0 {
-			qcom,mdss-dsi-panel-phy-timings = [00 22 09 09 25 24 09
-				09 06 02 04 00 1C 19];
+			qcom,mdss-dsi-panel-phy-timings = [00 27 0A 0A 27 25 0A
+				0B 07 02 04 20 1A 00];
 			qcom,display-topology = <1 0 1>;
 			qcom,default-topology-index = <0>;
 		};
