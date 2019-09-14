@@ -165,6 +165,9 @@ static ssize_t power_supply_show_property(struct device *dev,
 	else if (off == POWER_SUPPLY_PROP_CONNECTOR_HEALTH)
 		return scnprintf(buf, PAGE_SIZE, "%s\n",
 			       power_supply_health_text[value.intval]);
+	else if (off == POWER_SUPPLY_PROP_SKIN_HEALTH)
+		return scnprintf(buf, PAGE_SIZE, "%s\n",
+			       power_supply_health_text[value.intval]);
 	else if (off >= POWER_SUPPLY_PROP_MODEL_NAME)
 		return sprintf(buf, "%s\n", value.strval);
 
@@ -414,15 +417,22 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(toggle_stat),
 	POWER_SUPPLY_ATTR(main_fcc_max),
 	POWER_SUPPLY_ATTR(fg_reset),
-	POWER_SUPPLY_ATTR(cc_soc),
-	POWER_SUPPLY_ATTR(voltage_vph),
-	POWER_SUPPLY_ATTR(batt_age_level),
-	POWER_SUPPLY_ATTR(chip_version),
 	POWER_SUPPLY_ATTR(qc_opti_disable),
+	POWER_SUPPLY_ATTR(cc_soc),
+	POWER_SUPPLY_ATTR(batt_age_level),
+	POWER_SUPPLY_ATTR(voltage_vph),
+	POWER_SUPPLY_ATTR(chip_version),
 	POWER_SUPPLY_ATTR(therm_icl_limit),
-	POWER_SUPPLY_ATTR(voltage_max_limit),
 	POWER_SUPPLY_ATTR(dc_reset),
+	POWER_SUPPLY_ATTR(scale_mode_en),
+	POWER_SUPPLY_ATTR(voltage_max_limit),
 	POWER_SUPPLY_ATTR(real_capacity),
+	POWER_SUPPLY_ATTR(esr_sw_control),
+	POWER_SUPPLY_ATTR(force_main_icl),
+	POWER_SUPPLY_ATTR(force_main_fcc),
+	POWER_SUPPLY_ATTR(comp_clamp_level),
+	POWER_SUPPLY_ATTR(adapter_cc_mode),
+	POWER_SUPPLY_ATTR(skin_health),
 	/* Charge pump properties */
 	POWER_SUPPLY_ATTR(cp_status1),
 	POWER_SUPPLY_ATTR(cp_status2),
@@ -430,6 +440,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(cp_switcher_en),
 	POWER_SUPPLY_ATTR(cp_die_temp),
 	POWER_SUPPLY_ATTR(cp_isns),
+	POWER_SUPPLY_ATTR(cp_isns_slave),
 	POWER_SUPPLY_ATTR(cp_toggle_switcher),
 	POWER_SUPPLY_ATTR(cp_irq_status),
 	POWER_SUPPLY_ATTR(cp_ilim),
@@ -519,10 +530,14 @@ int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env)
 	char *prop_buf;
 	char *attrname;
 
+	dev_dbg(dev, "uevent\n");
+
 	if (!psy || !psy->desc) {
 		dev_dbg(dev, "No power supply yet\n");
 		return ret;
 	}
+
+	dev_dbg(dev, "POWER_SUPPLY_NAME=%s\n", psy->desc->name);
 
 	ret = add_uevent_var(env, "POWER_SUPPLY_NAME=%s", psy->desc->name);
 	if (ret)
@@ -558,6 +573,8 @@ int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env)
 			ret = -ENOMEM;
 			goto out;
 		}
+
+		dev_dbg(dev, "prop %s=%s\n", attrname, prop_buf);
 
 		ret = add_uevent_var(env, "POWER_SUPPLY_%s=%s", attrname, prop_buf);
 		kfree(attrname);

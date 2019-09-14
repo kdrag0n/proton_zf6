@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2011 Google, Inc.
- * Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
  * Copyright (C) 2019 Sultan Alsawaf <sultan@kerneltoast.com>.
  */
 
@@ -428,7 +428,8 @@ static int ion_sgl_sync_range(struct device *dev, struct scatterlist *sgl,
 			break;
 
 		if (i > 0) {
-			pr_warn("Partial cmo only supported with 1 segment\n"
+			pr_warn_ratelimited(
+				"Partial cmo only supported with 1 segment\n"
 				"is dma_set_max_seg_size being set on dev:%s\n",
 				dev_name(dev));
 			return -EINVAL;

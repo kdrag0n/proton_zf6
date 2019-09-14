@@ -71,7 +71,7 @@ static u32 dsi_dsc_rc_buf_thresh[] = {0x0e, 0x1c, 0x2a, 0x38, 0x46, 0x54,
  * Rate control - Min QP values for each ratio type in dsi_dsc_ratio_type
  */
 static char dsi_dsc_rc_range_min_qp_1_1[][15] = {
-	{0, 0, 1, 1, 3, 3, 3, 3, 3, 3, 5, 5, 5, 7, 12},
+	{0, 0, 1, 1, 3, 3, 3, 3, 3, 3, 5, 5, 5, 7, 13},
 	{0, 4, 5, 5, 7, 7, 7, 7, 7, 7, 9, 9, 9, 11, 17},
 	{0, 4, 9, 9, 11, 11, 11, 11, 11, 11, 13, 13, 13, 15, 21},
 	};
@@ -2174,7 +2174,8 @@ static int dsi_panel_parse_jitter_config(
 				  &priv_info->panel_prefill_lines);
 	if (rc) {
 		pr_debug("panel prefill lines are not defined rc=%d\n", rc);
-		priv_info->panel_prefill_lines = DEFAULT_PANEL_PREFILL_LINES;
+		priv_info->panel_prefill_lines = mode->timing.v_back_porch +
+			mode->timing.v_sync_width + mode->timing.v_front_porch;
 	} else if (priv_info->panel_prefill_lines >=
 					DSI_V_TOTAL(&mode->timing)) {
 		pr_debug("invalid prefill lines config=%d setting to:%d\n",
