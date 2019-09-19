@@ -230,7 +230,7 @@ function dbuild() {
 # Flash the given kernel package (defaults to latest) on the device via ADB
 function ktest() {
 	local fn="${1:-kernel.zip}"
-	local target_fn="${2:-/data/local/tmp/$(basename "$fn")}"
+	local target_fn="${2:-/data/local/tmp/$(basename "$fn" .zip)-75hz.zip}"
 	local backslash='\'
 
 	# Wait for device to show up on ADB
@@ -270,7 +270,7 @@ function ktest() {
 function sktest() {
 	local fn="${1:-kernel.zip}"
 	local hostname="${2:-$lan_ssh_host}"
-	local target_fn="${3:-$(basename "$fn")}"
+	local target_fn="${3:-$(basename "$fn" .zip)-75hz.zip}"
 	local backslash='\'
 
 	# Push package
