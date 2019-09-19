@@ -97,14 +97,14 @@ if mountpoint -q /data; then
   done
 fi
 
-# Use 60 Hz timing mode (timing 1) based on ZIP file name
+# Set display timing mode based on ZIP file name
 case "$ZIPFILE" in
-  *60fps*|*60hz*)
-    ui_print "  • Setting 60 Hz refresh rate"
+  *75fps*|*75hz*)
+    ui_print "  • Setting 75 Hz refresh rate"
     patch_cmdline "msm_drm.timing_override" "msm_drm.timing_override=1"
     ;;
   *)
-    ui_print "  • Setting 75 Hz refresh rate"
+    ui_print "  • Setting 60 Hz refresh rate"
     patch_cmdline "msm_drm.timing_override" ""
     ;;
 esac
