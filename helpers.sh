@@ -367,11 +367,16 @@ function ec() {
 
 #### MISCELLANEOUS ####
 
-# Get a sorted list of the side of various objects in the kernel
+# Get a sorted list of the size of various objects in the kernel
 function osize() {
 	find "$kroot/out" -type f -name '*.o' ! -name 'built-in.o' ! -name 'vmlinux.o' \
 	-exec du -h --apparent-size {} + | sort -r -h | head -n "${1:-75}" | \
 	perl -pe 's/([\d.]+[A-Z]?).+\/out\/(.+)\.o/$1\t$2.c/g'
+}
+
+# Get a sorted list of the size of various symbols in the kernel
+function ssize() {
+	nm --size -r "$kroot/out/vmlinux" | rg -ve ' b ' -e ' B ' | head -${1:-25}
 }
 
 # Create a link to a commit on GitHub
