@@ -40,6 +40,22 @@ static void remove_flag(char *cmd, const char *flag)
 	}
 }
 
+static void patch_flag(char *cmd, const char *flag, const char *val)
+{
+	size_t flag_len, val_len;
+	char *start, *end;
+
+	start = strstr(cmd, flag);
+	if (!start)
+		return;
+
+	flag_len = strlen(flag);
+	val_len = strlen(val);
+	end = start + flag_len + strcspn(start + flag_len, " ");
+	memmove(start + flag_len + val_len, end, strlen(end) + 1);
+	memcpy(start + flag_len, val, val_len);
+}
+
 static void remove_safetynet_flags(char *cmd)
 {
 	remove_flag(cmd, "androidboot.verifiedbootstate=");
@@ -52,9 +68,10 @@ static int __init proc_cmdline_init(void)
 
 	/*
 	 * Remove various flags from command line seen by userspace in order to
-	 * pass SafetyNet CTS check.
+	 * pass SafetyNet CTS check and make userspace cope with warm resets.
 	 */
 	remove_safetynet_flags(new_command_line);
+	patch_flag(new_command_line, "androidboot.bootreason=", "hard");
 
 	proc_create("cmdline", 0, NULL, &cmdline_proc_fops);
 	return 0;
