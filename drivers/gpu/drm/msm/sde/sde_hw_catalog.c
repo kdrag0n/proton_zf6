@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -3652,7 +3652,8 @@ static int sde_hardware_format_caps(struct sde_mdss_cfg *sde_cfg,
 		sde_cfg->has_hdr = true;
 
 	/* Disable HDR for SM6150 target only */
-	if (IS_SDE_MAJOR_MINOR_SAME((hw_rev), SDE_HW_VER_530))
+	if (IS_SDE_MAJOR_MINOR_SAME((hw_rev), SDE_HW_VER_530)
+			|| IS_SDE_MAJOR_MINOR_SAME((hw_rev), SDE_HW_VER_540))
 		sde_cfg->has_hdr = false;
 
 	index = sde_copy_formats(sde_cfg->dma_formats, dma_list_size,

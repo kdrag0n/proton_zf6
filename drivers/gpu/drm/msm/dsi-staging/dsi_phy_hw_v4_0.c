@@ -179,7 +179,6 @@ void dsi_phy_hw_v4_0_enable(struct dsi_phy_hw *phy,
 	/* Alter PHY configurations if data rate less than 1.5GHZ*/
 	if (cfg->bit_clk_rate_hz < 1500000000)
 		less_than_1500_mhz = true;
-
 	vreg_ctrl_0 = less_than_1500_mhz ? 0x5B : 0x59;
 	glbl_str_swi_cal_sel_ctrl = less_than_1500_mhz ? 0x03 : 0x00;
 	glbl_hstx_str_ctrl_0 = less_than_1500_mhz ? 0x66 : 0x88;

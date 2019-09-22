@@ -139,8 +139,6 @@ static void dp_gpio_hpd_work(struct work_struct *work)
 			dp_gpio_isr,
 			IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
 			"dp-gpio-intp", gpio_hpd);
-		if (rc)
-			return;
 		dp_gpio_hpd_connect(gpio_hpd, true);
 	} else {
 		devm_free_irq(gpio_hpd->dev,
@@ -150,8 +148,6 @@ static void dp_gpio_hpd_work(struct work_struct *work)
 			dp_gpio_isr,
 			IRQF_TRIGGER_RISING | IRQF_ONESHOT,
 			"dp-gpio-intp", gpio_hpd);
-		if (rc)
-			return;
 		dp_gpio_hpd_connect(gpio_hpd, false);
 	}
 

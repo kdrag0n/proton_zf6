@@ -1820,7 +1820,6 @@ const char *cmd_set_prop_map[DSI_CMD_SET_MAX] = {
 const char *cmd_set_state_map[DSI_CMD_SET_MAX] = {
 	"qcom,mdss-dsi-pre-on-command-state",
 	"qcom,mdss-dsi-on-command-state",
-	"qcom,mdss-dsi-on-command-state",
 	"qcom,mdss-dsi-post-on-command-state",
 	"qcom,mdss-dsi-pre-off-command-state",
 	"qcom,mdss-dsi-off-command-state",
@@ -3711,8 +3710,8 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 			pr_err("failed to partial update caps, rc=%d\n", rc);
 
 		/*
-		 * TODO: support pixel overlap for DSC enabled and Partial
-		 * update enabled case also.
+		 * No support for pixel overlap in DSC enabled or Partial
+		 * update enabled cases.
 		 */
 		if (prv_info->dsc_enabled || prv_info->roi_caps.enabled)
 			prv_info->overlap_pixels = 0;

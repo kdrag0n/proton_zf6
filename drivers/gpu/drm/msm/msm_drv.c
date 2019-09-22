@@ -1829,7 +1829,6 @@ static int msm_pm_resume(struct device *dev)
 	struct drm_device *ddev;
 	struct msm_drm_private *priv;
 	struct msm_kms *kms;
-	int val;
 
 	if (display_early_on) {
 		g_dev = dev;
@@ -1839,22 +1838,18 @@ static int msm_pm_resume(struct device *dev)
 		g_dev = NULL;
 	}
 
-	if (!dev) {
+	if (!dev)
 		return -EINVAL;
-	}
 
 	ddev = dev_get_drvdata(dev);
-	if (!ddev || !ddev->dev_private) {
+	if (!ddev || !ddev->dev_private)
 		return -EINVAL;
-	}
 
 	priv = ddev->dev_private;
 	kms = priv->kms;
 
-	if (!g_dev && kms && kms->funcs && kms->funcs->pm_resume) {
-		val = kms->funcs->pm_resume(dev);
-		return val;
-	}
+	if (!g_dev && kms && kms->funcs && kms->funcs->pm_resume)
+		return kms->funcs->pm_resume(dev);
 
 	/* enable hot-plug polling */
 	drm_kms_helper_poll_enable(ddev);
@@ -2088,8 +2083,7 @@ static int add_gpu_components(struct device *dev,
 	if (!np)
 		return 0;
 
-	if (of_device_is_available(np))
-		drm_of_component_match_add(dev, matchptr, compare_of, np);
+	drm_of_component_match_add(dev, matchptr, compare_of, np);
 
 	of_node_put(np);
 
