@@ -230,7 +230,6 @@ function dbuild() {
 # Flash the given kernel package (defaults to latest) on the device via ADB
 function ktest() {
 	local fn="${1:-kernel.zip}"
-	local target_fn="${2:-/data/local/tmp/$(basename "$fn" .zip)-75hz.zip}"
 	local backslash='\'
 
 	# Wait for device to show up on ADB
@@ -239,6 +238,7 @@ function ktest() {
 	# Check if device is in Android or recovery
 	if adb shell pgrep gatekeeperd > /dev/null; then
 		# Device is in Android
+		local target_fn="${2:-/data/local/tmp/$(basename "$fn" .zip)-75hz.zip}"
 
 		# Push package
 		msg "Pushing kernel package..."
@@ -255,14 +255,15 @@ function ktest() {
 		END
 	else
 		# Device is in recovery (assuming TWRP)
+		local target_fn="${2:-/tmp/$(basename "$fn" .zip)-75hz.zip}"
 
 		# Push package
 		msg "Pushing kernel package..."
-		adb push "$fn" /tmp/kernel.zip && \
+		adb push "$fn" "$target_fn" && \
 
 		# Tell TWRP to flash it and reboot afterwards
 		msg "Executing flasher on device..."
-		adb shell "twrp install /tmp/kernel.zip && reboot"
+		adb shell "twrp install '$target_fn' && reboot"
 	fi
 }
 
