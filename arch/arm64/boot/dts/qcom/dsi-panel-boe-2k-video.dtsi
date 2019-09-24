@@ -165,7 +165,7 @@
 				qcom,mdss-dsi-h-right-border = <0>;
 				qcom,mdss-dsi-v-top-border = <0>;
 				qcom,mdss-dsi-v-bottom-border = <0>;
-				qcom,mdss-dsi-panel-framerate = <75>;
+				qcom,mdss-dsi-panel-framerate = <72>;
 
 				qcom,mdss-dsi-on-command = [
 					39 01 00 00 00 00 02 00 00
