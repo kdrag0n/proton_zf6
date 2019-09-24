@@ -34,8 +34,8 @@ dump_boot;
 
 # Set display timing mode based on ZIP file name
 case "$ZIPFILE" in
-  *75fps*|*75hz*)
-    ui_print "  • Setting 75 Hz refresh rate"
+  *72fps*|*72hz*)
+    ui_print "  • Setting 72 Hz refresh rate"
     patch_cmdline "msm_drm.timing_override" "msm_drm.timing_override=1"
     ;;
   *)
