@@ -126,6 +126,9 @@ static int g_last_bl = 0x0;
 static int g_bl_threshold = LCD_BL_THRESHOLD_BOE;
 static int g_wled_dimming_div = 10;
 
+int g_bl_debounce_target = 128;
+int g_bl_debounce_value  = 144;
+
 int dsi_dsc_create_pps_buf_cmd(struct msm_display_dsc_info *dsc, char *buf,
 				int pps_id)
 {
@@ -811,6 +814,9 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		if (asus_lcd_cabc_mode[1] == 3)
 			rc = mipi_dsi_dcs_set_display_cabc(dsi);
 	}
+
+	if (bl_lvl == g_bl_debounce_target)
+		bl_lvl = g_bl_debounce_value;
 
 	g_last_bl = bl_lvl;
 
