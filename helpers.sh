@@ -238,7 +238,7 @@ function ktest() {
 	# Check if device is in Android or recovery
 	if adb shell pgrep gatekeeperd > /dev/null; then
 		# Device is in Android
-		local target_fn="${2:-/data/local/tmp/$(basename "$fn" .zip)-75hz.zip}"
+		local target_fn="${2:-/data/local/tmp/$(basename "$fn" .zip)-72hz.zip}"
 
 		# Push package
 		msg "Pushing kernel package..."
@@ -255,7 +255,7 @@ function ktest() {
 		END
 	else
 		# Device is in recovery (assuming TWRP)
-		local target_fn="${2:-/tmp/$(basename "$fn" .zip)-75hz.zip}"
+		local target_fn="${2:-/tmp/$(basename "$fn" .zip)-72hz.zip}"
 
 		# Push package
 		msg "Pushing kernel package..."
@@ -271,7 +271,7 @@ function ktest() {
 function sktest() {
 	local fn="${1:-kernel.zip}"
 	local hostname="${2:-$lan_ssh_host}"
-	local target_fn="${3:-$(basename "$fn" .zip)-75hz.zip}"
+	local target_fn="${3:-$(basename "$fn" .zip)-72hz.zip}"
 	local backslash='\'
 
 	# Push package
