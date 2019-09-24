@@ -1881,7 +1881,7 @@ int mproximity_store_touch_enable(bool enable)
 }
 
 /*For load calibration data*/
-int mproximity_store_load_calibration_data()
+int mproximity_store_load_calibration_data(void)
 {
 	int ret=0;
 	
