@@ -32,6 +32,14 @@ dump_boot;
 
 # begin ramdisk changes
 
+# Set Android version for kernel
+ver="$(file_getprop /system/build.prop ro.build.version.release)"
+if [ ! -z "$ver" ]; then
+  patch_cmdline "androidboot.version" "androidboot.version=$ver"
+else
+  patch_cmdline "androidboot.version" ""
+fi
+
 # Set display timing mode based on ZIP file name
 case "$ZIPFILE" in
   *72fps*|*72hz*)
