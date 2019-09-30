@@ -263,6 +263,7 @@ static void googlekey_report_function(struct work_struct *work)
 	spin_lock_irqsave(&googlekey_slock, flags);
 
 	if (ddata->sendVirtualPress){
+		input_report_key(ddata->input, KEY_ASSISTANT, 1);
 		input_report_key(ddata->input, g_google_key_code, 1);
 		input_sync(ddata->input);
 		ddata->sendVirtualPress = false;
@@ -272,6 +273,7 @@ static void googlekey_report_function(struct work_struct *work)
 	}
 
 	if (ddata->key_press_queued){
+		input_report_key(ddata->input, KEY_ASSISTANT, 1);
 		input_report_key(ddata->input, g_google_key_code, 1);
 		input_sync(ddata->input);
 		ddata->key_press_queued = false;
@@ -283,6 +285,7 @@ static void googlekey_report_function(struct work_struct *work)
 	}
 
 	if (ddata->key_release_queued){
+		input_report_key(ddata->input, KEY_ASSISTANT, 0);
 		input_report_key(ddata->input, g_google_key_code, 0);
 		input_sync(ddata->input);
 		ddata->key_release_queued = false;
@@ -321,6 +324,7 @@ static void googlekey_report_function(struct work_struct *work)
 #else
 	value = !!gpio_get_value_cansleep(ddata->gpio) ^ ddata->active_low;
 
+	input_report_key(ddata->input, KEY_ASSISTANT, value);
 	input_report_key(ddata->input, g_google_key_code, value);
 	input_sync(ddata->input);
 	pr_info("[keypad] googlekey EV_KEY report value = %d\n", value);
@@ -340,6 +344,7 @@ static void googlekey_double_check(struct work_struct *work)
 		gpiovalue = gpio_get_value(ddata->gpio);
 		//pr_info("[keypad] googlekey double_check gpio = %d\n", gpiovalue);
 		if(gpiovalue){
+			input_report_key(ddata->input, KEY_ASSISTANT, 0);
 			input_report_key(ddata->input, g_google_key_code, 0);
 			input_sync(ddata->input);
 			ddata->key_release_queued = false;
@@ -437,6 +442,7 @@ static int __init googlekey_driver_probe(struct platform_device *pdev)
 	input->name = GOOGLEKEY_DEVICE_NAME;
 	input->phys = GOOGLEKEY_PHYS;
 	set_bit(EV_KEY, input->evbit);
+	set_bit(KEY_ASSISTANT, input->keybit);
 	set_bit(KEY_ASUS_GOOGLE_ASSISTANT, input->keybit);
 	set_bit(BTN_0, input->keybit);
 
