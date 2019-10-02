@@ -14,6 +14,7 @@
  */
 #define DEBUG
 
+#include <linux/android_version.h>
 #include <linux/file.h>
 #include <linux/inetdevice.h>
 #include <linux/module.h>
@@ -3003,6 +3004,10 @@ static struct xt_match qtaguid_mt_reg __read_mostly = {
 
 static int __init qtaguid_mt_init(void)
 {
+	/* Android 10+ uses the upstream "owner" module instead */
+	if (get_android_version() >= 10)
+		return 0;
+
 	if (qtaguid_proc_register(&xt_qtaguid_procdir)
 	    || iface_stat_init(xt_qtaguid_procdir)
 	    || xt_register_match(&qtaguid_mt_reg)

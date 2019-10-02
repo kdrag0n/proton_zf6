@@ -10,6 +10,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+#include <linux/android_version.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/file.h>
@@ -116,11 +117,19 @@ static struct xt_match owner_mt_reg __read_mostly = {
 
 static int __init owner_mt_init(void)
 {
+	/* Android 9 and older uses the custom "qtaguid" module instead */
+	if (get_android_version() < 10)
+		return 0;
+
 	return xt_register_match(&owner_mt_reg);
 }
 
 static void __exit owner_mt_exit(void)
 {
+	/* Android 9 and older uses the custom "qtaguid" module instead */
+	if (get_android_version() < 10)
+		return;
+
 	xt_unregister_match(&owner_mt_reg);
 }
 
