@@ -147,7 +147,7 @@ static int set_charger_mode(char *str)
 __setup("androidboot.mode=", set_charger_mode);
 EXPORT_SYMBOL(g_Charger_mode);
 
-static unsigned int android_version = 9;
+static unsigned int android_version = CONFIG_DEFAULT_ANDROID_VERSION;
 
 static int __init set_android_version(char *val)
 {

@@ -21,6 +21,12 @@ mounts-$(CONFIG_BLK_DEV_MD)	+= do_mounts_md.o
 mounts-$(CONFIG_BLK_DEV_DM)	+= do_mounts_dm.o
 mounts-$(CONFIG_BLK_DEV_DM)	+= do_mounts_verity.o
 
+ifneq ($(PLATFORM_VERSION),)
+CFLAGS_main.o += -DCONFIG_DEFAULT_ANDROID_VERSION=$(PLATFORM_VERSION)
+else
+CFLAGS_main.o += -DCONFIG_DEFAULT_ANDROID_VERSION=9
+endif
+
 # dependencies on generated files need to be listed explicitly
 $(obj)/version.o: include/generated/compile.h
 
