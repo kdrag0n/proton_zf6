@@ -404,6 +404,7 @@ struct ion_page_pool *ion_page_pool_create(gfp_t gfp_mask, unsigned int order,
 void ion_page_pool_destroy(struct ion_page_pool *pool);
 struct page *ion_page_pool_alloc(struct ion_page_pool *a, bool *from_pool);
 void ion_page_pool_free(struct ion_page_pool *pool, struct page *page);
+long ion_page_pool_nr_pages(void);
 
 struct ion_heap *get_ion_heap(int heap_id);
 struct page *ion_page_pool_alloc_pool_only(struct ion_page_pool *a);

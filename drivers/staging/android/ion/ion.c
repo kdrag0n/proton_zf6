@@ -18,6 +18,7 @@
 
 static struct ion_device *internal_dev;
 static struct kmem_cache *ion_sg_table_pool;
+static atomic_long_t total_heap_bytes;
 
 int ion_walk_heaps(int heap_id, enum ion_heap_type type, void *data,
 		   int (*f)(struct ion_heap *heap, void *data))
@@ -84,6 +85,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		goto free_heap;
 
 	table = buffer->sg_table;
+	atomic_long_add(len, &total_heap_bytes);
 	return buffer;
 
 free_heap:
@@ -104,6 +106,7 @@ static void _ion_buffer_destroy(struct ion_buffer *buffer)
 	struct ion_heap *heap = buffer->heap;
 
 	msm_dma_buf_freed(&buffer->iommu_data);
+	atomic_long_sub(buffer->size, &total_heap_bytes);
 
 	if (heap->flags & ION_HEAP_FLAG_DEFER_FREE)
 		ion_heap_freelist_add(heap, buffer);
@@ -824,6 +827,56 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 	up_write(&dev->heap_lock);
 }
 
+static ssize_t
+total_heaps_kb_show(struct kobject *kobj, struct kobj_attribute *attr,
+		    char *buf)
+{
+	u64 size_in_bytes = atomic_long_read(&total_heap_bytes);
+
+	return sprintf(buf, "%llu\n", div_u64(size_in_bytes, 1024));
+}
+
+static ssize_t
+total_pools_kb_show(struct kobject *kobj, struct kobj_attribute *attr,
+		    char *buf)
+{
+	u64 size_in_bytes = ion_page_pool_nr_pages() * PAGE_SIZE;
+
+	return sprintf(buf, "%llu\n", div_u64(size_in_bytes, 1024));
+}
+
+static struct kobj_attribute total_heaps_kb_attr =
+	__ATTR_RO(total_heaps_kb);
+
+static struct kobj_attribute total_pools_kb_attr =
+	__ATTR_RO(total_pools_kb);
+
+static struct attribute *ion_device_attrs[] = {
+	&total_heaps_kb_attr.attr,
+	&total_pools_kb_attr.attr,
+	NULL,
+};
+
+ATTRIBUTE_GROUPS(ion_device);
+
+static int ion_init_sysfs(void)
+{
+	struct kobject *ion_kobj;
+	int ret;
+
+	ion_kobj = kobject_create_and_add("ion", kernel_kobj);
+	if (!ion_kobj)
+		return -ENOMEM;
+
+	ret = sysfs_create_groups(ion_kobj, ion_device_groups);
+	if (ret) {
+		kobject_put(ion_kobj);
+		return ret;
+	}
+
+	return 0;
+}
+
 struct ion_device *ion_device_create(void)
 {
 	struct ion_device *dev;
@@ -845,11 +898,17 @@ struct ion_device *ion_device_create(void)
 	if (ret)
 		goto free_table_pool;
 
+	ret = ion_init_sysfs();
+	if (ret)
+		goto dereg_misc;
+
 	init_rwsem(&dev->heap_lock);
 	plist_head_init(&dev->heaps);
 	internal_dev = dev;
 	return dev;
 
+dereg_misc:
+	misc_deregister(&dev->dev);
 free_table_pool:
 	kmem_cache_destroy(ion_sg_table_pool);
 free_dev:
