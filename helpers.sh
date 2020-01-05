@@ -1,6 +1,6 @@
 
 # Interactive helpers for Android kernel development
-# Copyright (C) 2019 Danny Lin <danny@kdrag0n.dev>
+# Copyright (C) 2019-2020 Danny Lin <danny@kdrag0n.dev>
 #
 # This script must be *sourced* from a Bourne-compatible shell in order to
 # function. Nothing will happen if you execute it.
