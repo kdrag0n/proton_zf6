@@ -7,7 +7,7 @@
 #
 
 # Proton Clang build (version + ISO 8601 date)
-proton_clang_build="10.0.0-20200104"
+proton_clang_build="11.0.0-20200117"
 
 # Path to executables in Clang toolchain
 clang_bin="$HOME/toolchains/proton_clang-$proton_clang_build/bin"
