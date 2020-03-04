@@ -19,19 +19,6 @@ endif
 endif
 
 ifdef CONFIG_LTO
-# 4.7 works mostly, but it sometimes loses symbols on large builds
-# This can be worked around by marking those symbols visible,
-# but that is fairly ugly and the problem is gone with 4.8
-# 4.8 was very slow
-# 4.9 was missing __attribute__((noreorder)) for ordering initcalls,
-# and needed -fno-toplevel-reorder, which can lead to missing symbols
-# so only support 5.0+
-ifeq ($(call cc-ifversion, -ge, 0500,y),y)
-# is the compiler compiled with LTO?
-ifneq ($(call cc-option,${LTO_CFLAGS},n),n)
-# binutils before 2.27 has various problems with plugins
-ifeq ($(call ld-ifversion,-ge,227000000,y),y)
-
 	LTO_CFLAGS := -flto $(DISABLE_TL_REORDER)
 	LTO_FINAL_CFLAGS := -fuse-linker-plugin
 
@@ -83,13 +70,4 @@ endif
 	# use plugin aware tools
 	AR = $(CROSS_COMPILE)gcc-ar
 	NM = $(CROSS_COMPILE)gcc-nm
-else
-        $(warning WARNING old binutils. LTO disabled)
-endif
-else
-        $(warning "WARNING: Compiler/Linker does not support LTO/WHOPR with linker plugin. CONFIG_LTO disabled.")
-endif
-else
-        $(warning "WARNING: GCC $(call cc-version) too old for LTO/WHOPR. CONFIG_LTO disabled")
-endif
 endif
