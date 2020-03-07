@@ -395,9 +395,8 @@ function unsetup() {
 		unset -f "$func" > /dev/null 2>&1
 	done
 
-	# Restore PATH and LD_LIBRARY_PATH if they were modified
+	# Restore PATH, if modified
 	[[ ! -z "$_ksetup_old_path" ]] && export PATH="$_ksetup_old_path"
-	[[ ! -z "$_ksetup_old_ld_path" ]] && export LD_LIBRARY_PATH="$_ksetup_old_ld_path"
 
 	# Unset variables
 	for var in "${_ksetup_vars[@]}"; do

@@ -6,17 +6,14 @@
 # function. Nothing will happen if you execute it.
 #
 
-# Proton Clang build (version + ISO 8601 date)
-proton_clang_build="11.0.0-20200117"
-
 # Path to executables in Clang toolchain
-clang_bin="$HOME/toolchains/proton_clang-$proton_clang_build/bin"
+clang_bin="$HOME/toolchains/proton-clang/bin"
 
 # 64-bit GCC toolchain prefix
-gcc_prefix64="$HOME/toolchains/proton_clang-$proton_clang_build/bin/aarch64-linux-gnu-"
+gcc_prefix64="aarch64-linux-gnu-"
 
 # 32-bit GCC toolchain prefix
-gcc_prefix32="$HOME/toolchains/proton_clang-$proton_clang_build/bin/arm-linux-gnueabi-"
+gcc_prefix32="arm-linux-gnueabi-"
 
 # Number of parallel jobs to run
 # Do not remove; set to 1 for no parallelism.
@@ -28,9 +25,7 @@ jobs=$(nproc)
 # Load the shared helpers
 source helpers.sh
 
-_ksetup_old_ld_path="$LD_LIBRARY_PATH"
 _ksetup_old_path="$PATH"
-export LD_LIBRARY_PATH="$clang_bin/../lib:$clang_bin/../lib64:$LD_LIBRARY_PATH"
 export PATH="$clang_bin:$PATH"
 
 # Index of variables for cleanup in unsetup
@@ -52,7 +47,6 @@ kmake_flags+=(
 
 	CROSS_COMPILE="$gcc_prefix64"
 	CROSS_COMPILE_ARM32="$gcc_prefix32"
-	CLANG_TRIPLE="aarch64-linux-gnu-"
 
 	KBUILD_COMPILER_STRING="$(get_clang_version clang)"
 )
