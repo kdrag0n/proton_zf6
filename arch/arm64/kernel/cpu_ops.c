@@ -31,7 +31,7 @@ extern const struct cpu_operations cpu_psci_ops;
 
 const struct cpu_operations *cpu_ops[NR_CPUS] __ro_after_init;
 
-static const struct cpu_operations *dt_supported_cpu_ops[] __initconst = {
+static const struct cpu_operations *dt_supported_cpu_ops[] = {
 	&smp_spin_table_ops,
 	&cpu_psci_ops,
 	NULL,
