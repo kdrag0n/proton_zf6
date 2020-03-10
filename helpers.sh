@@ -139,7 +139,7 @@ function zver() {
 
 # Make wrapper for kernel compilation
 function kmake() {
-	make "${kmake_flags[@]}" "$@"
+	time make "${kmake_flags[@]}" "$@"
 }
 
 
