@@ -7,10 +7,10 @@
 #
 
 # 64-bit GCC toolchain prefix
-gcc_prefix64="$HOME/toolchains/proton-gcc-9.2.0/bin/aarch64-elf-"
+gcc_prefix64="$HOME/toolchains/arter97/bin/aarch64-elf-"
 
 # 32-bit GCC toolchain prefix
-gcc_prefix32="$HOME/toolchains/proton-gcc32-9.2.0/bin/arm-eabi-"
+gcc_prefix32="$HOME/toolchains/arter97-32/bin/arm-eabi-"
 
 # Number of parallel jobs to run
 # Do not remove; set to 1 for no parallelism.
