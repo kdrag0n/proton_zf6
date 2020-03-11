@@ -29,7 +29,7 @@ struct crypto_aes_ctx {
 };
 
 extern const u32 crypto_ft_tab[4][256];
-extern const u32 crypto_fl_tab[4][256];
+//extern const u32 crypto_fl_tab[4][256];
 extern const u32 crypto_it_tab[4][256];
 extern const u32 crypto_il_tab[4][256];
 
