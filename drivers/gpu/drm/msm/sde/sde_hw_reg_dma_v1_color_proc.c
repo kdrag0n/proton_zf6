@@ -17,6 +17,9 @@
 #include "sde_hw_sspp.h"
 #include "sde_hwio.h"
 
+/* ASUS display: record IGC parameter to prevent duplicate setting */
+#define ASUS_KERNEL_IGC_TABLE 1
+
 /* Reserve space of 128 words for LUT dma payload set-up */
 #define REG_DMA_HEADERS_BUFFER_SZ (sizeof(u32) * 128)
 #define REG_DMA_VIG_SWI_DIFF 0x200
@@ -788,6 +791,69 @@ static void _dspp_igcv31_off(struct sde_hw_dspp *ctx, void *cfg)
 		DRM_ERROR("failed to kick off ret %d\n", rc);
 }
 
+#if ASUS_KERNEL_IGC_TABLE
+static struct drm_msm_igc_lut* g_lut_cfg = NULL;
+bool asus_igc_need_commit = true;
+bool asus_igc_enabled = true;
+
+static void asus_igc_lut_table_update(struct drm_msm_igc_lut *lut_cfg)
+{
+	g_lut_cfg->flags = lut_cfg->flags;
+	memcpy(g_lut_cfg->c0, lut_cfg->c0, IGC_TBL_LEN * sizeof(uint32_t));
+	memcpy(g_lut_cfg->c1, lut_cfg->c1, IGC_TBL_LEN * sizeof(uint32_t));
+	memcpy(g_lut_cfg->c2, lut_cfg->c2, IGC_TBL_LEN * sizeof(uint32_t));
+	g_lut_cfg->strength = lut_cfg->strength;
+}
+
+static bool asus_igc_lut_table_compare(struct drm_msm_igc_lut *lut_cfg)
+{
+	int i = 0;
+	bool ret = true;
+
+	if (!g_lut_cfg) {
+		g_lut_cfg = kzalloc(sizeof(struct drm_msm_igc_lut), GFP_KERNEL);
+		asus_igc_lut_table_update(lut_cfg);
+		return false;
+	}
+
+	if (g_lut_cfg->flags != lut_cfg->flags) {
+		printk("[Display] IGC lut flags differ B: 0x%x, A: 0x%x\n", g_lut_cfg->flags, lut_cfg->flags);
+		ret = false;
+		goto out;
+	}
+
+	for(i = 0; i < IGC_TBL_LEN; i++) {
+		if (g_lut_cfg->c0[i] != lut_cfg->c0[i]) {
+			printk("[Display] IGC lut c0 differ at index %d\n", i);
+			ret = false;
+			goto out;
+		}
+
+		if (g_lut_cfg->c1[i] != lut_cfg->c1[i]) {
+			printk("[Display] IGC lut c1 differ at index %d\n", i);
+			ret = false;
+			goto out;
+		}
+
+		if (g_lut_cfg->c2[i] != lut_cfg->c2[i]) {
+			printk("[Display] IGC lut c2 differ at index %d\n", i);
+			ret = false;
+			goto out;
+		}
+	}
+
+	if (g_lut_cfg->strength != lut_cfg->strength) {
+		printk("[Display] IGC lut strength differ B: 0x%x, A: 0x%x\n", g_lut_cfg->strength, lut_cfg->strength);
+		ret = false;
+		goto out;
+	}
+
+out:
+	asus_igc_lut_table_update(lut_cfg);
+	return ret;
+}
+#endif
+
 void reg_dmav1_setup_dspp_igcv31(struct sde_hw_dspp *ctx, void *cfg)
 {
 	struct drm_msm_igc_lut *lut_cfg;
@@ -807,6 +873,7 @@ void reg_dmav1_setup_dspp_igcv31(struct sde_hw_dspp *ctx, void *cfg)
 	if (!hw_cfg->payload) {
 		DRM_DEBUG_DRIVER("disable igc feature\n");
 		_dspp_igcv31_off(ctx, cfg);
+		asus_igc_enabled = false;
 		return;
 	}
 
@@ -817,6 +884,16 @@ void reg_dmav1_setup_dspp_igcv31(struct sde_hw_dspp *ctx, void *cfg)
 	}
 
 	lut_cfg = hw_cfg->payload;
+
+#if ASUS_KERNEL_IGC_TABLE
+	if (asus_igc_need_commit) {
+		asus_igc_need_commit = false;
+	} else if (!asus_igc_enabled) {
+		asus_igc_enabled = true;
+	} else if (asus_igc_lut_table_compare(lut_cfg)) {
+		return;
+	}
+#endif
 
 	dma_ops = sde_reg_dma_get_ops();
 	dma_ops->reset_reg_dma_buf(dspp_buf[IGC][ctx->idx]);
