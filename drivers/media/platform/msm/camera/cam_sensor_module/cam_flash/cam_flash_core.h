@@ -16,6 +16,8 @@
 #include <media/cam_sensor.h>
 #include "cam_flash_dev.h"
 
+#pragma GCC diagnostic ignored "-Wvisibility"
+
 int cam_flash_publish_dev_info(struct cam_req_mgr_device_info *info);
 int cam_flash_establish_link(struct cam_req_mgr_core_dev_link_setup *link);
 int cam_flash_apply_request(struct cam_req_mgr_apply_request *apply);

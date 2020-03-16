@@ -26,7 +26,6 @@
 #include <linux/timer.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
-#include <linux/semaphore.h>
 #include <media/cam_sensor.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
@@ -148,10 +147,6 @@ struct cam_cci_master_info {
 	struct completion report_q[NUM_QUEUES];
 	atomic_t done_pending[NUM_QUEUES];
 	spinlock_t lock_q[NUM_QUEUES];
-	spinlock_t freq_cnt;
-	struct semaphore master_sem;
-	bool is_first_req;
-	uint16_t freq_ref_cnt;
 };
 
 struct cam_cci_clk_params_t {
@@ -238,10 +233,10 @@ struct cci_device {
 	spinlock_t lock_status;
 	bool is_burst_read[MASTER_MAX];
 	uint32_t irqs_disabled;
-	struct mutex init_mutex;
 	struct mutex mutex_for_init;
 	uint32_t rw_cnt[8];
 	struct mutex mutex_for_conf[MASTER_MAX];
+	struct mutex init_mutex;
 };
 
 enum cam_cci_i2c_cmd_type {

@@ -420,7 +420,6 @@ static int32_t cam_eeprom_platform_driver_probe(
 	struct cam_eeprom_soc_private  *soc_private = NULL;
 
 	CAM_INFO(CAM_EEPROM,"EEPROM Probe Start");
-
 	e_ctrl = kzalloc(sizeof(struct cam_eeprom_ctrl_t), GFP_KERNEL);
 	if (!e_ctrl)
 		return -ENOMEM;

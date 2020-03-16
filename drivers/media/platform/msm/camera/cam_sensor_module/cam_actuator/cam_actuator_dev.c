@@ -16,7 +16,6 @@
 #include "cam_actuator_core.h"
 #include "cam_trace.h"
 #include "asus_actuator.h"
-
 static long cam_actuator_subdev_ioctl(struct v4l2_subdev *sd,
 	unsigned int cmd, void *arg)
 {

@@ -20,21 +20,17 @@
 #include "cam_irq_controller.h"
 #include <uapi/media/cam_isp.h>
 
-#define CAM_ISP_FPS_60                           60
-
 /*
  * struct cam_isp_timestamp:
  *
  * @mono_time:          Monotonic boot time
  * @vt_time:            AV Timer time
  * @ticks:              Qtimer ticks
- * @time_usecs:         time in micro seconds
  */
 struct cam_isp_timestamp {
 	struct timeval          mono_time;
 	struct timeval          vt_time;
 	uint64_t                ticks;
-	uint64_t                time_usecs;
 };
 
 /*
@@ -109,7 +105,6 @@ enum cam_isp_hw_cmd_type {
 	CAM_ISP_HW_CMD_FE_UPDATE_IN_RD,
 	CAM_ISP_HW_CMD_FE_UPDATE_BUS_RD,
 	CAM_ISP_HW_CMD_GET_IRQ_REGISTER_DUMP,
-	CAM_ISP_HW_CMD_FPS_CONFIG,
 	CAM_ISP_HW_CMD_MAX,
 };
 

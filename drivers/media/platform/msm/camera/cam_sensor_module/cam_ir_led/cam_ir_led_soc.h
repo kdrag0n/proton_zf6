@@ -10,13 +10,12 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _CAM_CSID_PPI_DEV_H_
-#define _CAM_CSID_PPI_DEV_H_
+#ifndef _CAM_IR_LED_SOC_H_
+#define _CAM_IR_LED_SOC_H_
 
-#include "cam_isp_hw.h"
+#include "cam_ir_led_dev.h"
 
-irqreturn_t cam_csid_ppi_irq(int irq_num, void *data);
-int cam_csid_ppi_probe(struct platform_device *pdev);
-int cam_csid_ppi_remove(struct platform_device *pdev);
+int cam_ir_led_get_dt_data(struct cam_ir_led_ctrl *fctrl,
+	struct cam_hw_soc_info *soc_info);
 
-#endif /*_CAM_CSID_PPI_DEV_H_ */
+#endif /*_CAM_IR_LED_SOC_H_*/
