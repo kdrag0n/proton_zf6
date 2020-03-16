@@ -78,6 +78,7 @@ static int g_alsps_frgb_power_status = ALSPS_RESUME;
 #define WAIT_I2C_DELAY 5
 
 static bool g_frgb_polling_cancel_flag = false;
+static bool g_psensor_polling_cancel_flag = false;
 
 /**********************************/
 /* ALSPS_FRGB Sensor IO Control */
@@ -137,7 +138,6 @@ static int pocket_mode_threshold = 0;
 static int touch_enable = 1;
 static int anti_oil_enable = 1;
 
-#define LIGHT_SENSOR_POLLING_REPORT_THRESHOLD 5
 static int light_sensor_log_count = 0;
 
 /*****************************************/
@@ -159,6 +159,8 @@ struct psensor_data
 	bool Device_switch_on;					/* this var. means is turning on ps or not */	
 	bool polling_mode;							/* Polling for adc of proximity */
 	bool autok;							/*auto calibration status*/
+	
+	int g_ps_int_status;					/* Proximitysensor interrupt status */
 
 	int int_counter;
 	int event_counter;
@@ -388,7 +390,7 @@ static int proximity_turn_onoff(bool bOn)
 		g_ps_data->Device_switch_on = true;
 		/*check the polling mode*/
 		if(g_ps_data->polling_mode == true) {
-			queue_delayed_work(ALSPS_FRGB_delay_workqueue, &proximity_polling_adc_work, msecs_to_jiffies(1000));
+			queue_delayed_work(ALSPS_FRGB_delay_workqueue, &proximity_polling_adc_work, msecs_to_jiffies(500));
 			log("[Polling] Proximity polling adc START. \n");
 		}
 
@@ -524,20 +526,51 @@ static int proximity_set_threshold(void)
 
 static void proximity_polling_adc(struct work_struct *work)
 {
-	int adc = 0;
+	int adc_value = 0;
 
 	/* Check Hardware Support First */
 	if(ALSPS_FRGB_hw_client->mpsensor_hw->proximity_hw_get_adc == NULL) {
-		err("proximity_hw_get_adc NOT SUPPORT. \n");		
+		err("proximity_hw_get_adc NOT SUPPORT. \n");
+	} else {
+		mutex_lock(&g_alsps_frgb_lock);
+		/* proximity sensor go to suspend, cancel proximity get adc polling */
+		if(g_alsps_frgb_power_status == ALSPS_SUSPEND){
+			g_psensor_polling_cancel_flag = true;
+			log("proximity sensor has suspended, cancel proximity get adc polling!!");
+		} else {
+			if(g_ps_data->Device_switch_on == true) {
+				adc_value = ALSPS_FRGB_hw_client->mpsensor_hw->proximity_hw_get_adc();
+				dbg("[Polling] Proximity get adc = %d\n", adc_value);
+				
+				if(adc_value < 0){
+					err("Proximity get adc ERROR\n");	
+				} else {
+					if(g_ps_data->g_ps_int_status != ALSPS_INT_PS_CLOSE &&
+							(adc_value >= g_ps_data->g_ps_calvalue_hi &&
+							(pocket_mode_threshold <= 0 || adc_value <= pocket_mode_threshold))) {
+						log("[Polling] Proximity Detect Object Close. (adc = %d)\n", adc_value);
+						psensor_report_abs(PSENSOR_REPORT_PS_CLOSE);
+						g_ps_data->g_ps_int_status = ALSPS_INT_PS_CLOSE;
+					}else if(g_ps_data->g_ps_int_status != ALSPS_INT_PS_AWAY &&
+							adc_value <= g_ps_data->g_ps_calvalue_lo){
+						log("[Polling] Proximity Detect Object Away. (adc = %d)\n", adc_value);
+						psensor_report_abs(PSENSOR_REPORT_PS_AWAY);
+						g_ps_data->g_ps_int_status = ALSPS_INT_PS_AWAY;
+					}else if(g_ps_data->g_ps_int_status != ALSPS_INT_PS_POCKET &&
+							(pocket_mode_threshold > 0 && adc_value > pocket_mode_threshold)){
+						log("[Polling] Proximity Detect Object Close. (adc = %d, distance < 1cm)\n", adc_value);	
+						psensor_report_abs(PSENSOR_REPORT_PS_POCKET);
+						g_ps_data->g_ps_int_status = ALSPS_INT_PS_POCKET;
+					}
+				}
+			}
+			if(g_ps_data->Device_switch_on == true)
+				queue_delayed_work(ALSPS_FRGB_delay_workqueue, &proximity_polling_adc_work, msecs_to_jiffies(500));
+			else
+				log("[Polling] Proximity polling adc STOP. \n");
+		}
+		mutex_unlock(&g_alsps_frgb_lock);
 	}
-	
-	adc= ALSPS_FRGB_hw_client->mpsensor_hw->proximity_hw_get_adc();
-	log("[Polling] Proximity get adc = %d\n", adc);
-	
-	if(g_ps_data->Device_switch_on == true)
-		queue_delayed_work(ALSPS_FRGB_delay_workqueue, &proximity_polling_adc_work, msecs_to_jiffies(1000));
-	else
-		log("[Polling] Proximity polling adc STOP. \n");
 }
 
 static int light_turn_onoff(bool bOn)
@@ -888,7 +921,7 @@ mutex_lock(&g_alsps_frgb_lock);
 			g_ir_last_raw=ir;
 
 			/* Light sensor polling in the low lux */
-			if(green < LIGHT_SENSOR_POLLING_REPORT_THRESHOLD && green >= 0){
+			if(green >= 0){
 				lux = light_get_lux(green);
 				lsensor_report_lux(lux);
 				if(light_sensor_log_count == 10) {
@@ -1611,6 +1644,7 @@ int mproximity_store_switch_onoff(bool bOn)
 			log("Proximity adc_value=%d, threshold_high=%d\n", adc_value, threshold_high);
 			if (adc_value < threshold_high) {
 				psensor_report_abs(PSENSOR_REPORT_PS_AWAY);
+				g_ps_data->g_ps_int_status = ALSPS_INT_PS_AWAY;
 				log("Proximity Report First Away abs.\n");
 			}			
 		} else	{
@@ -2168,6 +2202,7 @@ static void proximity_work(int state)
 			log("[ISR] Proximity Detect Object Away. (adc = %d)\n", adc);
 			asus_lcd_early_on_for_phone_call();
 			psensor_report_abs(PSENSOR_REPORT_PS_AWAY);
+			g_ps_data->g_ps_int_status = ALSPS_INT_PS_AWAY;
 			g_ps_data->event_counter++;	/* --- For stress test debug --- */
 			//audio_mode = get_audiomode();
 			//if (0 == audio_mode || 2 == audio_mode || 3 == audio_mode) {
@@ -2181,9 +2216,11 @@ static void proximity_work(int state)
 			if(pocket_mode_threshold > 0 && adc > pocket_mode_threshold){
 				log("[ISR] Proximity Detect Object Close. (adc = %d, distance < 1cm)\n", adc);		
 				psensor_report_abs(PSENSOR_REPORT_PS_POCKET);
+				g_ps_data->g_ps_int_status = ALSPS_INT_PS_POCKET;
 			}else{
 				log("[ISR] Proximity Detect Object Close. (adc = %d)\n", adc);		
 				psensor_report_abs(PSENSOR_REPORT_PS_CLOSE);
+				g_ps_data->g_ps_int_status = ALSPS_INT_PS_CLOSE;
 			}
 			g_ps_data->event_counter++;	/* --- For stress test debug --- */
 //#ifdef ASUS_AUDIO_MODE_PORTING_COMPLETED
@@ -2199,7 +2236,6 @@ static void proximity_work(int state)
 			err("[ISR] Proximity Detect Object ERROR. (adc = %d)\n", adc);
 		}
 	}
-	
 }
 
 static void light_work(void)
@@ -2231,7 +2267,7 @@ static void light_work(void)
 		}
 
 		/* Set the factory sensitivity (2nd priority) */
-#ifdef ASUS_FACTORY_BUILD
+#ifdef ASUS_FTM
 		light_change_sensitivity = LIGHT_CHANGE_FACTORY_SENSITIVITY;
 #endif
 
@@ -2287,7 +2323,10 @@ static void light_work(void)
 static void ALSPS_FRGB_ist(struct work_struct *work)
 {
 	int alsps_int_ps, alsps_int_als;
-	
+#if 0
+	int adc_value = 0;
+#endif
+
 mutex_lock(&g_alsps_frgb_lock);
 	if(g_als_data->Device_switch_on == false && g_ps_data->Device_switch_on == false) {
 		err("ALSPS are disabled and ignore IST.\n");
@@ -2326,7 +2365,37 @@ mutex_lock(&g_alsps_frgb_lock);
 		if (alsps_int_ps == ALSPS_INT_PS_CLOSE) {
 			proximity_work(ALSPS_INT_PS_CLOSE);
 		}
+	} 
+#if 0
+	/* WORKAROUND: When the interrupt of proximity and light sensor are 
+	 * enabled at the same time, the proximity sensor will miss some event 
+	 * occasionally. So, we need to check the proximity sensor status when
+	 * the driver receives the ALSP interrupt. */
+	else if(g_ps_data->Device_switch_on == true) {
+		adc_value = ALSPS_FRGB_hw_client->mpsensor_hw->proximity_hw_get_adc();
+		if(adc_value < 0){
+			err("Proximity get adc ERROR\n");	
+		} else {
+			if(g_ps_data->g_ps_int_status != ALSPS_INT_PS_CLOSE &&
+					(adc_value >= g_ps_data->g_ps_calvalue_hi &&
+					(pocket_mode_threshold <= 0 || adc_value <= pocket_mode_threshold))) {
+				log("Proximity Detect Object Close. (adc = %d)\n", adc_value);	
+				psensor_report_abs(PSENSOR_REPORT_PS_CLOSE);
+				g_ps_data->g_ps_int_status = ALSPS_INT_PS_CLOSE;
+			}else if(g_ps_data->g_ps_int_status != ALSPS_INT_PS_AWAY &&
+					adc_value <= g_ps_data->g_ps_calvalue_lo){
+				log("Proximity Detect Object Away. (adc = %d)\n", adc_value);
+				psensor_report_abs(PSENSOR_REPORT_PS_AWAY);
+				g_ps_data->g_ps_int_status = ALSPS_INT_PS_AWAY;
+			}else if(g_ps_data->g_ps_int_status != ALSPS_INT_PS_POCKET &&
+			        (pocket_mode_threshold > 0 && adc_value > pocket_mode_threshold)){
+				log("Proximity Detect Object Close. (adc = %d, distance < 1cm)\n", adc_value);	
+				psensor_report_abs(PSENSOR_REPORT_PS_POCKET);
+				g_ps_data->g_ps_int_status = ALSPS_INT_PS_POCKET;
+			}
+		}
 	}
+#endif
 
 	/* Check Light Sensor Interrupt */
 	alsps_int_als = ALSPS_FRGB_SENSOR_INT&ALSPS_INT_ALS_MASK;
@@ -2790,7 +2859,7 @@ static int init_data(void)
 	memset(g_ps_data, 0, sizeof(struct psensor_data));
 	g_ps_data->Device_switch_on = 	false;
 	g_ps_data->HAL_switch_on = 	false;	
-	g_ps_data->polling_mode = 		false;
+	g_ps_data->polling_mode = 		true;
 	g_ps_data->autok = 			true;
 	
 	g_ps_data->g_ps_calvalue_hi = ALSPS_FRGB_hw_client->mpsensor_hw->proximity_hi_threshold_default;
@@ -2845,6 +2914,7 @@ static int init_data(void)
 	
 	/* Reset ASUS FRGB sensor polling cancel flag */
 	g_frgb_polling_cancel_flag = false;
+	g_psensor_polling_cancel_flag = false;
 
 	return 0;
 init_data_err:
@@ -2917,6 +2987,8 @@ void mALSPS_FRGB_algo_suspend(void)
 {
 	log("Driver SUSPEND +++\n");
 
+mutex_lock(&g_alsps_frgb_lock);
+
 	g_alsps_frgb_power_status = ALSPS_SUSPEND;
 
 	/* For keep Proximity can wake_up system */
@@ -2931,6 +3003,11 @@ void mALSPS_FRGB_algo_suspend(void)
 	if (g_frgb_data->Device_switch_on)				
 		FRGB_suspend_turn_off(false);
 	
+	cancel_delayed_work(&proximity_polling_adc_work);
+	g_psensor_polling_cancel_flag = true;
+	
+mutex_unlock(&g_alsps_frgb_lock);	
+
 	log("Driver SUSPEND ---\n");
 	
 	return;
@@ -2966,6 +3043,12 @@ void mALSPS_FRGB_algo_resume(void)
 		if(true == g_ps_data->autok && g_ps_data->crosstalk_diff != 0){
 			autok_delay = ns_to_ktime(PROXIMITY_AUTOK_POLLING * NSEC_PER_MSEC);
 			hrtimer_start(&g_alsps_frgb_timer, autok_delay, HRTIMER_MODE_REL);
+		}
+		/* If the proximity sensor has been opened and proximity polling thread has been canceled, 
+		 * restart it. */
+		if(g_psensor_polling_cancel_flag){
+			queue_delayed_work(ALSPS_FRGB_delay_workqueue, &proximity_polling_adc_work, msecs_to_jiffies(100));
+			g_psensor_polling_cancel_flag = false;
 		}
 	}
 	

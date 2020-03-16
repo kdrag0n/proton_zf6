@@ -34,7 +34,7 @@
 #else
 	#define dbg(fmt, args...)
 #endif
-#define log(fmt, args...) do {} while (0)
+#define log(fmt, args...) printk(KERN_INFO "[%s][%s]"fmt,MODULE_NAME,SENSOR_TYPE_NAME,##args)
 #define err(fmt, args...) printk(KERN_ERR "[%s][%s]"fmt,MODULE_NAME,SENSOR_TYPE_NAME,##args)
 
 /*****************************************/
@@ -186,17 +186,17 @@ static int vcnl36863_ALSPS_FRGB_hw_init(struct i2c_client* client)
 	int ret = 0;
 
 	g_i2c_client = client;
-	
-	/* Check the Device ID 
-	 * Do Not return when check ID
-	 */
-	ret = vcnl36863_ALSPS_FRGB_hw_check_ID();
 
 	/*Init regulator setting */
 	ret = vcnl36863_regulator_init();
 	if(ret < 0){
 		return ret;
 	}
+	
+	/* Check the Device ID 
+	 * Do Not return when check ID
+	 */
+	ret = vcnl36863_ALSPS_FRGB_hw_check_ID();
 
 	/*Set Proximity config */
 	ret = vcnl36863_proximity_hw_set_config();
@@ -307,13 +307,13 @@ static int vcnl36863_ALSPS_FRGB_hw_get_interrupt(void)
 /******************/
 /*Proximity Part*/
 /******************/
-static struct regulator *reg;
+static struct regulator *reg, *reg_i2c;
 
 static int vcnl36863_regulator_init(void)
 {
 	int ret = 0;
 
-	reg = regulator_get(&g_i2c_client->dev,"vcc_psensor");
+    reg = regulator_get(&g_i2c_client->dev,"vcc_psensor");
     if (IS_ERR_OR_NULL(reg)) {
         ret = PTR_ERR(reg);
         err("Failed to get regulator vcc_psensor %d\n", ret);
@@ -322,6 +322,24 @@ static int vcnl36863_regulator_init(void)
     ret = regulator_set_voltage(reg, 3000000, 3600000);
     if (ret) {
         err("Failed to set voltage for vcc_psensor reg %d\n", ret);
+        return -1;
+    }
+    
+    reg_i2c = regulator_get(&g_i2c_client->dev,"vcc_alsps_i2c");
+    if (IS_ERR_OR_NULL(reg_i2c)) {
+        ret = PTR_ERR(reg_i2c);
+        err("Failed to get regulator vcc_alsps_i2c %d\n", ret);
+        return ret;
+    }
+    ret = regulator_set_voltage(reg_i2c, 1800000, 1800000);
+    if (ret) {
+        err("Failed to set voltage for vcc_alsps_i2c reg %d\n", ret);
+        return -1;
+    }
+    
+    ret = regulator_enable(reg_i2c);
+    if(ret){
+        err("Failed to enable vcc_alsps_i2c reg %d\n", ret);
         return -1;
     }
     
