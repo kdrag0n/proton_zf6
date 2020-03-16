@@ -90,31 +90,6 @@ static uint32_t get_sensor_test_reg_addr(uint16_t sensor_id)
 	return 0;
 }
 
-static const char * submodule2string(enum sensor_sub_module sub_module)
-{
-	switch(sub_module)
-	{
-		case SUB_MODULE_SENSOR:
-			return "SENSOR";
-		case SUB_MODULE_ACTUATOR:
-			return "ACTUATOR";
-		case SUB_MODULE_EEPROM:
-			return "EEPROM";
-		case SUB_MODULE_LED_FLASH:
-			return "FLASH";
-		case SUB_MODULE_CSID:
-			return "CSID";
-		case SUB_MODULE_CSIPHY:
-			return "CSIPHY";
-		case SUB_MODULE_OIS:
-			return "OIS";
-		case SUB_MODULE_EXT:
-			return "EXT";
-		case SUB_MODULE_MAX:
-		default:
-			return "InvalidSubModule";
-	}
-}
 //just for EEPROM and Actuator to determine file name
 int get_camera_id_for_submodule(enum sensor_sub_module sub_module, uint32_t index, uint32_t* camera_id)
 {
@@ -136,11 +111,6 @@ int get_camera_id_for_submodule(enum sensor_sub_module sub_module, uint32_t inde
 				//return first camera id matched
 				//one camera have one specific type submodule
 				*camera_id = i;
-				pr_info("got camera id %d for submodule %s, index %d\n",
-						*camera_id,
-						submodule2string(sub_module),
-						index
-						);
 				return 0;
 			}
 		}
@@ -153,11 +123,7 @@ static void create_proc_file(const char *PATH, const struct file_operations* f_o
 	struct proc_dir_entry *pde;
 
 	pde = proc_create_data(PATH, 0666, NULL, f_ops, data);
-	if(pde)
-	{
-		pr_info("create(%s) done\n", PATH);
-	}
-	else
+	if(!pde)
 	{
 		pr_err("create(%s) failed!\n", PATH);
 	}
@@ -166,11 +132,7 @@ static void create_proc_file(const char *PATH, const struct file_operations* f_o
 static void create_sysfs_root_dir(char* dir_name, struct kobject** kobj)
 {
 	*kobj = kobject_create_and_add(dir_name, NULL);
-	if(*kobj)
-	{
-		pr_info("kobj (%s) created\n",dir_name);
-	}
-	else
+	if(!(*kobj))
 	{
 		pr_err("kobj (%s) created failed!\n",dir_name);
 	}
@@ -185,11 +147,7 @@ static void create_sysfs_dir(char* dir_name, struct kobject** kobj, struct kobje
 	}
 
 	*kobj = kobject_create_and_add(dir_name, parent);
-	if(*kobj)
-	{
-		pr_info("kobj (%s/%s) created\n",parent->name,dir_name);
-	}
-	else
+	if(!(*kobj))
 	{
 		pr_err("kobj (%s/%s) created failed!\n",parent->name,dir_name);
 	}
@@ -205,10 +163,6 @@ static void create_sysfs_file(struct kobject* kobj, struct device_attribute *dev
 		if(ret)
 		{
 			pr_err("create(%s/%s) failed!\n",kobj->name,dev_attr->attr.name);
-		}
-		else
-		{
-			pr_info("create(%s/%s) done\n",kobj->name,dev_attr->attr.name);
 		}
 	}
 	else
