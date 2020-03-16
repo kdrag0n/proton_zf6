@@ -685,9 +685,10 @@
 			reg = <0x0 0x98900000 0x0 0x1400000>;
 		};
 
-		ramoops: ramoops@85600000 {
-			compatible = "ramoops";
-			reg = <0 0x85600000 0 0x00100000>;
+		// Total = 99D00000
+		ramoops: ramoops {
+			compatible = "removed-dma-pool", "ramoops";
+			reg = <0 0x99E00000 0 0x00100000>;
 			record-size = <0x20000>;
 			console-size = <0x40000>;
 			pmsg-size = <0x20000>;

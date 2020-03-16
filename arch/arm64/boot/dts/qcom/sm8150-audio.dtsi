@@ -30,6 +30,7 @@
 
 &audio_apr {
 	snd_9360: sound-pahu {
+		status = "disabled";
 		compatible = "qcom,sm8150-asoc-snd-pahu";
 		qcom,model = "sm8150-pahu-snd-card";
 
@@ -151,17 +152,17 @@
 				"msm-dai-q6-tdm.36912", "msm-dai-q6-tdm.36913",
 				"msm-dai-q6-tdm.36914",
 				"msm-dai-q6-tdm.36928", "msm-dai-q6-tdm.36929";
-		fsa4480-i2c-handle = <&fsa4480>;
-	};
+                fsa4480-i2c-handle = <&fsa4480>;
+        };
 };
-
+ 
 &qupv3_se4_i2c {
-	status = "ok";
-	fsa4480: fsa4480@43 {
-		compatible = "qcom,fsa4480-i2c";
-		reg = <0x43>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&fsa_usbc_ana_en>;
+        status = "ok";
+        fsa4480: fsa4480@43 {
+                compatible = "qcom,fsa4480-i2c";
+                reg = <0x43>;
+                pinctrl-names = "default";
+                pinctrl-0 = <&fsa_usbc_ana_en>;
 	};
 };
 
