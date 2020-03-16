@@ -970,9 +970,6 @@ static int vcnl36863_light_hw_turn_onoff(bool bOn)
 		if(ret < 0){
 			err("Light Sensor power on ERROR (CS_CONF1)\n");
 			return ret;
-		} else {
-			log("Light Sensor power on (CS_CONF1 : 0x%x -> 0x%x)\n", 
-				power_state_data_origin[0], power_state_data_buf[0]);
 		}		
 	}else{ /* power off */	
 		power_state_data_buf[0] |= VCNL36863_CS_SD;
@@ -981,9 +978,6 @@ static int vcnl36863_light_hw_turn_onoff(bool bOn)
 		if(ret < 0){
 			err("Light Sensor power off ERROR (CS_CONF1) \n");
 			return ret;
-		}else{
-			log("Light Sensor power off (CS_CONF1 : 0x%x -> 0x%x)\n", 
-				power_state_data_origin[0], power_state_data_buf[0]);
 		}
 	}	
 
@@ -1013,9 +1007,6 @@ static int vcnl36863_light_hw_interrupt_onoff(bool bOn)
 		if(ret < 0){
 			err("Light Sensor Enable INT ERROR (CS_CONF2)\n");
 			return ret;
-		}else{
-			log("Light Sensor Enable INT (CS_CONF2 : 0x%x -> 0x%x)\n", 
-				power_state_data_origin[1], power_state_data_buf[1]);
 		}		
 	}else{ /* Disable INT */	
       	power_state_data_buf[1] &= VCNL36863_CS_INT_MASK;
@@ -1024,9 +1015,6 @@ static int vcnl36863_light_hw_interrupt_onoff(bool bOn)
 		if(ret < 0){
 			err("Light Sensor Disable INT ERROR (CS_CONF2)\n");
 			return ret;
-		}else{
-			log("Light Sensor Disable INT (CS_CONF2 : 0x%x -> 0x%x)\n", 
-				power_state_data_origin[1], power_state_data_buf[1]);
 		}
 	}	
 
