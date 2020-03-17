@@ -318,10 +318,12 @@ rmnet_perf_opt_add_flow_subfrags(struct rmnet_perf_opt_flow_node *flow_node)
 
 		new_frag = pkt_list[i].frag_desc;
 		/* Pull headers if they're there */
-		if (new_frag->hdr_ptr == rmnet_frag_data_ptr(new_frag))
-			rmnet_frag_pull(new_frag, perf->rmnet_port,
-					flow_node->ip_len +
-					flow_node->trans_len);
+		if (new_frag->hdr_ptr == rmnet_frag_data_ptr(new_frag)) {
+			if (!rmnet_frag_pull(new_frag, perf->rmnet_port,
+					     flow_node->ip_len +
+					     flow_node->trans_len))
+				continue;
+		}
 
 		/* Move the fragment onto the subfrags list */
 		list_move_tail(&new_frag->list, &head_frag->sub_frags);
@@ -572,6 +574,24 @@ void rmnet_perf_opt_flush_single_flow_node(
 	}
 }
 
+/* rmnet_perf_opt_flush_flow_by_hash() - Iterate through all flow nodes
+ *	that match a certain hash and flush the match
+ * @hash_val: hash value we are looking to match and hence flush
+ *
+ * Return:
+ *    - void
+ **/
+void rmnet_perf_opt_flush_flow_by_hash(u32 hash_val)
+{
+	struct rmnet_perf_opt_flow_node *flow_node;
+
+	hash_for_each_possible(rmnet_perf_opt_fht, flow_node, list, hash_val) {
+		if (hash_val == flow_node->hash_value &&
+		    flow_node->num_pkts_held > 0)
+			rmnet_perf_opt_flush_single_flow_node(flow_node);
+	}
+}
+
 /* rmnet_perf_opt_flush_all_flow_nodes() - Iterate through all flow nodes
  *		and flush them individually
  *
@@ -690,6 +710,18 @@ void rmnet_perf_opt_insert_pkt_in_flow(
 
 	if (pkt_info->trans_proto == IPPROTO_TCP)
 		flow_node->next_seq += payload_len;
+}
+void
+rmnet_perf_free_hash_table()
+{
+	int i;
+	struct rmnet_perf_opt_flow_node *flow_node;
+	struct hlist_node *tmp;
+
+	hash_for_each_safe(rmnet_perf_opt_fht, i, tmp, flow_node, list) {
+		hash_del(&flow_node->list);
+	}
+
 }
 
 /* rmnet_perf_opt_ingress() - Core business logic of optimization framework

@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -295,6 +295,9 @@ static INT DWC_ETH_QOS_mdio_reset(struct mii_bus *bus)
 
 	DBGPR_MDIO("-->DWC_ETH_QOS_mdio_reset: phyaddr : %d\n", pdata->phyaddr);
 
+	if (pdata->res_data->early_eth_en)
+		return 0;
+
 #if 0 /* def DWC_ETH_QOS_CONFIG_PGTEST */
 	pr_alert("PHY Programming for Autoneg disable\n");
 	hw_if->read_phy_regs(pdata->phyaddr, MII_BMCR, &phydata);
@@ -442,6 +445,43 @@ void dump_phy_registers(struct DWC_ETH_QOS_prv_data *pdata)
 	pr_alert("\n****************************************************\n");
 }
 
+static void DWC_ETH_QOS_request_phy_wol(struct DWC_ETH_QOS_prv_data *pdata)
+{
+	pdata->phy_wol_supported = 0;
+	pdata->phy_wol_wolopts = 0;
+
+	/* Check if phydev is valid*/
+	/* Check and enable Wake-on-LAN functionality in PHY*/
+	if (pdata->phydev) {
+		struct ethtool_wolinfo wol = {.cmd = ETHTOOL_GWOL};
+		wol.supported = 0;
+		wol.wolopts= 0;
+
+		phy_ethtool_get_wol(pdata->phydev, &wol);
+		pdata->phy_wol_supported = wol.supported;
+
+		/* Try to enable supported Wake-on-LAN features in PHY*/
+		if (wol.supported) {
+
+			device_set_wakeup_capable(&pdata->pdev->dev, 1);
+
+			wol.cmd = ETHTOOL_SWOL;
+			wol.wolopts = wol.supported;
+
+			if (!phy_ethtool_set_wol(pdata->phydev, &wol)){
+				pdata->phy_wol_wolopts = wol.wolopts;
+
+				enable_irq_wake(pdata->phy_irq);
+
+				device_set_wakeup_enable(&pdata->pdev->dev, 1);
+				EMACDBG("Enabled WoL[0x%x] in %s\n", wol.wolopts,
+						 pdata->phydev->drv->name);
+				pdata->wol_enabled = 1;
+			}
+		}
+	}
+}
+
 /*!
  * \brief API to enable or disable PHY hibernation mode
  *
@@ -458,7 +498,7 @@ static void DWC_ETH_QOS_set_phy_hibernation_mode(struct DWC_ETH_QOS_prv_data *pd
 								uint mode)
 {
 	u32 phydata = 0;
-	EMACINFO("Enter\n");
+	EMACDBG("Enter\n");
 
 	DWC_ETH_QOS_mdio_write_direct(pdata, pdata->phyaddr,
 				DWC_ETH_QOS_PHY_DEBUG_PORT_ADDR_OFFSET,
@@ -467,7 +507,7 @@ static void DWC_ETH_QOS_set_phy_hibernation_mode(struct DWC_ETH_QOS_prv_data *pd
 				DWC_ETH_QOS_PHY_DEBUG_PORT_DATAPORT,
 				&phydata);
 
-	EMACINFO("value read 0x%x\n", phydata);
+	EMACDBG("value read 0x%x\n", phydata);
 
 	phydata = ((phydata & DWC_ETH_QOS_PHY_HIB_CTRL_PS_HIB_EN_WR_MASK)
 			   | ((DWC_ETH_QOS_PHY_HIB_CTRL_PS_HIB_EN_MASK & mode) << 15));
@@ -482,7 +522,7 @@ static void DWC_ETH_QOS_set_phy_hibernation_mode(struct DWC_ETH_QOS_prv_data *pd
 				DWC_ETH_QOS_PHY_DEBUG_PORT_DATAPORT,
 				&phydata);
 
-	EMACINFO("Exit value written 0x%x\n", phydata);
+	EMACDBG("Exit value written 0x%x\n", phydata);
 }
 
 /*!
@@ -540,7 +580,8 @@ static void set_phy_rx_tx_delay(struct DWC_ETH_QOS_prv_data *pdata,
 			EMACDBG("Read 0x%x from offset 0x8\n",phydata);
 			phydata = 0;
 
-		if (pdata->emac_hw_version_type == EMAC_HW_v2_1_2) {
+		if (pdata->emac_hw_version_type == EMAC_HW_v2_1_2
+			|| pdata->emac_hw_version_type == EMAC_HW_v2_1_1) {
 			u16 tx_clk = 0xE;
 			/* Provide TX_CLK  delay of -0.06nsec */
 			DWC_ETH_QOS_mdio_mmd_register_read_direct(pdata, pdata->phyaddr,
@@ -559,7 +600,8 @@ static void set_phy_rx_tx_delay(struct DWC_ETH_QOS_prv_data *pdata,
 		DWC_ETH_QOS_mdio_mmd_register_read_direct(pdata, pdata->phyaddr,
 					DWC_ETH_QOS_MICREL_PHY_DEBUG_MMD_DEV_ADDR,0x5,&phydata);
 		phydata &= ~(0xFF);
-		if (pdata->emac_hw_version_type == EMAC_HW_v2_1_2)
+		if (pdata->emac_hw_version_type == EMAC_HW_v2_1_2 ||
+			pdata->emac_hw_version_type == EMAC_HW_v2_1_1)
 			phydata |= ((0x2 << 12) | (0x2 << 8) | (0x2 << 4) | 0x2);
 		else
 			/* Default settings for EMAC_HW_v2_1_0 */
@@ -576,7 +618,8 @@ static void set_phy_rx_tx_delay(struct DWC_ETH_QOS_prv_data *pdata,
 			DWC_ETH_QOS_mdio_mmd_register_read_direct(pdata, pdata->phyaddr,
 					DWC_ETH_QOS_MICREL_PHY_DEBUG_MMD_DEV_ADDR,0x4,&phydata);
 		phydata &= ~(0xF << 4);
-		if (pdata->emac_hw_version_type == EMAC_HW_v2_1_2)
+		if (pdata->emac_hw_version_type == EMAC_HW_v2_1_2 ||
+			pdata->emac_hw_version_type == EMAC_HW_v2_1_1)
 			phydata |= (0x2 << 4);
 		else
 			/* Default settings for EMAC_HW_v2_1_0 */
@@ -651,9 +694,10 @@ static void configure_phy_rx_tx_delay(struct DWC_ETH_QOS_prv_data *pdata)
 			set_phy_rx_tx_delay(pdata, ENABLE_RX_DELAY, ENABLE_TX_DELAY);
 		} else {
 			/* Settings for RGMII ID mode.
-			Not applicable for EMAC core version 2.1.0 and 2.1.2 */
+			Not applicable for EMAC core version 2.1.0, 2.1.2 and 2.1.1 */
 			if (pdata->emac_hw_version_type != EMAC_HW_v2_1_0 &&
-				pdata->emac_hw_version_type != EMAC_HW_v2_1_2)
+				pdata->emac_hw_version_type != EMAC_HW_v2_1_2 &&
+				pdata->emac_hw_version_type != EMAC_HW_v2_1_1)
 				set_phy_rx_tx_delay(pdata, DISABLE_RX_DELAY, DISABLE_TX_DELAY);
 		}
 		break;
@@ -672,9 +716,10 @@ static void configure_phy_rx_tx_delay(struct DWC_ETH_QOS_prv_data *pdata)
 				set_phy_rx_tx_delay(pdata, DISABLE_RX_DELAY, ENABLE_TX_DELAY);
 			} else {
 				/* Settings for RGMII ID mode */
-				/* Not applicable for EMAC core version 2.1.0 and 2.1.2 */
+				/* Not applicable for EMAC core version 2.1.0, 2.1.2 and 2.1.1 */
 				if (pdata->emac_hw_version_type != EMAC_HW_v2_1_0 &&
-					pdata->emac_hw_version_type != EMAC_HW_v2_1_2)
+					pdata->emac_hw_version_type != EMAC_HW_v2_1_2 &&
+					pdata->emac_hw_version_type != EMAC_HW_v2_1_1)
 					set_phy_rx_tx_delay(pdata, DISABLE_RX_DELAY, DISABLE_TX_DELAY);
 			}
 		}
@@ -796,7 +841,6 @@ static inline int DWC_ETH_QOS_configure_io_macro_dll_settings(
 	EMACDBG("Enter\n");
 
 #ifndef DWC_ETH_QOS_EMULATION_PLATFORM
-	if (pdata->emac_hw_version_type == EMAC_HW_v2_0_0 || pdata->emac_hw_version_type == EMAC_HW_v2_3_1)
 	DWC_ETH_QOS_rgmii_io_macro_dll_reset(pdata);
 
 	/* For RGMII ID mode with internal delay*/
@@ -897,6 +941,11 @@ void DWC_ETH_QOS_adjust_link(struct net_device *dev)
 	if (!phydev)
 		return;
 
+	if (pdata->oldlink == -1 && !phydev->link) {
+		pdata->oldlink = phydev->link;
+		return;
+	}
+
 	DBGPR_MDIO(
 		"-->DWC_ETH_QOS_adjust_link. address %d link %d\n",
 		phydev->mdio.addr, phydev->link);
@@ -988,6 +1037,16 @@ void DWC_ETH_QOS_adjust_link(struct net_device *dev)
 	if (new_state) {
 		phy_print_status(phydev);
 
+#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+		if ((phydev->link == 1) && !pdata->print_kpi) {
+			place_marker("M - Ethernet is Ready.Link is UP");
+			pdata->print_kpi = 1;
+		}
+#endif
+
+		if (pdata->phy_intr_en && !pdata->wol_enabled)
+			DWC_ETH_QOS_request_phy_wol(pdata);
+
 		if (pdata->ipa_enabled && netif_running(dev)) {
 			if (phydev->link == 1)
 				 DWC_ETH_QOS_ipa_offload_event_handler(pdata, EV_PHY_LINK_UP);
@@ -995,7 +1054,9 @@ void DWC_ETH_QOS_adjust_link(struct net_device *dev)
 				DWC_ETH_QOS_ipa_offload_event_handler(pdata, EV_PHY_LINK_DOWN);
 		}
 
-		if (phydev->link == 0 && pdata->io_macro_phy_intf != RMII_MODE)
+		if (phydev->link == 1)
+			pdata->hw_if.start_mac_tx_rx();
+		else if (phydev->link == 0 && pdata->io_macro_phy_intf != RMII_MODE)
 			DWC_ETH_QOS_set_clk_and_bus_config(pdata, SPEED_10);
 	}
 
@@ -1007,42 +1068,6 @@ void DWC_ETH_QOS_adjust_link(struct net_device *dev)
 	//spin_unlock_irqrestore(&pdata->lock, flags);
 
 	DBGPR_MDIO("<--DWC_ETH_QOS_adjust_link\n");
-}
-
-static void DWC_ETH_QOS_request_phy_wol(struct DWC_ETH_QOS_prv_data *pdata)
-{
-	pdata->phy_wol_supported = 0;
-	pdata->phy_wol_wolopts = 0;
-
-	/* Check if phydev is valid*/
-	/* Check and enable Wake-on-LAN functionality in PHY*/
-	if (pdata->phydev) {
-		struct ethtool_wolinfo wol = {.cmd = ETHTOOL_GWOL};
-		wol.supported = 0;
-		wol.wolopts= 0;
-
-		phy_ethtool_get_wol(pdata->phydev, &wol);
-		pdata->phy_wol_supported = wol.supported;
-
-		/* Try to enable supported Wake-on-LAN features in PHY*/
-		if (wol.supported) {
-
-			device_set_wakeup_capable(&pdata->pdev->dev, 1);
-
-			wol.cmd = ETHTOOL_SWOL;
-			wol.wolopts = wol.supported;
-
-			if (!phy_ethtool_set_wol(pdata->phydev, &wol)){
-				pdata->phy_wol_wolopts = wol.wolopts;
-
-				enable_irq_wake(pdata->phy_irq);
-
-				device_set_wakeup_enable(&pdata->pdev->dev, 1);
-				EMACINFO("Enabled WoL[0x%x] in %s\n", wol.wolopts,
-						 pdata->phydev->drv->name);
-			}
-		}
-	}
 }
 
 bool DWC_ETH_QOS_is_phy_link_up(struct DWC_ETH_QOS_prv_data *pdata)
@@ -1072,8 +1097,6 @@ static int DWC_ETH_QOS_init_phy(struct net_device *dev)
 {
 	struct DWC_ETH_QOS_prv_data *pdata = netdev_priv(dev);
 	struct phy_device *phydev = NULL;
-	char phy_id_fmt[MII_BUS_ID_SIZE + 3];
-	char bus_id[MII_BUS_ID_SIZE];
 	u32 phydata = 0;
 	int ret = 0;
 
@@ -1083,22 +1106,24 @@ static int DWC_ETH_QOS_init_phy(struct net_device *dev)
 	pdata->speed = 0;
 	pdata->oldduplex = -1;
 
-	snprintf(bus_id, MII_BUS_ID_SIZE, "dwc_phy-%x", pdata->bus_id);
-
-	snprintf(phy_id_fmt, MII_BUS_ID_SIZE + 3, PHY_ID_FMT, bus_id,
-		 pdata->phyaddr);
-
-	DBGPR_MDIO("trying to attach to %s\n", phy_id_fmt);
-
-	phydev = phy_connect(dev, phy_id_fmt, &DWC_ETH_QOS_adjust_link,
-			     pdata->interface);
-
+	phydev = mdiobus_get_phy(pdata->mii, pdata->phyaddr);
 	if (IS_ERR(phydev)) {
 		pr_alert("%s: Could not attach to PHY\n", dev->name);
 		return PTR_ERR(phydev);
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+	phydev->skip_sw_reset = true;
+#endif
+	ret = phy_connect_direct(dev, phydev, &DWC_ETH_QOS_adjust_link,
+							pdata->interface);
+	if (ret) {
+		EMACERR("phy_connect_direct failed\n");
+		return ret;
+	}
+
 	if (phydev->phy_id == 0) {
+		pr_alert("%s: Invalid phy id\n", dev->name);
 		phy_disconnect(phydev);
 		return -ENODEV;
 	}
@@ -1113,19 +1138,26 @@ static int DWC_ETH_QOS_init_phy(struct net_device *dev)
 		EMACDBG("Phy polling enabled\n");
 #endif
 
-	if (pdata->interface == PHY_INTERFACE_MODE_GMII ||
-	    pdata->interface == PHY_INTERFACE_MODE_RGMII) {
+
+	if (pdata->interface == PHY_INTERFACE_MODE_GMII || pdata->interface == PHY_INTERFACE_MODE_RGMII) {
 		phy_set_max_speed(phydev, SPEED_1000);
 		/* Half duplex not supported */
 		phydev->supported &= ~(SUPPORTED_10baseT_Half | SUPPORTED_100baseT_Half | SUPPORTED_1000baseT_Half);
-	} else if ((pdata->interface == PHY_INTERFACE_MODE_MII) ||
-		   (pdata->interface == PHY_INTERFACE_MODE_RMII)) {
+	} else if ((pdata->interface == PHY_INTERFACE_MODE_MII) || (pdata->interface == PHY_INTERFACE_MODE_RMII)) {
 		phy_set_max_speed(phydev, SPEED_100);
 		/* Half duplex is not supported */
 		phydev->supported &= ~(SUPPORTED_10baseT_Half | SUPPORTED_100baseT_Half);
 	}
-
 	phydev->advertising = phydev->supported;
+
+	if (pdata->res_data->early_eth_en ) {
+		phydev->autoneg = AUTONEG_DISABLE;
+		phydev->speed = SPEED_100;
+		phydev->duplex = DUPLEX_FULL;
+		phydev->advertising = phydev->supported;
+		phydev->advertising &= ~(SUPPORTED_1000baseT_Full);
+		EMACDBG("Set max speed to SPEED_100 as early ethernet enabled\n");
+	}
 
 	pdata->phydev = phydev;
 
@@ -1166,10 +1198,8 @@ static int DWC_ETH_QOS_init_phy(struct net_device *dev)
 		phydev->irq = PHY_IGNORE_INTERRUPT;
 		phydev->interrupts =  PHY_INTERRUPT_ENABLED;
 
-		if (phydev->drv->config_intr &&
-			!phydev->drv->config_intr(phydev)){
-			DWC_ETH_QOS_request_phy_wol(pdata);
-		} else {
+		if (!(phydev->drv->config_intr &&
+			!phydev->drv->config_intr(phydev))){
 			EMACERR("Failed to configure PHY interrupts");
 			BUG();
 		}
@@ -1218,8 +1248,24 @@ int DWC_ETH_QOS_mdio_register(struct net_device *dev)
 	int ret = Y_SUCCESS;
 	int phy_reg_read_status, mii_status;
 	u32 phy_id, phy_id1, phy_id2;
+	u32 phydata = 0;
 
 	DBGPR_MDIO("-->DWC_ETH_QOS_mdio_register\n");
+
+	if (pdata->res_data->phy_addr != -1) {
+		phy_reg_read_status =
+		   DWC_ETH_QOS_mdio_read_direct(pdata, pdata->res_data->phy_addr, MII_BMSR,
+										&mii_status);
+		if (phy_reg_read_status == 0) {
+			if (mii_status != 0x0000 && mii_status != 0xffff) {
+				phy_detected = 1;
+				phyaddr = pdata->res_data->phy_addr;
+				EMACINFO("skip_phy_detection (phyaddr)%d\n", phyaddr);
+				goto skip_phy_detection;
+			} else
+				EMACERR("Invlaid phy address specified in device tree\n");
+		}
+	}
 
 	/* find the phy ID or phy address which is connected to our MAC */
 	for (phyaddr = 0; phyaddr < 32; phyaddr++) {
@@ -1247,10 +1293,23 @@ int DWC_ETH_QOS_mdio_register(struct net_device *dev)
 		return -ENOLINK;
 	}
 
+	skip_phy_detection:
+
 	pdata->phyaddr = phyaddr;
 	pdata->bus_id = 0x1;
 	pdata->phy_intr_en = false;
 	pdata->always_on_phy = false;
+
+	if(pdata->res_data->early_eth_en) {
+		EMACDBG("Updated speed to 100 in emac\n");
+		pdata->hw_if.set_mii_speed_100();
+
+		phydata = BMCR_SPEED100;
+		phydata |= BMCR_FULLDPLX;
+		EMACDBG("Updated speed to 100 and autoneg disable\n");
+		pdata->hw_if.write_phy_regs(pdata->phyaddr,
+				MII_BMCR, phydata);
+	}
 
 	DBGPHY_REGS(pdata);
 
@@ -1267,7 +1326,7 @@ int DWC_ETH_QOS_mdio_register(struct net_device *dev)
 	snprintf(new_bus->id, MII_BUS_ID_SIZE, "%s-%x", new_bus->name,
 		 pdata->bus_id);
 	new_bus->priv = dev;
-	new_bus->phy_mask = 0;
+	new_bus->phy_mask = ~(1 << phyaddr);
 	new_bus->parent = &pdata->pdev->dev;
 	ret = mdiobus_register(new_bus);
 	if (ret != 0) {

@@ -54,14 +54,14 @@
 //#define RMNET_SHS_UDP_PPS_SILVER_CORE_UPPER_THRESH 90000
 //#define RMNET_SHS_TCP_PPS_SILVER_CORE_UPPER_THRESH 90000
 
-#define SHS_TRACE_ERR(...) if (rmnet_shs_debug) \
-	trace_rmnet_shs_err(__VA_ARGS__)
+#define SHS_TRACE_ERR(...) \
+  do { if (rmnet_shs_debug) trace_rmnet_shs_err(__VA_ARGS__); } while (0)
 
-#define SHS_TRACE_HIGH(...) if (rmnet_shs_debug) \
-	trace_rmnet_shs_high(__VA_ARGS__)
+#define SHS_TRACE_HIGH(...) \
+  do { if (rmnet_shs_debug) trace_rmnet_shs_high(__VA_ARGS__); } while (0)
 
-#define SHS_TRACE_LOW(...) if (rmnet_shs_debug) \
-	trace_rmnet_shs_low(__VA_ARGS__)
+#define SHS_TRACE_LOW(...) \
+  do { if (rmnet_shs_debug) trace_rmnet_shs_low(__VA_ARGS__); } while (0)
 
 #define RMNET_SHS_MAX_SILVER_CORE_BURST_CAPACITY  204800
 
@@ -76,6 +76,9 @@
 #define RMNET_SHS_UDP_PPS_LPWR_CPU_LTHRESH 0
 #define RMNET_SHS_UDP_PPS_PERF_CPU_LTHRESH 40000
 #define RMNET_SHS_TCP_PPS_PERF_CPU_LTHRESH (40000*RMNET_SHS_TCP_COALESCING_RATIO)
+
+#define RMNET_SHS_UDP_PPS_HEADROOM 20000
+#define RMNET_SHS_GOLD_BALANCING_THRESH (RMNET_SHS_UDP_PPS_PERF_CPU_UTHRESH / 2)
 
 struct core_flush_s {
 	struct  hrtimer core_timer;
@@ -92,8 +95,8 @@ struct rmnet_shs_cfg_s {
 	struct rmnet_port *port;
 	struct  core_flush_s core_flush[MAX_CPUS];
 	u64 core_skbs[MAX_CPUS];
-	long int num_bytes_parked;
-	long int num_pkts_parked;
+	long num_bytes_parked;
+	long num_pkts_parked;
 	u32 is_reg_dl_mrk_ind;
 	u16 num_flows;
 	u8 is_pkt_parked;
@@ -296,7 +299,7 @@ extern int (*rmnet_shs_skb_entry)(struct sk_buff *skb,
 int rmnet_shs_is_lpwr_cpu(u16 cpu);
 void rmnet_shs_cancel_table(void);
 void rmnet_shs_rx_wq_init(void);
-void rmnet_shs_rx_wq_exit(void);
+unsigned int rmnet_shs_rx_wq_exit(void);
 int rmnet_shs_get_mask_len(u8 mask);
 
 int rmnet_shs_chk_and_flush_node(struct rmnet_shs_skbn_s *node,
@@ -311,7 +314,7 @@ void rmnet_shs_assign(struct sk_buff *skb, struct rmnet_port *port);
 void rmnet_shs_flush_table(u8 is_force_flush, u8 ctxt);
 void rmnet_shs_cpu_node_remove(struct rmnet_shs_skbn_s *node);
 void rmnet_shs_init(struct net_device *dev, struct net_device *vnd);
-void rmnet_shs_exit(void);
+void rmnet_shs_exit(unsigned int cpu_switch);
 void rmnet_shs_ps_on_hdlr(void *port);
 void rmnet_shs_ps_off_hdlr(void *port);
 void rmnet_shs_update_cpu_proc_q_all_cpus(void);

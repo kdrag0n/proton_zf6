@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -51,9 +51,12 @@
 
 void *ipc_emac_log_ctxt;
 
-static UCHAR dev_addr[6] = {0, 0x55, 0x7b, 0xb5, 0x7d, 0xf7};
+#define MAC_ADDR_CFG_FPATH "/data/emac_config.ini"
+static UCHAR dev_addr[ETH_ALEN] = {0, 0x55, 0x7b, 0xb5, 0x7d, 0xf7};
 struct DWC_ETH_QOS_res_data dwc_eth_qos_res_data = {0, };
 static struct msm_bus_scale_pdata *emac_bus_scale_vec = NULL;
+
+UCHAR config_dev_addr[ETH_ALEN];
 
 ULONG dwc_eth_qos_base_addr;
 ULONG dwc_rgmii_io_csr_base_addr;
@@ -86,6 +89,81 @@ int phy_interrupt_en = 1;
 module_param(phy_interrupt_en, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 MODULE_PARM_DESC(phy_interrupt_en,
 		"Enable PHY interrupt [0-DISABLE, 1-ENABLE]");
+
+struct ip_params pparams = {};
+#ifdef DWC_ETH_QOS_BUILTIN
+static int __init set_early_ethernet_ipv4(char *ipv4_addr_in)
+{
+	int ret = 1;
+	pparams.is_valid_ipv4_addr = false;
+
+	if (!ipv4_addr_in)
+		return ret;
+
+	strlcpy(pparams.ipv4_addr_str, ipv4_addr_in, sizeof(pparams.ipv4_addr_str));
+	EMACDBG("Early ethernet IPv4 addr: %s\n", pparams.ipv4_addr_str);
+
+	ret = in4_pton(pparams.ipv4_addr_str, -1,
+				(u8*)&pparams.ipv4_addr.s_addr, -1, NULL);
+	if (ret != 1 || pparams.ipv4_addr.s_addr == 0) {
+		EMACERR("Invalid ipv4 address programmed: %s\n", ipv4_addr_in);
+		return ret;
+	}
+
+	pparams.is_valid_ipv4_addr = true;
+	return ret;
+}
+__setup("eipv4=", set_early_ethernet_ipv4);
+
+static int __init set_early_ethernet_ipv6(char* ipv6_addr_in)
+{
+	int ret = 1;
+	pparams.is_valid_ipv6_addr = false;
+
+	if (!ipv6_addr_in)
+		return ret;
+
+	strlcpy(pparams.ipv6_addr_str, ipv6_addr_in, sizeof(pparams.ipv6_addr_str));
+	EMACDBG("Early ethernet IPv6 addr: %s\n", pparams.ipv6_addr_str);
+
+	ret = in6_pton(pparams.ipv6_addr_str, -1,
+				   (u8 *)&pparams.ipv6_addr.ifr6_addr.s6_addr32, -1, NULL);
+	if (ret != 1 || pparams.ipv6_addr.ifr6_addr.s6_addr32 == 0)  {
+		EMACERR("Invalid ipv6 address programmed: %s\n", ipv6_addr_in);
+		return ret;
+	}
+
+	pparams.is_valid_ipv6_addr = true;
+	return ret;
+}
+__setup("eipv6=", set_early_ethernet_ipv6);
+
+static int __init set_early_ethernet_mac(char* mac_addr)
+{
+	int ret = 1;
+	bool valid_mac = false;
+
+	pparams.is_valid_mac_addr = false;
+	if(!mac_addr)
+		return ret;
+
+	valid_mac = mac_pton(mac_addr, pparams.mac_addr);
+	if(!valid_mac)
+		goto fail;
+
+	valid_mac = is_valid_ether_addr(pparams.mac_addr);
+	if (!valid_mac)
+		goto fail;
+
+	pparams.is_valid_mac_addr = true;
+	return ret;
+
+fail:
+	EMACERR("Invalid Mac address programmed: %s\n", mac_addr);
+	return ret;
+}
+__setup("ermac=", set_early_ethernet_mac);
+#endif
 
 static ssize_t read_phy_reg_dump(struct file *file,
 	char __user *user_buf, size_t count, loff_t *ppos)
@@ -427,8 +505,10 @@ static void DWC_ETH_QOS_configure_gpio_pins(struct platform_device *pdev)
 			return;
 		}
 		EMACDBG("get pinctrl succeed\n");
+		dwc_eth_qos_res_data.pinctrl = pinctrl;
 
 		if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_2_0 ||
+			dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2 ||
 			dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_3_1) {
 			/* PPS0 pin */
 			emac_pps_0 = pinctrl_lookup_state(pinctrl, EMAC_PIN_PPS0);
@@ -620,6 +700,28 @@ static void DWC_ETH_QOS_configure_gpio_pins(struct platform_device *pdev)
 		else
 			EMACDBG("Set rgmii_rxc_state succeed\n");
 
+		dwc_eth_qos_res_data.rgmii_rxc_suspend_state =
+			pinctrl_lookup_state(pinctrl, EMAC_RGMII_RXC_SUSPEND);
+		if (IS_ERR_OR_NULL(dwc_eth_qos_res_data.rgmii_rxc_suspend_state)) {
+			ret = PTR_ERR(dwc_eth_qos_res_data.rgmii_rxc_suspend_state);
+			EMACERR("Failed to get rgmii_rxc_suspend_state, err = %d\n", ret);
+			dwc_eth_qos_res_data.rgmii_rxc_suspend_state = NULL;
+		}
+		else {
+			EMACDBG("Get rgmii_rxc_suspend_state succeed\n");
+		}
+
+		dwc_eth_qos_res_data.rgmii_rxc_resume_state =
+			pinctrl_lookup_state(pinctrl, EMAC_RGMII_RXC_RESUME);
+		if (IS_ERR_OR_NULL(dwc_eth_qos_res_data.rgmii_rxc_resume_state)) {
+			ret = PTR_ERR(dwc_eth_qos_res_data.rgmii_rxc_resume_state);
+			EMACERR("Failed to get rgmii_rxc_resume_state, err = %d\n", ret);
+			dwc_eth_qos_res_data.rgmii_rxc_resume_state = NULL;
+		}
+		else {
+			EMACDBG("Get rgmii_rxc_resume_state succeed\n");
+		}
+
 		rgmii_rx_ctl_state = pinctrl_lookup_state(pinctrl, EMAC_RGMII_RX_CTL);
 		if (IS_ERR_OR_NULL(rgmii_rx_ctl_state)) {
 			ret = PTR_ERR(rgmii_rx_ctl_state);
@@ -725,6 +827,10 @@ static int DWC_ETH_QOS_get_dts_config(struct platform_device *pdev)
 	}
 	EMACDBG(": emac_core_version = %d\n", dwc_eth_qos_res_data.emac_hw_version_type);
 
+	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_3_1 ||
+		dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2)
+		dwc_eth_qos_res_data.pps_lpass_conn_en = true;
+
 	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_3_1) {
 
 		resource = platform_get_resource_byname(pdev, IORESOURCE_IRQ,
@@ -748,6 +854,17 @@ static int DWC_ETH_QOS_get_dts_config(struct platform_device *pdev)
 		dwc_eth_qos_res_data.ptp_pps_avb_class_b_irq = resource->start;
 		EMACDBG("ptp_pps_avb_class_b_irq = %d\n", dwc_eth_qos_res_data.ptp_pps_avb_class_b_irq);
 
+	}
+
+	dwc_eth_qos_res_data.early_eth_en = 0;
+	if(pparams.is_valid_mac_addr &&
+	   (pparams.is_valid_ipv4_addr || pparams.is_valid_ipv6_addr)) {
+		/* For 1000BASE-T mode, auto-negotiation is required and
+			always used to establish a link.
+			Configure phy and MAC in 100Mbps mode with autoneg disable
+			as link up takes more time with autoneg enabled  */
+		dwc_eth_qos_res_data.early_eth_en = 1;
+		EMACINFO("Early ethernet is enabled\n");
 	}
 
 	ret = DWC_ETH_QOS_get_io_macro_config(pdev);
@@ -781,6 +898,16 @@ static int DWC_ETH_QOS_get_dts_config(struct platform_device *pdev)
 	if (of_property_read_bool(pdev->dev.of_node, "pinctrl-names")) {
 		dwc_eth_qos_res_data.is_pinctrl_names = true;
 		EMACDBG("qcom,pinctrl-names present\n");
+	}
+	dwc_eth_qos_res_data.phy_addr = -1;
+	if (of_property_read_bool(pdev->dev.of_node, "emac-phy-addr")) {
+		ret = of_property_read_u32(pdev->dev.of_node, "emac-phy-addr",
+			&dwc_eth_qos_res_data.phy_addr);
+		if (ret) {
+			EMACINFO("Pphy_addr not specified, using dynamic phy detection\n");
+			dwc_eth_qos_res_data.phy_addr = -1;
+		}
+		EMACINFO("phy_addr = %d\n", dwc_eth_qos_res_data.phy_addr);
 	}
 
 	return ret;
@@ -831,7 +958,7 @@ int DWC_ETH_QOS_qmp_mailbox_init(struct DWC_ETH_QOS_prv_data *pdata)
 	pdata->qmp_mbox_client = devm_kzalloc(
 	   &pdata->pdev->dev, sizeof(*pdata->qmp_mbox_client), GFP_KERNEL);
 
-	if (IS_ERR(pdata->qmp_mbox_client)){
+	if (pdata->qmp_mbox_client == NULL || IS_ERR(pdata->qmp_mbox_client)){
 		EMACERR("qmp alloc client failed\n");
 		return -1;
 	}
@@ -899,8 +1026,9 @@ int DWC_ETH_QOS_enable_ptp_clk(struct device *dev)
 	int ret;
 	const char* ptp_clock_name;
 
-	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_0 ||
-		dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2)
+	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_0
+	    || dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2
+	    || dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_1)
 		ptp_clock_name = "emac_ptp_clk";
 	else
 		ptp_clock_name = "eth_ptp_clk";
@@ -1048,8 +1176,9 @@ static int DWC_ETH_QOS_get_clks(struct device *dev)
 	dwc_eth_qos_res_data.rgmii_clk = NULL;
 	dwc_eth_qos_res_data.ptp_clk = NULL;
 
-	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_0 ||
-		(dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2)) {
+	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_0
+	    || dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2
+	    || dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_1) {
 		/* EMAC core version 2.1.0 clocks */
 		axi_clock_name = "emac_axi_clk";
 		ahb_clock_name = "emac_slv_ahb_clk";
@@ -1336,7 +1465,8 @@ static int DWC_ETH_QOS_init_gpios(struct device *dev)
 		}
 	}
 
-	if (dwc_eth_qos_res_data.is_gpio_phy_reset) {
+	if (dwc_eth_qos_res_data.is_gpio_phy_reset &&
+		!dwc_eth_qos_res_data.early_eth_en) {
 		ret = setup_gpio_output_common(
 			dev, EMAC_GPIO_PHY_RESET_NAME,
 			&dwc_eth_qos_res_data.gpio_phy_reset, PHY_RESET_GPIO_LOW);
@@ -1350,6 +1480,8 @@ static int DWC_ETH_QOS_init_gpios(struct device *dev)
 
 		gpio_set_value(dwc_eth_qos_res_data.gpio_phy_reset, PHY_RESET_GPIO_HIGH);
 		EMACDBG("PHY is out of reset successfully\n");
+		/* Add delay of 50ms so that phy should get sufficient time*/
+		mdelay(50);
 	}
 
 	return ret;
@@ -1364,6 +1496,145 @@ static struct of_device_id DWC_ETH_QOS_plat_drv_match[] = {
 	{ .compatible = "qcom,emac-smmu-embedded", },
 	{}
 };
+
+void is_ipv6_NW_stack_ready(struct work_struct *work)
+{
+	struct delayed_work *dwork;
+	struct DWC_ETH_QOS_prv_data *pdata;
+	int ret;
+
+	EMACDBG("\n");
+	dwork = container_of(work, struct delayed_work, work);
+	pdata = container_of(dwork, struct DWC_ETH_QOS_prv_data, ipv6_addr_assign_wq);
+
+	ret = DWC_ETH_QOS_add_ipv6addr(pdata);
+	if (ret)
+		return;
+
+	cancel_delayed_work_sync(&pdata->ipv6_addr_assign_wq);
+	flush_delayed_work(&pdata->ipv6_addr_assign_wq);
+	return;
+}
+
+int DWC_ETH_QOS_add_ipv6addr(struct DWC_ETH_QOS_prv_data *pdata)
+{
+	int ret;
+#ifdef DWC_ETH_QOS_BUILTIN
+	struct in6_ifreq ir6;
+	char* prefix;
+	struct ip_params *ip_info = &pparams;
+	struct net *net = dev_net(pdata->dev);
+
+	EMACDBG("\n");
+	if (!net || !net->genl_sock || !net->genl_sock->sk_socket)
+		EMACERR("Sock is null, unable to assign ipv6 address\n");
+
+	if (!net->ipv6.devconf_dflt) {
+		EMACDBG("ipv6.devconf_dflt is null, schedule wq\n");
+		schedule_delayed_work(&pdata->ipv6_addr_assign_wq, msecs_to_jiffies(1000));
+		return -EFAULT;
+	}
+
+	/*For valid IPv6 address*/
+	memset(&ir6, 0, sizeof(ir6));
+	memcpy(&ir6, &ip_info->ipv6_addr, sizeof(struct in6_ifreq));
+	ir6.ifr6_ifindex = pdata->dev->ifindex;
+
+	if ((prefix = strchr(ip_info->ipv6_addr_str, '/')) == NULL)
+		ir6.ifr6_prefixlen = 0;
+	else {
+		ir6.ifr6_prefixlen = simple_strtoul(prefix + 1, NULL, 0);
+		if (ir6.ifr6_prefixlen > 128)
+			ir6.ifr6_prefixlen = 0;
+	}
+
+	ret = inet6_ioctl(net->genl_sock->sk_socket, SIOCSIFADDR, (unsigned long)(void *)&ir6);
+	if (ret)
+		EMACERR("Can't setup IPv6 address!\r\n");
+	else
+		EMACDBG("Assigned IPv6 address: %s\r\n", ip_info->ipv6_addr_str);
+#else
+	ret = -EFAULT;
+#endif
+	return ret;
+}
+
+int DWC_ETH_QOS_add_ipaddr(struct DWC_ETH_QOS_prv_data *pdata)
+{
+	int ret=0;
+#ifdef DWC_ETH_QOS_BUILTIN
+	struct ip_params *ip_info = &pparams;
+	struct ifreq ir;
+	struct sockaddr_in *sin = (void *) &ir.ifr_ifru.ifru_addr;
+	struct net *net = dev_net(pdata->dev);
+
+	if (!net || !net->genl_sock || !net->genl_sock->sk_socket)
+		EMACERR("Sock is null, unable to assign ipv4 address\n");
+
+	/*For valid Ipv4 address*/
+	memset(&ir, 0, sizeof(ir));
+	memcpy(&sin->sin_addr.s_addr, &ip_info->ipv4_addr,
+		   sizeof(sin->sin_addr.s_addr));
+	strlcpy(ir.ifr_ifrn.ifrn_name, pdata->dev->name, sizeof(ir.ifr_ifrn.ifrn_name) + 1);
+	sin->sin_family = AF_INET;
+	sin->sin_port = 0;
+
+	ret = inet_ioctl(net->genl_sock->sk_socket, SIOCSIFADDR, (unsigned long)(void *)&ir);
+	if (ret)
+		EMACERR( "Can't setup IPv4 address!: %d\r\n", ret);
+	else
+		EMACDBG("Assigned IPv4 address: %s\r\n", ip_info->ipv4_addr_str);
+#endif
+	return ret;
+}
+
+u32 l3mdev_fib_table1 (const struct net_device *dev)
+{
+	return RT_TABLE_LOCAL;
+}
+
+const struct l3mdev_ops l3mdev_op1 = {.l3mdev_fib_table = l3mdev_fib_table1};
+
+/*!
+ * \brief Parse the config file to obtain the MAC address
+ *
+ * \param[in] None
+ *
+ * \return None
+ *
+ */
+
+static void DWC_ETH_QOS_read_mac_addr_from_config(void)
+{
+	int ret = -ENOENT;
+	void *data = NULL;
+	char *file_path = MAC_ADDR_CFG_FPATH;
+	loff_t size = 0;
+	loff_t max_size = 30;
+
+	EMACDBG("Enter\n");
+
+	ret = kernel_read_file_from_path(file_path, &data, &size,
+				max_size, READING_POLICY);
+
+	if (ret < 0) {
+		EMACINFO("unable to open file: %s (%d)\n", file_path, ret);
+		goto ret;
+	}
+
+	if (!mac_pton(data, config_dev_addr) && !is_valid_ether_addr(config_dev_addr)) {
+		EMACERR("Invalid mac addr found in emac_config.ini\n");
+		goto ret;
+	}
+
+	EMACDBG("mac address read from config.ini successfully\n");
+	ether_addr_copy(dev_addr, config_dev_addr);
+
+ret:
+	if (data)
+		vfree(data);
+	return;
+}
 
 static int DWC_ETH_QOS_configure_netdevice(struct platform_device *pdev)
 {
@@ -1387,6 +1658,12 @@ static int DWC_ETH_QOS_configure_netdevice(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err_out_dev_failed;
 	}
+
+	if (pparams.is_valid_mac_addr == true)
+		ether_addr_copy(dev_addr, pparams.mac_addr);
+	else
+		DWC_ETH_QOS_read_mac_addr_from_config();
+
 	dev->dev_addr[0] = dev_addr[0];
 	dev->dev_addr[1] = dev_addr[1];
 	dev->dev_addr[2] = dev_addr[2];
@@ -1436,9 +1713,24 @@ static int DWC_ETH_QOS_configure_netdevice(struct platform_device *pdev)
 	/* store emac hw version in pdata*/
 	pdata->emac_hw_version_type = dwc_eth_qos_res_data.emac_hw_version_type;
 
+#ifdef CONFIG_NET_L3_MASTER_DEV
+	if (pdata->res_data->early_eth_en && pdata->emac_hw_version_type == EMAC_HW_v2_3_1) {
+		EMACDBG("l3mdev_op1 set \n");
+		dev->priv_flags = IFF_L3MDEV_MASTER;
+		dev->l3mdev_ops = &l3mdev_op1;
+	}
+#endif
+
+
 	/* Scale the clocks to 10Mbps speed */
-	pdata->speed = SPEED_10;
-	DWC_ETH_QOS_set_clk_and_bus_config(pdata, SPEED_10);
+	if (pdata->res_data->early_eth_en) {
+		pdata->speed = SPEED_100;
+		DWC_ETH_QOS_set_clk_and_bus_config(pdata, SPEED_100);
+	}
+	else {
+		pdata->speed = SPEED_10;
+		DWC_ETH_QOS_set_clk_and_bus_config(pdata, SPEED_10);
+	}
 
 	DWC_ETH_QOS_set_rgmii_func_clk_en();
 
@@ -1456,7 +1748,7 @@ static int DWC_ETH_QOS_configure_netdevice(struct platform_device *pdev)
 	pdata->ipa_enabled = 0;
 #endif
 
-	EMACINFO("EMAC IPA enabled: %d\n", pdata->ipa_enabled);
+	EMACDBG("EMAC IPA enabled: %d\n", pdata->ipa_enabled);
 	if (pdata->ipa_enabled) {
 		pdata->prv_ipa.ipa_ver = ipa_get_hw_type();
 		device_init_wakeup(&pdev->dev, 1);
@@ -1549,10 +1841,19 @@ static int DWC_ETH_QOS_configure_netdevice(struct platform_device *pdev)
 
 	DWC_ETH_QOS_init_rx_coalesce(pdata);
 
+	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_2_0 )
+		pdata->default_ptp_clock = DWC_ETH_QOS_PTP_CLOCK_57_6;
+	else if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_1_2 || dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_3_1)
+		pdata->default_ptp_clock = DWC_ETH_QOS_PTP_CLOCK_96;
+	else if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_3_2 )
+		pdata->default_ptp_clock = DWC_ETH_QOS_PTP_CLOCK_62_5;
+	else
+		pdata->default_ptp_clock = DWC_ETH_QOS_DEFAULT_PTP_CLOCK;
+
 #ifdef DWC_ETH_QOS_CONFIG_PTP
 	DWC_ETH_QOS_ptp_init(pdata);
 	/*default ptp clock frequency set to 50Mhz*/
-	pdata->ptpclk_freq = DWC_ETH_QOS_DEFAULT_PTP_CLOCK;
+	pdata->ptpclk_freq = pdata->default_ptp_clock;
 #endif /* end of DWC_ETH_QOS_CONFIG_PTP */
 
 #endif /* end of DWC_ETH_QOS_CONFIG_PGTEST */
@@ -1610,6 +1911,19 @@ static int DWC_ETH_QOS_configure_netdevice(struct platform_device *pdev)
 	if (pdata->disable_ctile_pc && !DWC_ETH_QOS_qmp_mailbox_init(pdata)){
 		INIT_WORK(&pdata->qmp_mailbox_work, DWC_ETH_QOS_qmp_mailbox_work);
 		queue_work(system_wq, &pdata->qmp_mailbox_work);
+	}
+
+	if (pdata->res_data->early_eth_en) {
+		if (pparams.is_valid_ipv4_addr)
+			ret = DWC_ETH_QOS_add_ipaddr(pdata);
+
+		if (pparams.is_valid_ipv6_addr) {
+			INIT_DELAYED_WORK(&pdata->ipv6_addr_assign_wq, is_ipv6_NW_stack_ready);
+			ret = DWC_ETH_QOS_add_ipv6addr(pdata);
+			if (ret)
+				schedule_delayed_work(&pdata->ipv6_addr_assign_wq, msecs_to_jiffies(1000));
+		}
+
 	}
 
 	EMACDBG("<-- DWC_ETH_QOS_configure_netdevice\n");
@@ -1789,7 +2103,9 @@ static int DWC_ETH_QOS_probe(struct platform_device *pdev)
 	int ret = 0;
 
 	EMACDBG("--> DWC_ETH_QOS_probe\n");
-
+#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+	place_marker("M - Ethernet probe start");
+#endif
 	if (of_device_is_compatible(pdev->dev.of_node, "qcom,emac-smmu-embedded"))
 		return emac_emb_smmu_cb_probe(pdev);
 
@@ -1838,6 +2154,11 @@ static int DWC_ETH_QOS_probe(struct platform_device *pdev)
 			goto err_out_dev_failed;
 	}
 	EMACDBG("<-- DWC_ETH_QOS_probe\n");
+
+#if defined DWC_ETH_QOS_BUILTIN && defined CONFIG_MSM_BOOT_TIME_MARKER
+	place_marker("M - Ethernet probe end");
+#endif
+
 	return ret;
 
  err_out_dev_failed:
@@ -1926,13 +2247,15 @@ int DWC_ETH_QOS_remove(struct platform_device *pdev)
 	}
 
 	if (dwc_eth_qos_res_data.emac_hw_version_type == EMAC_HW_v2_3_1) {
-		if (dwc_eth_qos_res_data.ptp_pps_avb_class_a_irq != 0) {
+		if (dwc_eth_qos_res_data.ptp_pps_avb_class_a_irq != 0 && pdata->en_ptp_pps_avb_class_a_irq) {
 			free_irq(dwc_eth_qos_res_data.ptp_pps_avb_class_a_irq, pdata);
 			dwc_eth_qos_res_data.ptp_pps_avb_class_a_irq = 0;
+			pdata->en_ptp_pps_avb_class_a_irq = false;
 		}
-		if (dwc_eth_qos_res_data.ptp_pps_avb_class_b_irq != 0) {
+		if (dwc_eth_qos_res_data.ptp_pps_avb_class_b_irq != 0 && pdata->en_ptp_pps_avb_class_b_irq) {
 			free_irq(dwc_eth_qos_res_data.ptp_pps_avb_class_b_irq, pdata);
 			dwc_eth_qos_res_data.ptp_pps_avb_class_b_irq = 0;
+			pdata->en_ptp_pps_avb_class_b_irq = false;
 		}
 	}
 
@@ -1991,6 +2314,13 @@ int DWC_ETH_QOS_remove(struct platform_device *pdev)
 static void DWC_ETH_QOS_shutdown(struct platform_device *pdev)
 {
 	pr_info("qcom-emac-dwc-eqos: DWC_ETH_QOS_shutdown\n");
+#ifdef DWC_ETH_QOS_BUILTIN
+	if (gDWC_ETH_QOS_prv_data->dev->flags & IFF_UP) {
+		gDWC_ETH_QOS_prv_data->dev->netdev_ops->ndo_stop(gDWC_ETH_QOS_prv_data->dev);
+		gDWC_ETH_QOS_prv_data->dev->flags &= ~IFF_UP;
+	}
+	DWC_ETH_QOS_remove(pdev);
+#endif
 }
 
 #ifdef CONFIG_PM
@@ -2017,10 +2347,10 @@ static void DWC_ETH_QOS_shutdown(struct platform_device *pdev)
  * \retval 0
  */
 
-static INT DWC_ETH_QOS_suspend(struct platform_device *pdev, pm_message_t state)
+static INT DWC_ETH_QOS_suspend(struct device *dev)
 {
-	struct net_device *dev = platform_get_drvdata(pdev);
-	struct DWC_ETH_QOS_prv_data *pdata = netdev_priv(dev);
+	struct DWC_ETH_QOS_prv_data *pdata = gDWC_ETH_QOS_prv_data;
+	struct net_device *net_dev = pdata->dev;
 	struct hw_if_struct *hw_if = &pdata->hw_if;
 	INT ret, pmt_flags = 0;
 	unsigned int rwk_filter_values[] = {
@@ -2056,7 +2386,7 @@ static INT DWC_ETH_QOS_suspend(struct platform_device *pdev, pm_message_t state)
 
 	EMACDBG("-->DWC_ETH_QOS_suspend\n");
 
-	if (of_device_is_compatible(pdev->dev.of_node, "qcom,emac-smmu-embedded")) {
+	if (of_device_is_compatible(dev->of_node, "qcom,emac-smmu-embedded")) {
 		EMACDBG("<--DWC_ETH_QOS_suspend smmu return\n");
 		return 0;
 	}
@@ -2068,7 +2398,7 @@ static INT DWC_ETH_QOS_suspend(struct platform_device *pdev, pm_message_t state)
 		return 0;
 	}
 
-	if (!dev || !netif_running(dev)) {
+	if (!net_dev || !netif_running(net_dev)) {
 		return -EINVAL;
 	}
 
@@ -2080,12 +2410,26 @@ static INT DWC_ETH_QOS_suspend(struct platform_device *pdev, pm_message_t state)
 	if (pdata->hw_feat.mgk_sel && (pdata->wolopts & WAKE_MAGIC))
 		pmt_flags |= DWC_ETH_QOS_MAGIC_WAKEUP;
 
-	ret = DWC_ETH_QOS_powerdown(dev, pmt_flags, DWC_ETH_QOS_DRIVER_CONTEXT);
+	ret = DWC_ETH_QOS_powerdown(net_dev, pmt_flags, DWC_ETH_QOS_DRIVER_CONTEXT);
 
 	DWC_ETH_QOS_suspend_clks(pdata);
 
-	EMACDBG("<--DWC_ETH_QOS_suspend ret = %d\n", ret);
+	/* Suspend the PHY RXC clock. */
+	if (dwc_eth_qos_res_data.is_pinctrl_names &&
+		(dwc_eth_qos_res_data.rgmii_rxc_suspend_state != NULL)) {
+		/* Remove RXC clock source from Phy.*/
+		ret = pinctrl_select_state(dwc_eth_qos_res_data.pinctrl,
+				dwc_eth_qos_res_data.rgmii_rxc_suspend_state);
+		if (ret)
+			EMACERR("Unable to set rgmii_rxc_suspend_state state, err = %d\n", ret);
+		else
+			EMACDBG("Set rgmii_rxc_suspend_state succeed\n");
+	}
 
+	EMACDBG("<--DWC_ETH_QOS_suspend ret = %d\n", ret);
+#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+	pdata->print_kpi = 0;
+#endif
 	return ret;
 }
 
@@ -2111,18 +2455,18 @@ static INT DWC_ETH_QOS_suspend(struct platform_device *pdev, pm_message_t state)
  * \retval 0
  */
 
-static INT DWC_ETH_QOS_resume(struct platform_device *pdev)
+static INT DWC_ETH_QOS_resume(struct device *dev)
 {
-	struct net_device *dev = platform_get_drvdata(pdev);
-	struct DWC_ETH_QOS_prv_data *pdata = netdev_priv(dev);
+	struct DWC_ETH_QOS_prv_data *pdata = gDWC_ETH_QOS_prv_data;
+	struct net_device *net_dev = pdata->dev;
 	INT ret;
 
-	DBGPR("-->DWC_ETH_QOS_resume\n");
-	if (of_device_is_compatible(pdev->dev.of_node, "qcom,emac-smmu-embedded"))
+	EMACDBG("-->DWC_ETH_QOS_resume\n");
+	if (of_device_is_compatible(dev->of_node, "qcom,emac-smmu-embedded"))
 		return 0;
 
-	if (!dev || !netif_running(dev)) {
-		DBGPR("<--DWC_ETH_QOS_dev_resume\n");
+	if (!net_dev || !netif_running(net_dev)) {
+		EMACERR("<--DWC_ETH_QOS_dev_resume\n");
 		return -EINVAL;
 	}
 
@@ -2139,40 +2483,146 @@ static INT DWC_ETH_QOS_resume(struct platform_device *pdev)
 
 		/* Wakeup reason can be PHY link event or a RX packet */
 		/* Set a wakeup event to ensure enough time for processing */
-		pm_wakeup_event(&pdev->dev, 5000);
+		pm_wakeup_event(dev, 5000);
 		return 0;
+	}
+
+	/* Resume the PhY RXC clock. */
+	if (dwc_eth_qos_res_data.is_pinctrl_names &&
+		(dwc_eth_qos_res_data.rgmii_rxc_resume_state != NULL)) {
+
+		/* Enable RXC clock source from Phy.*/
+		ret = pinctrl_select_state(dwc_eth_qos_res_data.pinctrl,
+				dwc_eth_qos_res_data.rgmii_rxc_resume_state);
+		if (ret)
+			EMACERR("Unable to set rgmii_rxc_resume_state state, err = %d\n", ret);
+		else
+			EMACDBG("Set rgmii_rxc_resume_state succeed\n");
 	}
 
 	DWC_ETH_QOS_resume_clks(pdata);
 
-	ret = DWC_ETH_QOS_powerup(dev, DWC_ETH_QOS_DRIVER_CONTEXT);
+	ret = DWC_ETH_QOS_powerup(net_dev, DWC_ETH_QOS_DRIVER_CONTEXT);
 
 	if (pdata->ipa_enabled)
 		DWC_ETH_QOS_ipa_offload_event_handler(pdata, EV_DPM_RESUME);
 
 	/* Wakeup reason can be PHY link event or a RX packet */
 	/* Set a wakeup event to ensure enough time for processing */
-	pm_wakeup_event(&pdev->dev, 5000);
+	pm_wakeup_event(dev, 5000);
 
-	DBGPR("<--DWC_ETH_QOS_resume\n");
+	EMACDBG("<--DWC_ETH_QOS_resume\n");
 
 	return ret;
 }
 
 #endif /* CONFIG_PM */
 
-static struct platform_driver DWC_ETH_QOS_plat_drv = {
-	.probe = DWC_ETH_QOS_probe,
-	.remove = DWC_ETH_QOS_remove,
-	.shutdown = DWC_ETH_QOS_shutdown,
+static int DWC_ETH_QOS_hib_restore(struct device *dev) {
+	struct DWC_ETH_QOS_prv_data *pdata = gDWC_ETH_QOS_prv_data;
+	int ret = 0;
+
+	if (of_device_is_compatible(dev->of_node, "qcom,emac-smmu-embedded"))
+		return 0;
+
+	EMACINFO(" start\n");
+
+        ret = DWC_ETH_QOS_init_regulators(dev);
+	if (ret)
+		return ret;
+
+	ret = DWC_ETH_QOS_init_gpios(dev);
+	if (ret)
+		return ret;
+
+	ret = DWC_ETH_QOS_get_clks(dev);
+	if (ret)
+		return ret;
+
+	DWC_ETH_QOS_set_clk_and_bus_config(pdata, pdata->speed);
+
+	DWC_ETH_QOS_set_rgmii_func_clk_en();
+
+#ifdef DWC_ETH_QOS_CONFIG_PTP
+	DWC_ETH_QOS_ptp_init(pdata);
+#endif /* end of DWC_ETH_QOS_CONFIG_PTP */
+
+	/* issue software reset to device */
+	pdata->hw_if.exit();
+
+	/* Bypass PHYLIB for TBI, RTBI and SGMII interface */
+	if (pdata->hw_feat.sma_sel == 1) {
+		ret = DWC_ETH_QOS_mdio_register(pdata->dev);
+		if (ret < 0) {
+			EMACERR("MDIO bus (id %d) registration failed\n",
+					  pdata->bus_id);
+			return ret;
+		}
+	}
+
+	if (!(pdata->dev->flags & IFF_UP)) {
+		pdata->dev->netdev_ops->ndo_open(pdata->dev);
+		pdata->dev->flags |= IFF_UP;
+	}
+
+	EMACINFO("end\n");
+
+	return ret;
+}
+
+static int DWC_ETH_QOS_hib_freeze(struct device *dev) {
+	struct DWC_ETH_QOS_prv_data *pdata = gDWC_ETH_QOS_prv_data;
+	int ret = 0;
+
+	if (of_device_is_compatible(dev->of_node, "qcom,emac-smmu-embedded"))
+		return 0;
+
+	EMACINFO(" start\n");
+	if (pdata->dev->flags & IFF_UP) {
+		pdata->dev->netdev_ops->ndo_stop(pdata->dev);
+		pdata->dev->flags &= ~IFF_UP;
+	}
+
+	if (pdata->hw_feat.sma_sel == 1)
+		DWC_ETH_QOS_mdio_unregister(pdata->dev);
+
+#ifdef DWC_ETH_QOS_CONFIG_PTP
+	DWC_ETH_QOS_ptp_remove(pdata);
+#endif /* end of DWC_ETH_QOS_CONFIG_PTP */
+
+	DWC_ETH_QOS_disable_clks(dev);
+
+	DWC_ETH_QOS_disable_regulators();
+
+	DWC_ETH_QOS_free_gpios();
+
+	EMACINFO("end\n");
+#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+	pdata->print_kpi = 0;
+#endif
+
+	return ret;
+}
+
+static const struct dev_pm_ops DWC_ETH_QOS_pm_ops = {
+	.freeze = DWC_ETH_QOS_hib_freeze,
+	.restore = DWC_ETH_QOS_hib_restore,
+	.thaw = DWC_ETH_QOS_hib_restore,
 #ifdef CONFIG_PM
 	.suspend = DWC_ETH_QOS_suspend,
 	.resume = DWC_ETH_QOS_resume,
 #endif
+};
+
+static struct platform_driver DWC_ETH_QOS_plat_drv = {
+	.probe = DWC_ETH_QOS_probe,
+	.remove = DWC_ETH_QOS_remove,
+	.shutdown = DWC_ETH_QOS_shutdown,
 	.driver = {
 		.name = DRV_NAME,
 		.owner = THIS_MODULE,
 		.of_match_table = DWC_ETH_QOS_plat_drv_match,
+		.pm = &DWC_ETH_QOS_pm_ops,
 	},
 };
 
@@ -2189,7 +2639,7 @@ static int DWC_ETH_QOS_init_module(void)
 {
 	INT ret = 0;
 
-	DBGPR("-->DWC_ETH_QOS_init_module\n");
+	EMACDBG("-->DWC_ETH_QOS_init_module\n");
 
 	ret = platform_driver_register(&DWC_ETH_QOS_plat_drv);
 	if (ret < 0) {
@@ -2199,15 +2649,15 @@ static int DWC_ETH_QOS_init_module(void)
 
 	ipc_emac_log_ctxt = ipc_log_context_create(IPCLOG_STATE_PAGES,"emac", 0);
 	if (!ipc_emac_log_ctxt)
-		pr_err("Error creating logging context for emac\n");
+		EMACERR("Error creating logging context for emac\n");
 	else
-		pr_info("IPC logging has been enabled for emac\n");
+		EMACDBG("IPC logging has been enabled for emac\n");
 
 #ifdef DWC_ETH_QOS_CONFIG_DEBUGFS
 	create_debug_files();
 #endif
 
-	DBGPR("<--DWC_ETH_QOS_init_module\n");
+	EMACDBG("<--DWC_ETH_QOS_init_module\n");
 
 	return ret;
 }
