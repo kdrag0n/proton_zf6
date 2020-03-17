@@ -685,7 +685,7 @@ static bool gyro_data_ready = true;
 static u64 gyro_last_enable_time_ns = 0;
 /*ASUS BSP: this function check if waiting enough time (80ms) since gyro sensor enabled
 			there is a counter used to prevent data always not ready*/
-bool icm_is_gyro_data_ready()
+bool icm_is_gyro_data_ready(void)
 {
 	struct timespec ts;
 	static int l_counter = 0;
