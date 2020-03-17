@@ -26,14 +26,13 @@
 #include "fg-core.h"
 #include "fg-reg.h"
 #include "fg-alg.h"
-
-//--------Howard Gauge include file--------
+//ASUS_BSP +++
 #include <linux/proc_fs.h>
 #include <linux/mm.h>
 #include <linux/syscalls.h>
 #include <linux/reboot.h>
 #include <linux/rtc.h>
-//--------Howard Gauge include file--------
+//ASUS_BSP ---
 
 #define FG_GEN4_DEV_NAME	"qcom,fg-gen4"
 #define TTF_AWAKE_VOTER		"fg_ttf_awake"
@@ -177,7 +176,6 @@
 #define MONOTONIC_SOC_WORD		463
 #define MONOTONIC_SOC_OFFSET		0
 
-
 /* v2 SRAM address and offset in ascending order */
 #define LOW_PASS_VBATT_WORD		3
 #define LOW_PASS_VBATT_OFFSET		0
@@ -207,12 +205,16 @@
 #define MONOTONIC_SOC_v2_OFFSET		0
 #define FIRST_LOG_CURRENT_v2_WORD	471
 #define FIRST_LOG_CURRENT_v2_OFFSET	0
-
+//ASUS_BSP +++
+#define BATT_TYPE_ARA "3282423_asus_c11p1708_3150mah_averaged_masterslave_jul10th2018"
+#define QCOM3600 "alium_860_89032_0000_3600mah_sept24th2018"
 #define BATT_TYPE_KIRIN  "3742266_asus_c11p1806_4850mah_averaged_masterslave_dec13th2018"
+
 extern void asus_extcon_set_fnode_name(struct extcon_dev *edev, const char *fname);
 extern int asus_extcon_set_state_sync(struct extcon_dev *edev, int cable_state);
 extern void asus_extcon_set_name(struct extcon_dev *edev, const char *fname);
 static struct fg_irq_info fg_irqs[FG_GEN4_IRQ_MAX];
+//ASUS_BSP ---
 
 /* DT parameters for FG device */
 struct fg_dt_props {
@@ -330,7 +332,7 @@ struct bias_config {
 //[+++]ASUS : Add debug log
 #define BAT_TAG "[BAT][BMS]"
 #define ERROR_TAG "[ERR]"
-#define BAT_DBG(fmt, ...) do {} while (0)
+#define BAT_DBG(fmt, ...) printk(KERN_INFO BAT_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
 #define BAT_DBG_E(fmt, ...)  printk(KERN_ERR BAT_TAG " %s: " fmt, __func__, ##__VA_ARGS__)
 //[---]ASUS : Add debug log
 
@@ -813,7 +815,6 @@ static int fg_gen4_get_charge_counter_shadow(struct fg_gen4_chip *chip,
 	return 0;
 }
 
-extern bool no_input_suspend_flag;
 static int fg_gen4_get_battery_temp(struct fg_dev *fg, int *val)
 {
 	int rc = 0;
@@ -831,9 +832,6 @@ static int fg_gen4_get_battery_temp(struct fg_dev *fg, int *val)
 	 * 0.25 C. Multiply by 10 to convert it to deci degrees C.
 	 */
 	*val = sign_extend32(buf, 9) * 100 / 40;
-
-	if (no_input_suspend_flag && *val > 600)
-		*val = 600;
 
 	return 0;
 }
@@ -1031,21 +1029,21 @@ static int fg_gen4_get_prop_capacity_raw(struct fg_gen4_chip *chip, int *val)
 		return rc;
 	}
 
+	if (!is_input_present(fg)) {
+		rc = fg_gen4_get_prop_capacity(fg, val);
+		if (!rc)
+			*val = *val * 100;
+		return rc;
+	}
+
 	rc = fg_get_sram_prop(&chip->fg, FG_SRAM_MONOTONIC_SOC, val);
 	if (rc < 0) {
 		pr_err("Error in getting MONOTONIC_SOC, rc=%d\n", rc);
 		return rc;
 	}
 
-	return 0;
-}
-
-static int fg_gen4_get_prop_capacity_raw_max(struct fg_gen4_chip *chip, int *val)
-{
-	if (chip->dt.soc_hi_res)
-		*val = 65535;
-	else
-		*val = FULL_SOC_RAW;
+	/* Show it in centi-percentage */
+	*val = (*val * 10000) / 0xFFFF;
 
 	return 0;
 }
@@ -1143,7 +1141,7 @@ static int fg_gen4_get_prop_soc_scale(struct fg_gen4_chip *chip)
 	return rc;
 }
 
-#define SDAM1_MEM_124_REG	0xB0BC
+#define SDAM1_MEM_127_REG	0xB0BF
 static int fg_gen4_set_calibrate_level(struct fg_gen4_chip *chip, int val)
 {
 	struct fg_dev *fg = &chip->fg;
@@ -1162,10 +1160,9 @@ static int fg_gen4_set_calibrate_level(struct fg_gen4_chip *chip, int val)
 		return 0;
 
 	buf = (u8)val;
-	rc = fg_write(fg, SDAM1_MEM_124_REG, &buf, 1);
+	rc = fg_write(fg, SDAM1_MEM_127_REG, &buf, 1);
 	if (rc < 0) {
-		pr_err("Error in writing to 0x%04X, rc=%d\n",
-			SDAM1_MEM_124_REG, rc);
+		pr_err("Error in writing to 0xB0BF, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -1176,10 +1173,9 @@ static int fg_gen4_set_calibrate_level(struct fg_gen4_chip *chip, int val)
 		return rc;
 	}
 
-	rc = fg_read(fg, SDAM1_MEM_124_REG, &buf, 1);
+	rc = fg_read(fg, SDAM1_MEM_127_REG, &buf, 1);
 	if (rc < 0) {
-		pr_err("Error in reading from 0x%04X, rc=%d\n",
-			SDAM1_MEM_124_REG, rc);
+		pr_err("Error in reading from 0xB0BF, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -1626,7 +1622,7 @@ static int fg_gen4_adjust_ki_coeff_dischg(struct fg_dev *fg)
 	return 0;
 }
 
-//----------------------Howard Gauge ------------------
+//ASUS_BSP +++
 #define ID_TOLERANCE		15
 #define BATT_ID_CRITERIA	51000
 bool ATD_Is_battID_within_range(int battID_criteria)
@@ -1642,8 +1638,7 @@ bool ATD_Is_battID_within_range(int battID_criteria)
 
 	return result;
 }
-
-//----------------------Howard Gauge ------------------
+//ASUS_BSP ---
 
 static int fg_gen4_slope_limit_config(struct fg_gen4_chip *chip, int batt_temp)
 {
@@ -1731,7 +1726,7 @@ static int fg_gen4_rapid_soc_config(struct fg_gen4_chip *chip, bool en)
 		slope_limit_coeff, cutoff_curr_ma);
 	return 0;
 }
-extern enum DEVICE_HWID g_ASUS_hwID;
+
 static int fg_gen4_get_batt_profile(struct fg_dev *fg)
 {
 	struct fg_gen4_chip *chip = container_of(fg, struct fg_gen4_chip, fg);
@@ -1746,8 +1741,13 @@ static int fg_gen4_get_batt_profile(struct fg_dev *fg)
 		return -ENXIO;
 	}
 
-	profile_node = of_batterydata_get_best_profile(batt_node,
-				fg->batt_id_ohms / 1000, BATT_TYPE_KIRIN);
+	if (chip->dt.multi_profile_load)
+		profile_node = of_batterydata_get_best_aged_profile(batt_node,
+					fg->batt_id_ohms / 1000,
+					chip->batt_age_level, &avail_age_level);
+	else
+		profile_node = of_batterydata_get_best_profile(batt_node,
+					fg->batt_id_ohms / 1000, BATT_TYPE_KIRIN); //ASUS_BSP
 	if (IS_ERR(profile_node))
 		return PTR_ERR(profile_node);
 
@@ -2188,8 +2188,8 @@ static bool is_profile_load_required(struct fg_gen4_chip *chip)
 	return true;
 }
 
-extern int FV_JEITA_uV; //ASUS_BSP battery safety upgrade
 //ASUS_BSP battery safety upgrade +++
+extern int FV_JEITA_uV;
 static void set_full_charging_voltage(void)
 {
 	if(0 == g_cycle_count_data.reload_condition){
@@ -2475,16 +2475,14 @@ done:
 	batt_psy_initialized(fg);
 	fg_notify_charger(fg);
 
-	//set_full_charging_voltage(); //ASUS_BSP battery safety upgrade
-
 	schedule_delayed_work(&chip->ttf->ttf_work, msecs_to_jiffies(10000));
 	fg_dbg(fg, FG_STATUS, "profile loaded successfully");
 	pr_info("%s profile loaded successfully", __func__);//ASUS_BSP for debug
 out:
 	if (!chip->esr_fast_calib || is_debug_batt_id(fg)) {
 		/* If it is debug battery, then disable ESR fast calibration */
-		fg_gen4_esr_fast_calib_config(chip, false);
 		chip->esr_fast_calib = false;
+		fg_gen4_esr_fast_calib_config(chip, false);
 	}
 
 	if (chip->dt.multi_profile_load && rc < 0)
@@ -2788,8 +2786,8 @@ static int init_batt_cycle_count_data(void)
 			return -1;
 		}
 
-		BAT_DBG("reload_condition=%d;high_temp_total_time=%lu;high_temp_vol_time=%lu;high_vol_total_time=%lu;battery_total_time=%lu\n",
-			buf.reload_condition, buf.high_temp_total_time,buf.high_temp_vol_time,buf.high_vol_total_time,buf.battery_total_time);
+		BAT_DBG("cycle_count=%d;reload_condition=%d;high_temp_total_time=%lu;high_temp_vol_time=%lu;high_vol_total_time=%lu;battery_total_time=%lu\n",
+			buf.cycle_count,buf.reload_condition, buf.high_temp_total_time,buf.high_temp_vol_time,buf.high_vol_total_time,buf.battery_total_time);
 	}
 	BAT_DBG("Cycle count data initialize success!\n");
 	g_cyclecount_initialized = true;
@@ -3025,7 +3023,9 @@ static void get_asus_cycle_count(int *count)
 	if(cycle_count_sd_old == -1){ //initail cycle_count_sd_old when reboot
 		cycle_count_sd_old = cycle_count_sd;
 	}
-	
+
+    BAT_DBG("%d, %d, %d, %d", cycle_count_file, cycle_count_sd, count_all, cycle_count_sd_old);
+    
 	if(cycle_count_file >= cycle_count_sd_old){
 		if(cycle_count_sd > cycle_count_sd_old){
 			cycle_count_file += (cycle_count_sd - cycle_count_sd_old);
@@ -3138,7 +3138,7 @@ static void battery_health_data_reset(void){
 extern int batt_health_csc_backup(void);
 static int resotre_bat_health(void)
 {
-	int i=0, rc = 0;
+	int i=0, rc = 0, count =0;
 
 	memset(&g_bat_health_data_backup,0,sizeof(struct BAT_HEALTH_DATA_BACKUP)*BAT_HEALTH_NUMBER_MAX);
 
@@ -3150,10 +3150,20 @@ static int resotre_bat_health(void)
 		return -1;
 	}
 
-	BAT_DBG("index(%d)\n", g_bat_health_data_backup[0].health);
 	for(i=1; i<BAT_HEALTH_NUMBER_MAX;i++){
 		BAT_DBG("%s %d",g_bat_health_data_backup[i].date, g_bat_health_data_backup[i].health);
+
+		if(g_bat_health_data_backup[i].health!=0){
+			count++;
+		}
 	}
+
+	if(count >= BAT_HEALTH_NUMBER_MAX-1){
+		g_health_upgrade_index = BAT_HEALTH_NUMBER_MAX-1;
+		g_bat_health_data_backup[0].health = BAT_HEALTH_NUMBER_MAX-1;
+	}
+    
+   	BAT_DBG("index(%d)\n", g_bat_health_data_backup[0].health);
 
 	g_health_upgrade_index = g_bat_health_data_backup[0].health;
 	g_bathealth_initialized = true;
@@ -3161,6 +3171,14 @@ static int resotre_bat_health(void)
 	batt_health_csc_backup();
 	//batt_safety_csc_backup();
 	return 0;
+}
+
+static void resequencing_bat_health_data(void){
+    int i;
+
+    for(i=1; i < BAT_HEALTH_NUMBER_MAX-1 ; i++){
+        memcpy(&g_bat_health_data_backup[i], &g_bat_health_data_backup[i+1], sizeof(struct BAT_HEALTH_DATA_BACKUP));
+    }
 }
 
 static int backup_bat_health(void)
@@ -3177,12 +3195,16 @@ static int backup_bat_health(void)
 
 	bat_health = g_bat_health_data.bat_health;
 
-	if(g_health_upgrade_index == BAT_HEALTH_NUMBER_MAX-1){
-		g_health_upgrade_index = 1;
+	if(g_health_upgrade_index >= BAT_HEALTH_NUMBER_MAX-1){
+        g_health_upgrade_index = BAT_HEALTH_NUMBER_MAX-1;
 	}else{
 		g_health_upgrade_index++;
 	}
 
+	if(g_health_upgrade_index >= BAT_HEALTH_NUMBER_MAX-1){
+		resequencing_bat_health_data();
+	}
+    
 	sprintf(g_bat_health_data_backup[g_health_upgrade_index].date, "%d-%02d-%02d %02d:%02d:%02d", tm.tm_year+1900,tm.tm_mon+1, tm.tm_mday,tm.tm_hour,tm.tm_min,tm.tm_sec);
 	g_bat_health_data_backup[g_health_upgrade_index].health = bat_health;
 	g_bat_health_data_backup[0].health = g_health_upgrade_index;
@@ -5071,9 +5093,6 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CAPACITY_RAW:
 		rc = fg_gen4_get_prop_capacity_raw(chip, &pval->intval);
 		break;
-	case POWER_SUPPLY_PROP_CAPACITY_RAW_MAX:
-		rc = fg_gen4_get_prop_capacity_raw_max(chip, &pval->intval);
-		break;
 	case POWER_SUPPLY_PROP_CC_SOC:
 		rc = fg_get_sram_prop(&chip->fg, FG_SRAM_CC_SOC, &val);
 		if (rc < 0) {
@@ -5323,7 +5342,6 @@ static enum power_supply_property fg_psy_props[] = {
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_REAL_CAPACITY,
 	POWER_SUPPLY_PROP_CAPACITY_RAW,
-	POWER_SUPPLY_PROP_CAPACITY_RAW_MAX,
 	POWER_SUPPLY_PROP_CC_SOC,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
@@ -6559,8 +6577,7 @@ static int fg_gen4_parse_dt(struct fg_gen4_chip *chip)
 	return 0;
 }
 
-//-------------Howard Gauge BMMI--------------
-
+//ASUS_BSP +++
 /*+++ proc batt_current Interface+++*/
 static int batt_mili_temp_proc_read(struct seq_file *buf, void *v)
 {
@@ -6768,9 +6785,7 @@ static void create_battID_status_proc_file(void)
         }
         return;
 }
-
-
-//-------------Howard Gauge BMMI--------------
+//ASUS_BSP ---
 
 static void fg_gen4_cleanup(struct fg_gen4_chip *chip)
 {
@@ -7004,6 +7019,18 @@ static int batt_safety_csc_restore(void){
 	return rc;
 }
 
+static void batt_safety_csc_stop(void){
+
+	cancel_delayed_work(&battery_safety_work);
+	BAT_DBG("Done! \n");
+}
+
+static void batt_safety_csc_start(void){
+
+	schedule_delayed_work(&battery_safety_work, 0);
+	BAT_DBG("Done! \n");
+}
+
 //ASUS_BS battery health upgrade +++
 static void batt_health_upgrade_debug_enable(bool enable){
 
@@ -7092,6 +7119,7 @@ static const struct file_operations batt_health_config_fops = {
 
 //ASUS_BS battery health upgrade ---
 
+#if 0
 static int batt_safety_csc_getcyclecount(void){
 	char buf[30]={0};
 	int rc;
@@ -7108,6 +7136,7 @@ static int batt_safety_csc_getcyclecount(void){
 	BAT_DBG("Done! rc(%d)\n",rc);
 	return rc;
 }
+#endif
 
 static ssize_t batt_safety_csc_proc_write(struct file *file,const char __user *buffer,size_t count,loff_t *pos)
 {
@@ -7126,20 +7155,20 @@ static ssize_t batt_safety_csc_proc_write(struct file *file,const char __user *b
 	sscanf(start, "%d", &value);
 
 	switch(value){
-		case 0: //erase
+		case 0: //erase battery safety
 			batt_safety_csc_erase();
-		break;
-		case 1: //backup /persist to /sdcard
+			break;
+		case 1: //backup battery safety
 			batt_safety_csc_backup();
-		break;
-		case 2: //resotre /sdcard from /persist 
+			break;
+		case 2: //resotre battery safety
 			batt_safety_csc_restore();
-		break;
-		case 3: //write cycle count to /sdcard
-			batt_safety_csc_getcyclecount();
-		break;
-		case 4: //copy bat_health_data to /sdcard from /persist
-			batt_health_csc_backup();
+			break;
+		case 3: //stop battery safety upgrade
+			batt_safety_csc_stop();
+			break;
+		case 4: //start safety upgrade
+			batt_safety_csc_start();
 			break;
 		case 5: // disable battery health debug log
 			batt_health_upgrade_debug_enable(false);
@@ -7152,6 +7181,9 @@ static ssize_t batt_safety_csc_proc_write(struct file *file,const char __user *b
 			break;
 		case 8: // enable battery health upgrade
 			batt_health_upgrade_enable(true);
+			break;
+		case 9: //initial battery safety upgrade
+			init_batt_cycle_count_data();
 			break;
 		default:
 			BAT_DBG_E("input error!Now return\n");
@@ -7502,9 +7534,9 @@ static int fg_gen4_probe(struct platform_device *pdev)
 	struct fg_dev *fg;
 	struct power_supply_config fg_psy_cfg;
 	int rc, msoc, volt_uv, batt_temp;
-	bool state;
+	bool state; //ASUS_BSP 
 
-	BAT_DBG("+++\n");
+	BAT_DBG("+++\n"); //ASUS_BSP for debug
 
 	chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
@@ -7527,9 +7559,9 @@ static int fg_gen4_probe(struct platform_device *pdev)
 		dev_err(fg->dev, "Parent regmap is unavailable\n");
 		return -ENXIO;
 	}
-	
-	g_fgChip = chip;
-	g_fg = fg;
+
+	g_fgChip = chip; //ASUS_BSP
+	g_fg = fg; //ASUS_BSP
 	
 	mutex_init(&fg->bus_lock);
 	mutex_init(&fg->sram_rw_lock);
@@ -7544,13 +7576,13 @@ static int fg_gen4_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&fg->profile_load_work, profile_load_work);
 	INIT_DELAYED_WORK(&fg->sram_dump_work, sram_dump_work);
 	INIT_DELAYED_WORK(&chip->pl_enable_work, pl_enable_work);
-	INIT_WORK(&chip->pl_current_en_work, pl_current_en_work);
-	//ASUS_BSP howard+++
+	//ASUS_BSP +++
 	INIT_DELAYED_WORK(&update_gauge_status_work, update_gauge_status_worker);
 	INIT_DELAYED_WORK(&battery_safety_work, battery_safety_worker); //ASUS_BSP battery safety upgrade
 	INIT_DELAYED_WORK(&battery_health_work, battery_health_worker); //battery_health_work
 	//INIT_DELAYED_WORK(&battery_metadata_work, battery_metadata_worker); //battery_metadata_work
-	//ASUS_BSP howard---
+	//ASUS_BSP ---
+	INIT_WORK(&chip->pl_current_en_work, pl_current_en_work);
 
 	fg->awake_votable = create_votable("FG_WS", VOTE_SET_ANY,
 					fg_awake_cb, fg);
@@ -7602,7 +7634,7 @@ static int fg_gen4_probe(struct platform_device *pdev)
 		dev_err(fg->dev, "Error in alg_init, rc:%d\n",
 			rc);
 		goto exit;
-	}	
+	}
 
 	rc = fg_gen4_parse_dt(chip);
 	if (rc < 0) {
@@ -7712,23 +7744,14 @@ static int fg_gen4_probe(struct platform_device *pdev)
 			msoc, volt_uv, batt_temp, fg->batt_id_ohms);
 	}
 
-	fg->tz_dev = thermal_zone_of_sensor_register(fg->dev, 0, fg,
-							&fg_gen4_tz_ops);
-	if (IS_ERR_OR_NULL(fg->tz_dev)) {
-		rc = PTR_ERR(fg->tz_dev);
-		fg->tz_dev = NULL;
-		dev_dbg(fg->dev, "Couldn't register with thermal framework rc:%d\n",
-			rc);
-	}
-
-// ASUS BSP BMMI/SMMI+++
+	//ASUS_BSP BMMI/SMMI+++
 	create_batt_mili_temp_proc_file();
 	create_batt_current_proc_file();
 	create_batt_voltage_proc_file();
 	create_gaugeIC_status_proc_file();
 	create_batt_type_proc_file();
 	create_battID_status_proc_file();
-// ASUS BSP BMMI/SMMI---
+	//ASUS_BSP BMMI/SMMI---
 
 	//ASUS_BSP battery safety upgrade +++
 	init_battery_safety(fg);
@@ -7738,19 +7761,28 @@ static int fg_gen4_probe(struct platform_device *pdev)
 	schedule_delayed_work(&battery_safety_work, 30 * HZ);
 	//ASUS_BSP battery safety upgrade ---
 
+	//ASUS_BSP battery health upgrade +++
 	battery_health_data_reset();
-	
 	schedule_delayed_work(&battery_health_work, 30 * HZ); //battery_health_work
 	//schedule_delayed_work(&battery_metadata_work, BATTERY_METADATA_UPGRADE_TIME * HZ); //battery_metadata_work
+	//ASUS_BSP battery health upgrade ---
+
+	fg->tz_dev = thermal_zone_of_sensor_register(fg->dev, 0, fg,
+							&fg_gen4_tz_ops);
+	if (IS_ERR_OR_NULL(fg->tz_dev)) {
+		rc = PTR_ERR(fg->tz_dev);
+		fg->tz_dev = NULL;
+		dev_dbg(fg->dev, "Couldn't register with thermal framework rc:%d\n",
+			rc);
+	}
 
 	device_init_wakeup(fg->dev, true);
-
 	if (!fg->battery_missing)
-		schedule_delayed_work(&fg->profile_load_work, 0 * HZ);
+		schedule_delayed_work(&fg->profile_load_work, 0);
 
-	qpnp_smbcharger_polling_data_worker(5);//Start the status report of fuel gauge
+	qpnp_smbcharger_polling_data_worker(5);//ASUS_BSP Start the status report of fuel gauge
 
-// ASUS BSP howard+++
+//ASUS_BSP +++
 	fg->bat_ver_extcon = extcon_dev_allocate(asus_fg_extcon_cable);
 	if (IS_ERR(fg->bat_ver_extcon)) {
 		rc = PTR_ERR(fg->bat_ver_extcon);
@@ -7761,7 +7793,7 @@ static int fg_gen4_probe(struct platform_device *pdev)
 	if (rc < 0) {
 		dev_err(fg->dev, "[BAT][CHG] failed to register ASUS bat_ver_extcon device rc=%d\n", rc);
 	}
-	asus_extcon_set_name(fg->bat_ver_extcon, "C11P1806-O-01-0001-6.1210.1904.131");
+	asus_extcon_set_name(fg->bat_ver_extcon, "C11P1806-O-01-0001-16.1220.1907.183");
 
 	fg->bat_id_extcon = extcon_dev_allocate(asus_fg_extcon_cable);
 	if (IS_ERR(fg->bat_id_extcon)) {
@@ -7777,11 +7809,10 @@ static int fg_gen4_probe(struct platform_device *pdev)
 	state = ATD_Is_battID_within_range(BATT_ID_CRITERIA);
 	asus_extcon_set_state_sync(fg->bat_id_extcon, state);
 
-// ASUS BSP howard ---
-
+//ASUS_BSP ---
 	pr_debug("FG GEN4 driver probed successfully\n");
 
-	BAT_DBG("---\n");
+	BAT_DBG("---\n"); //ASUS_BSP for debug
 
 	return 0;
 exit:

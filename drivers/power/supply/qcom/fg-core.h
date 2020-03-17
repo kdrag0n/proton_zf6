@@ -30,7 +30,7 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/pmic-voter.h>
-#include <linux/extcon.h>	//ASUS BSP +++
+#include <linux/extcon.h>	//ASUS BSP
 
 #define fg_dbg(fg, reason, fmt, ...)			\
 	do {							\
@@ -540,9 +540,11 @@ struct BAT_HEALTH_DATA_BACKUP{
 };
 //ASUS_BS battery health upgrade ---
 
+//ASUS_BSP +++
 static const unsigned int asus_fg_extcon_cable[] = {
 	EXTCON_NONE,
 };
+//ASUS_BSP ---
 
 /* Debugfs data structures are below */
 
