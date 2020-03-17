@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -405,6 +405,30 @@ typedef  enum  {
     WMI_SERVICE_EXT2_MSG = 220, /* WMI_SERVICE_READY_EXT2 msg is sent by target */
     WMI_SERVICE_WPA3_SAE_ROAM_SUPPORT = 221, /* Indicates FW supports WPA3 SAE roaming */
     WMI_SERVICE_WPA3_OWE_ROAM_SUPPORT = 222, /* Indicates FW supports WPA3 OWE roaming */
+    WMI_SERVICE_AUDIO_AGGR = 223, /* Indicates FW supports audio frame aggregation */
+    WMI_SERVICE_6GHZ_SUPPORT = 224, /* Indicates FW supports 6GHZ (scan, connection and so on) */
+    /* WMI_SERVICE_QMI_STATS_SUPPORT
+     * Indicates FW supports stat request command WMI_REQUEST_LINK_STATS_CMDID
+     * and WMI_REQUEST_STATS_CMDID coming from QMI which will be used in
+     * runtime PM suspend.
+     */
+    WMI_SERVICE_QMI_STATS_SUPPORT = 225,
+    WMI_SERVICE_CFR_CAPTURE_FILTER_SUPPORT = 226, /* Indicate FW Supports Channel Frequency Response (CFR) via WMI_CFR_CAPTURE_FILTER_CMDID */
+    WMI_SERVICE_STA_BSS_MAX_IDLE_TIME = 227, /* Indicate FW supports BSS Max Idle time feature via WMI_VDEV_BSS_MAX_IDLE_TIME_CMDID */
+    WMI_SERVICE_BIP_CIPHER_SUPPORT = 228, /* FW supports new BIP_CIPHER suites (WMI_CIPHER_BIP_xxx) */
+    WMI_SERVICE_BW_165MHZ_SUPPORT = 229, /* Indicate FW supports bandwidth 165MHz (i.e. 6 GHz in addition to 2.4 and 5) */
+    WMI_SERVICE_BW_RESTRICTED_80P80_SUPPORT = WMI_SERVICE_BW_165MHZ_SUPPORT,
+    WMI_SERVICE_NAN_NDI_SAP_SAP_SCC_SUPPORT = 230, /* Support SAP + SAP + NAN discovery + NDI concurrency in SCC mode */
+    WMI_SERVICE_NAN_VDEV_SUPPORT = 231, /* indicates firmware is dependent on host to create NAN vdev */
+    WMI_SERVICE_AUDIO_SYNC_SUPPORT = 232, /* Indicate FW supports Audio sync feature */
+    WMI_SERVICE_DUAL_STA_ROAM_SUPPORT = 233, /* Indidate FW support dual STA roaming */
+    WMI_SERVICE_PEER_CREATE_CONF = 234, /* Target will send WMI_PEER_CREATE_CONF_EVENTID after WMI_PEER_CREATE_CMDID is processed */
+    WMI_SERVICE_MULTIPLE_VDEV_RESTART_RESPONSE_SUPPORT = 235, /* indicates firmware supports Multiple vdev restart response */
+    WMI_SERVICE_ROAM_SCAN_CHANNEL_LIST_TO_HOST_SUPPORT = 236, /* Indicates firmware supports sending roam scan channel list to host */
+    WMI_SERVICE_PEER_DELETE_NO_PEER_FLUSH_TIDS_CMD = 237, /* Host should not send WMI_PEER_FLUSH_TIDS_CMD as part of peer delete */
+    WMI_SERVICE_NSS_RATIO_TO_HOST_SUPPORT = 238, /* Indicates firmware supports sending NSS ratio info to host */
+    WMI_SERVICE_WPA3_SUITEB_ROAM_SUPPORT = 239, /* Indicates FW supports WPA3 SUITE B roaming */
+
 
     /******* ADD NEW SERVICES HERE *******/
 
@@ -415,7 +439,22 @@ typedef  enum  {
 #define WMI_SERVICE_BM_SIZE   ((WMI_MAX_SERVICE + sizeof(A_UINT32)- 1)/sizeof(A_UINT32))
 
 #define WMI_NUM_EXT_SERVICES (WMI_MAX_EXT_SERVICE - WMI_MAX_SERVICE)
+
+/*
+ * TEMPORARY WORKAROUND
+ * Virtually all branches of the target utilize an incorrect check on
+ * the value of WMI_SERVICE_EXT_BM_SIZE32, checking that
+ * WMI_SERVICE_EXT_BM_SIZE32 < 4, rather than WMI_SERVICE_EXT_BM_SIZE32 <= 4.
+ * Until all target branches are fixed, this check is being disabled
+ * by artificially setting WMI_SERVICE_EXT_BM_SIZE32 to 0, rather than
+ * the number of 4-byte words required for holding the WMI extension
+ * service flags.
+ */
+#if 0
 #define WMI_SERVICE_EXT_BM_SIZE32 ((WMI_NUM_EXT_SERVICES + 31) / 32)
+#else
+#define WMI_SERVICE_EXT_BM_SIZE32 0
+#endif
 
 #define WMI_SERVICE_ROAM_OFFLOAD WMI_SERVICE_ROAM_SCAN_OFFLOAD /* depreciated the name WMI_SERVICE_ROAM_OFFLOAD, but here to help compiling with old host driver */
 
