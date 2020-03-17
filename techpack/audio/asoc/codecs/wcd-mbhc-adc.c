@@ -892,8 +892,19 @@ enable_supply:
 exit:
 	if (mbhc->mbhc_cb->mbhc_micbias_control &&
 	    !mbhc->micbias_enable)
+	/* #ASUS_BSP +++ Enable MIC bias always if HEADSET inserted for ASUS Design */
+	{
+		if (plug_type == MBHC_PLUG_TYPE_HEADSET) {
+			mbhc->mbhc_cb->mbhc_micbias_control(codec, MIC_BIAS_2,
+							    MICB_ENABLE);
+			mbhc->micbias_enable = true;
+		} else	{
 		mbhc->mbhc_cb->mbhc_micbias_control(codec, MIC_BIAS_2,
 						    MICB_DISABLE);
+
+		}
+	}
+	/* #ASUS_BSP --- */
 
 	/*
 	 * If plug type is corrected from special headset to headphone,
