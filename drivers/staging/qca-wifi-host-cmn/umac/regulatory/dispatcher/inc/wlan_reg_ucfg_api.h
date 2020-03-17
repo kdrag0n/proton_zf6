@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -36,12 +36,22 @@ typedef QDF_STATUS (*reg_event_cb)(void *status_struct);
 /**
  * ucfg_reg_set_band() - Sets the band information for the PDEV
  * @pdev: The physical pdev to set the band for
- * @band: The set band parameter to configure for the pysical device
+ * @band: The set band parameter to configure for the physical device
  *
  * Return: QDF_STATUS
  */
 QDF_STATUS ucfg_reg_set_band(struct wlan_objmgr_pdev *pdev,
-		enum band_info band);
+			     enum band_info band);
+
+/**
+ * ucfg_reg_get_band() - Gets the band information for the PDEV
+ * @pdev: The physical pdev to get the band for
+ * @band: The band parameter of the physical device
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS ucfg_reg_get_band(struct wlan_objmgr_pdev *pdev,
+			     enum band_info *band);
 
 /**
  * ucfg_reg_notify_sap_event() - Notify regulatory domain for sap event
@@ -345,4 +355,13 @@ struct wlan_psoc_host_hal_reg_capabilities_ext *ucfg_reg_get_hal_reg_cap(
 QDF_STATUS ucfg_reg_set_hal_reg_cap(struct wlan_objmgr_psoc *psoc,
 			struct wlan_psoc_host_hal_reg_capabilities_ext *reg_cap,
 			uint16_t phy_cnt);
+
+/**
+ * ucfg_set_ignore_fw_reg_offload_ind() - API to set ignore regdb offload ind
+ * @psoc: psoc ptr
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS ucfg_set_ignore_fw_reg_offload_ind(struct wlan_objmgr_psoc *psoc);
+
 #endif

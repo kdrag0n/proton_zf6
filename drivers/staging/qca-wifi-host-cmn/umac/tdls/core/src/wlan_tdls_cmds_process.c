@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -530,7 +530,6 @@ tdls_add_peer_serialize_callback(struct wlan_serialization_command *cmd,
 	}
 
 	req = cmd->umac_cmd;
-	tdls_debug("reason: %d, req %pK", reason, req);
 
 	switch (reason) {
 	case WLAN_SER_CB_ACTIVATE_CMD:
@@ -760,7 +759,7 @@ int tdls_validate_mgmt_request(struct tdls_action_frame_request *tdls_mgmt_req)
 		}
 	}
 
-	tdls_notice("tdls_mgmt" QDF_MAC_ADDR_STR " action %d, dialog_token %d status %d, len = %zu",
+	tdls_debug("tdls_mgmt" QDF_MAC_ADDR_STR " action %d, dialog_token %d status %d, len = %zu",
 		   QDF_MAC_ADDR_ARRAY(tdls_validate->peer_mac),
 		   tdls_validate->action_code, tdls_validate->dialog_token,
 		   tdls_validate->status_code, tdls_validate->len);
@@ -976,7 +975,6 @@ tdls_update_peer_serialize_callback(struct wlan_serialization_command *cmd,
 	}
 
 	req = cmd->umac_cmd;
-	tdls_debug("reason: %d, req %pK", reason, req);
 
 	switch (reason) {
 	case WLAN_SER_CB_ACTIVATE_CMD:
@@ -1099,7 +1097,6 @@ tdls_del_peer_serialize_callback(struct wlan_serialization_command *cmd,
 	}
 
 	req = cmd->umac_cmd;
-	tdls_debug("reason: %d, req %pK", reason, req);
 
 	switch (reason) {
 	case WLAN_SER_CB_ACTIVATE_CMD:
@@ -1169,7 +1166,7 @@ QDF_STATUS tdls_process_del_peer(struct tdls_oper_request *req)
 
 	mac = req->peer_addr;
 	peer = tdls_find_peer(vdev_obj, mac);
-	if (!peer) {
+	if (!peer || !(TDLS_STA_INDEX_CHECK((peer->sta_id)))) {
 		tdls_err(QDF_MAC_ADDR_STR
 			 " not found, ignore NL80211_TDLS_ENABLE_LINK",
 			 QDF_MAC_ADDR_ARRAY(mac));
@@ -1416,10 +1413,10 @@ static QDF_STATUS tdls_add_peer_rsp(struct tdls_add_sta_rsp *rsp)
 				conn_rec[sta_idx].index = sta_idx;
 				qdf_copy_macaddr(&conn_rec[sta_idx].peer_mac,
 						 &rsp->peermac);
-				tdls_warn("TDLS: STA IDX at %d is %d of mac "
-					  QDF_MAC_ADDR_STR, sta_idx,
-					  rsp->sta_id, QDF_MAC_ADDR_ARRAY
-					  (rsp->peermac.bytes));
+				tdls_debug("TDLS: STA IDX at %d is %d of mac "
+					   QDF_MAC_ADDR_STR, sta_idx,
+					   rsp->sta_id, QDF_MAC_ADDR_ARRAY
+					   (rsp->peermac.bytes));
 				break;
 			}
 		}
@@ -1501,7 +1498,7 @@ QDF_STATUS tdls_process_del_peer_rsp(struct tdls_del_sta_rsp *rsp)
 			continue;
 
 		macaddr = rsp->peermac.bytes;
-		tdls_warn("TDLS: del STA IDX = %x", rsp->sta_id);
+		tdls_debug("TDLS: del STA IDX = %x", rsp->sta_id);
 		curr_peer = tdls_find_peer(vdev_obj, macaddr);
 		if (curr_peer) {
 			tdls_debug(QDF_MAC_ADDR_STR " status is %d",
@@ -1582,63 +1579,6 @@ tdls_wma_update_peer_state(struct tdls_soc_priv_obj *soc_obj,
 	}
 
 	return status;
-}
-
-static QDF_STATUS
-tdls_update_uapsd(struct wlan_objmgr_psoc *psoc, struct wlan_objmgr_vdev *vdev,
-		  uint8_t sta_id, uint32_t srvc_int, uint32_t sus_int,
-		  uint8_t dir, uint8_t psb, uint32_t delay_interval)
-{
-	uint8_t i;
-	static const uint8_t ac[AC_PRIORITY_NUM] = {UAPSD_AC_VO, UAPSD_AC_VI,
-						    UAPSD_AC_BK, UAPSD_AC_BE};
-	static const uint8_t tid[AC_PRIORITY_NUM] = {7, 5, 2, 3};
-	uint32_t vdev_id;
-
-	struct sta_uapsd_params tdls_uapsd_params;
-	struct sta_uapsd_trig_params tdls_trig_params;
-	struct wlan_objmgr_peer *bsspeer;
-	uint8_t macaddr[QDF_MAC_ADDR_SIZE];
-	QDF_STATUS status;
-
-	if (!psb) {
-		tdls_debug("No need to configure auto trigger:psb is 0");
-		return QDF_STATUS_SUCCESS;
-	}
-	vdev_id = wlan_vdev_get_id(vdev);
-	bsspeer = wlan_vdev_get_bsspeer(vdev);
-	if (!bsspeer) {
-		tdls_err("bss peer is NULL");
-		return QDF_STATUS_E_FAILURE;
-	}
-	wlan_vdev_obj_lock(vdev);
-	qdf_mem_copy(macaddr,
-		     wlan_peer_get_macaddr(bsspeer), QDF_MAC_ADDR_SIZE);
-	wlan_vdev_obj_unlock(vdev);
-
-	tdls_debug("TDLS uapsd id %d, srvc %d, sus %d, dir %d psb %d delay %d",
-		   sta_id, srvc_int, sus_int, dir, psb, delay_interval);
-	for (i = 0; i < AC_PRIORITY_NUM; i++) {
-		tdls_uapsd_params.wmm_ac = ac[i];
-		tdls_uapsd_params.user_priority = tid[i];
-		tdls_uapsd_params.service_interval = srvc_int;
-		tdls_uapsd_params.delay_interval = delay_interval;
-		tdls_uapsd_params.suspend_interval = sus_int;
-
-		tdls_trig_params.vdevid = vdev_id;
-		tdls_trig_params.num_ac = 1;
-		tdls_trig_params.auto_triggerparam = &tdls_uapsd_params;
-
-		qdf_mem_copy(tdls_trig_params.peer_addr,
-			     macaddr, QDF_MAC_ADDR_SIZE);
-		status = tgt_tdls_set_uapsd(psoc, &tdls_trig_params);
-		if (QDF_IS_STATUS_ERROR(status)) {
-			tdls_err("Failed to set uapsd for vdev %d, status %d",
-				 vdev_id, status);
-		}
-	}
-
-	return QDF_STATUS_SUCCESS;
 }
 
 QDF_STATUS tdls_process_enable_link(struct tdls_oper_request *req)
@@ -1733,11 +1673,6 @@ QDF_STATUS tdls_process_enable_link(struct tdls_oper_request *req)
 		   TDLS_IS_BUFFER_STA_ENABLED(feature),
 		   soc_obj->tdls_configs.tdls_uapsd_mask);
 
-	if (TDLS_IS_BUFFER_STA_ENABLED(feature) ||
-	    soc_obj->tdls_configs.tdls_uapsd_mask)
-		tdls_update_uapsd(soc_obj->soc,
-				  vdev, peer->sta_id, 0, 0, BI_DIR, 1,
-				  soc_obj->tdls_configs.delayed_trig_framint);
 error:
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_TDLS_NB_ID);
 	qdf_mem_free(req);
@@ -1939,9 +1874,9 @@ QDF_STATUS tdls_process_remove_force_peer(struct tdls_oper_request *req)
 		status = QDF_STATUS_E_NULL_VALUE;
 		goto error;
 	}
-
-	tdls_set_peer_link_status(peer, TDLS_LINK_TEARING,
-				  TDLS_LINK_UNSPECIFIED);
+	if (peer->link_status == TDLS_LINK_CONNECTED)
+		tdls_set_peer_link_status(peer, TDLS_LINK_TEARING,
+					  TDLS_LINK_UNSPECIFIED);
 
 	if (soc_obj->tdls_dp_vdev_update)
 		soc_obj->tdls_dp_vdev_update(&soc_obj->soc,

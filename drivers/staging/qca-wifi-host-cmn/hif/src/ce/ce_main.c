@@ -2099,6 +2099,7 @@ QDF_STATUS hif_post_recv_buffers_for_pipe(struct HIF_CE_pipe_info *pipe_info)
 	struct hif_softc *scn = HIF_GET_SOFTC(pipe_info->HIF_CE_state);
 	QDF_STATUS status;
 	uint32_t bufs_posted = 0;
+	unsigned int ce_id;
 
 	buf_sz = pipe_info->buf_sz;
 	if (buf_sz == 0) {
@@ -2107,6 +2108,7 @@ QDF_STATUS hif_post_recv_buffers_for_pipe(struct HIF_CE_pipe_info *pipe_info)
 	}
 
 	ce_hdl = pipe_info->ce_hdl;
+	ce_id = ((struct CE_state *)ce_hdl)->id;
 
 	qdf_spin_lock_bh(&pipe_info->recv_bufs_needed_lock);
 	while (atomic_read(&pipe_info->recv_bufs_needed) > 0) {
@@ -2116,6 +2118,9 @@ QDF_STATUS hif_post_recv_buffers_for_pipe(struct HIF_CE_pipe_info *pipe_info)
 		atomic_dec(&pipe_info->recv_bufs_needed);
 		qdf_spin_unlock_bh(&pipe_info->recv_bufs_needed_lock);
 
+		hif_record_ce_desc_event(scn, ce_id,
+					 HIF_RX_DESC_PRE_NBUF_ALLOC, NULL, NULL,
+					 0, 0);
 		nbuf = qdf_nbuf_alloc(scn->qdf_dev, buf_sz, 0, 4, false);
 		if (!nbuf) {
 			hif_post_recv_buffers_failure(pipe_info, nbuf,
@@ -2125,6 +2130,9 @@ QDF_STATUS hif_post_recv_buffers_for_pipe(struct HIF_CE_pipe_info *pipe_info)
 			return QDF_STATUS_E_NOMEM;
 		}
 
+		hif_record_ce_desc_event(scn, ce_id,
+					 HIF_RX_DESC_PRE_NBUF_MAP, NULL, nbuf,
+					 0, 0);
 		/*
 		 * qdf_nbuf_peek_header(nbuf, &data, &unused);
 		 * CE_data = dma_map_single(dev, data, buf_sz, );
@@ -2143,7 +2151,9 @@ QDF_STATUS hif_post_recv_buffers_for_pipe(struct HIF_CE_pipe_info *pipe_info)
 		}
 
 		CE_data = qdf_nbuf_get_frag_paddr(nbuf, 0);
-
+		hif_record_ce_desc_event(scn, ce_id,
+					 HIF_RX_DESC_POST_NBUF_MAP, NULL, nbuf,
+					 0, 0);
 		qdf_mem_dma_sync_single_for_device(scn->qdf_dev, CE_data,
 					       buf_sz, DMA_FROM_DEVICE);
 		status = ce_recv_buf_enqueue(ce_hdl, (void *)nbuf, CE_data);
@@ -2655,16 +2665,21 @@ void hif_ce_prepare_config(struct hif_softc *scn)
 		scn->ce_count = QCA_6290_CE_COUNT;
 		break;
 	case TARGET_TYPE_ADRASTEA:
-		if (hif_is_attribute_set(scn, HIF_LOWDESC_CE_NO_PKTLOG_CFG))
+		if (hif_is_attribute_set(scn, HIF_LOWDESC_CE_NO_PKTLOG_CFG)) {
 			hif_state->host_ce_config =
 				host_lowdesc_ce_config_wlan_adrastea_nopktlog;
-		else
+			hif_state->target_ce_config =
+			       target_lowdesc_ce_config_wlan_adrastea_nopktlog;
+			hif_state->target_ce_config_sz =
+			sizeof(target_lowdesc_ce_config_wlan_adrastea_nopktlog);
+		} else {
 			hif_state->host_ce_config =
 				host_ce_config_wlan_adrastea;
-
-		hif_state->target_ce_config = target_ce_config_wlan_adrastea;
-		hif_state->target_ce_config_sz =
+			hif_state->target_ce_config =
+					target_ce_config_wlan_adrastea;
+			hif_state->target_ce_config_sz =
 					sizeof(target_ce_config_wlan_adrastea);
+		}
 		break;
 
 	}

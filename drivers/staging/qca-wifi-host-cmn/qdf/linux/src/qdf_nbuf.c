@@ -2680,6 +2680,8 @@ qdf_export_symbol(qdf_nbuf_alloc_debug);
 
 void qdf_nbuf_free_debug(qdf_nbuf_t nbuf, uint8_t *file, uint32_t line)
 {
+	qdf_nbuf_t ext_list;
+
 	if (qdf_unlikely(!nbuf))
 		return;
 
@@ -2690,6 +2692,17 @@ void qdf_nbuf_free_debug(qdf_nbuf_t nbuf, uint8_t *file, uint32_t line)
 	qdf_nbuf_panic_on_free_if_mapped(nbuf, file, line);
 	qdf_net_buf_debug_delete_node(nbuf);
 	qdf_nbuf_history_add(nbuf, file, line, QDF_NBUF_FREE);
+
+	/* Take care to delete the debug entries for frag_list */
+	ext_list = qdf_nbuf_get_ext_list(nbuf);
+	while (ext_list) {
+		if (qdf_nbuf_get_users(ext_list) == 1) {
+			qdf_nbuf_panic_on_free_if_mapped(ext_list, file, line);
+			qdf_net_buf_debug_delete_node(ext_list);
+		}
+
+		ext_list = qdf_nbuf_queue_next(ext_list);
+	}
 
 free_buf:
 	__qdf_nbuf_free(nbuf);
@@ -3967,6 +3980,8 @@ qdf_nbuf_update_radiotap_he_mu_other_flags(struct mon_rx_status *rx_status,
 }
 
 #define NORMALIZED_TO_NOISE_FLOOR (-96)
+#define IEEE80211_RADIOTAP_TX_STATUS 0
+#define IEEE80211_RADIOTAP_RETRY_COUNT 1
 
 /* This is the length for radiotap, combined length
  * (Mandatory part struct ieee80211_radiotap_header + RADIOTAP_HEADER_LEN)
@@ -3981,6 +3996,11 @@ qdf_nbuf_update_radiotap_he_mu_other_flags(struct mon_rx_status *rx_status,
 #define RADIOTAP_FIXED_HEADER_LEN 16
 #define RADIOTAP_HT_FLAGS_LEN 3
 #define RADIOTAP_AMPDU_STATUS_LEN 8
+/* This is Radio Tap Header Extension Length.
+ * 4 Bytes for Extended it_present bit map +
+ * 4 bytes padding for alignment
+ */
+#define RADIOTAP_HEADER_EXT_LEN (2 * sizeof(uint32_t))
 #define RADIOTAP_HEADER_LEN (sizeof(struct ieee80211_radiotap_header) + \
 				RADIOTAP_FIXED_HEADER_LEN + \
 				RADIOTAP_HT_FLAGS_LEN + \
@@ -3988,7 +4008,8 @@ qdf_nbuf_update_radiotap_he_mu_other_flags(struct mon_rx_status *rx_status,
 				RADIOTAP_AMPDU_STATUS_LEN + \
 				RADIOTAP_HE_FLAGS_LEN + \
 				RADIOTAP_HE_MU_FLAGS_LEN + \
-				RADIOTAP_HE_MU_OTHER_FLAGS_LEN)
+				RADIOTAP_HE_MU_OTHER_FLAGS_LEN + \
+				RADIOTAP_HEADER_EXT_LEN)
 
 #define IEEE80211_RADIOTAP_HE 23
 #define IEEE80211_RADIOTAP_HE_MU	24
@@ -4071,6 +4092,14 @@ unsigned int qdf_nbuf_update_radiotap(struct mon_rx_status *rx_status,
 	uint32_t rtap_hdr_len = sizeof(struct ieee80211_radiotap_header);
 	uint32_t rtap_len = rtap_hdr_len;
 	uint8_t length = rtap_len;
+	uint32_t *rtap_ext = NULL;
+
+	/* Adding Extended Header space */
+	if (rx_status->add_rtap_ext) {
+		rtap_hdr_len += RADIOTAP_HEADER_EXT_LEN;
+		rtap_len = rtap_hdr_len;
+	}
+	length = rtap_len;
 
 	/* IEEE80211_RADIOTAP_TSFT              __le64       microseconds*/
 	rthdr->it_present = cpu_to_le32(1 << IEEE80211_RADIOTAP_TSFT);
@@ -4225,6 +4254,20 @@ unsigned int qdf_nbuf_update_radiotap(struct mon_rx_status *rx_status,
 			qdf_print("length is greater than RADIOTAP_HE_MU_OTHER_FLAGS_LEN");
 			return 0;
 		}
+	}
+
+	/* Add Extension to Radiotap Header & corresponding data */
+	if (rx_status->add_rtap_ext) {
+		rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_EXT);
+		rtap_ext = (uint32_t *)&rthdr->it_present;
+		rtap_ext++;
+		*rtap_ext = cpu_to_le32(1 << IEEE80211_RADIOTAP_TX_STATUS);
+		*rtap_ext |= cpu_to_le32(1 << IEEE80211_RADIOTAP_RETRY_COUNT);
+
+		rtap_buf[rtap_len] = rx_status->tx_status;
+		rtap_len += 1;
+		rtap_buf[rtap_len] = rx_status->tx_retry_cnt;
+		rtap_len += 1;
 	}
 
 	rthdr->it_len = cpu_to_le16(rtap_len);

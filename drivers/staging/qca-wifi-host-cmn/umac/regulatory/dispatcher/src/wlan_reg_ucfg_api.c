@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -106,17 +106,16 @@ QDF_STATUS ucfg_reg_get_current_cc(struct wlan_objmgr_pdev *pdev,
 	return reg_get_current_cc(pdev, rd);
 }
 
-/**
- * ucfg_reg_set_band() - Sets the band information for the PDEV
- * @pdev: The physical pdev to set the band for
- * @band: The set band parameter to configure for the pysical device
- *
- * Return: QDF_STATUS
- */
 QDF_STATUS ucfg_reg_set_band(struct wlan_objmgr_pdev *pdev,
 			     enum band_info band)
 {
 	return reg_set_band(pdev, band);
+}
+
+QDF_STATUS ucfg_reg_get_band(struct wlan_objmgr_pdev *pdev,
+			     enum band_info *band)
+{
+	return reg_get_band(pdev, band);
 }
 
 /**
@@ -296,3 +295,8 @@ QDF_STATUS ucfg_reg_set_hal_reg_cap(struct wlan_objmgr_psoc *psoc,
 	return reg_set_hal_reg_cap(psoc, hal_reg_cap, phy_cnt);
 }
 qdf_export_symbol(ucfg_reg_set_hal_reg_cap);
+
+QDF_STATUS ucfg_set_ignore_fw_reg_offload_ind(struct wlan_objmgr_psoc *psoc)
+{
+	return reg_set_ignore_fw_reg_offload_ind(psoc);
+}

@@ -25,6 +25,9 @@
 #ifndef __REG_DB_H
 #define __REG_DB_H
 
+/* Alpha2 code for world reg domain */
+#define REG_WORLD_ALPHA2 "00"
+
 #define REGULATORY_CHAN_DISABLED     (1<<0)
 #define REGULATORY_CHAN_NO_IR        (1<<1)
 #define REGULATORY_CHAN_RADAR        (1<<3)
@@ -65,6 +68,19 @@ enum dfs_reg {
 	DFS_CN_REG = 4,
 	DFS_KR_REG = 5,
 	DFS_UNDEF_REG = 0xFFFF,
+};
+
+/** enum op_class_table_num
+ * OP_CLASS_US- Class corresponds to US
+ * OP_CLASS_EU- Class corresponds to EU
+ * OP_CLASS_JAPAN- Class corresponds to JAPAN
+ * OP_CLASS_GLOBAL- Class corresponds to GLOBAL
+ */
+enum op_class_table_num {
+	OP_CLASS_US = 1,
+	OP_CLASS_EU,
+	OP_CLASS_JAPAN,
+	OP_CLASS_GLOBAL
 };
 
 /**

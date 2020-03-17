@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -39,9 +39,18 @@ static bool tgt_if_regulatory_is_11d_offloaded(struct wlan_objmgr_psoc
 					       *psoc)
 {
 	wmi_unified_t wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	struct wlan_lmac_if_reg_rx_ops *reg_rx_ops;
+
+	reg_rx_ops = target_if_regulatory_get_rx_ops(psoc);
 
 	if (!wmi_handle)
 		return false;
+
+	if (reg_rx_ops->reg_ignore_fw_reg_offload_ind &&
+		reg_rx_ops->reg_ignore_fw_reg_offload_ind(psoc)) {
+		target_if_debug("Ignore fw reg 11d offload indication");
+		return 0;
+	}
 
 	return wmi_service_enabled(wmi_handle,
 				   wmi_service_11d_offload);
@@ -51,9 +60,18 @@ static bool tgt_if_regulatory_is_regdb_offloaded(struct wlan_objmgr_psoc
 						 *psoc)
 {
 	wmi_unified_t wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	struct wlan_lmac_if_reg_rx_ops *reg_rx_ops;
+
+	reg_rx_ops = target_if_regulatory_get_rx_ops(psoc);
 
 	if (!wmi_handle)
 		return false;
+
+	if (reg_rx_ops->reg_ignore_fw_reg_offload_ind &&
+	    reg_rx_ops->reg_ignore_fw_reg_offload_ind(psoc)) {
+		target_if_debug("User disabled regulatory offload from ini");
+		return 0;
+	}
 
 	return wmi_service_enabled(wmi_handle,
 				   wmi_service_regulatory_db);
@@ -71,7 +89,7 @@ static bool tgt_if_regulatory_is_there_serv_ready_extn(struct wlan_objmgr_psoc
 				   wmi_service_ext_msg);
 }
 
-static inline struct wlan_lmac_if_reg_rx_ops *
+struct wlan_lmac_if_reg_rx_ops *
 target_if_regulatory_get_rx_ops(struct wlan_objmgr_psoc *psoc)
 {
 	return &psoc->soc_cb.rx_ops.reg_rx_ops;
@@ -395,6 +413,29 @@ static QDF_STATUS tgt_if_regulatory_stop_11d_scan(
 						  reg_stop_11d_scan_req);
 }
 
+/**
+ * tgt_if_regulatory_send_ctl_info() - Sends CTL info to firmware
+ * @psoc: Pointer to psoc
+ * @params: Pointer to argument list
+ *
+ * Return: QDF_STATUS
+ */
+static QDF_STATUS
+tgt_if_regulatory_send_ctl_info(struct wlan_objmgr_psoc *psoc,
+				struct reg_ctl_params *params)
+{
+	wmi_unified_t wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+
+	if (!wmi_handle)
+		return QDF_STATUS_E_FAILURE;
+
+	return wmi_unified_send_regdomain_info_to_fw_cmd(wmi_handle,
+							 params->regd,
+							 params->regd_2g,
+							 params->regd_5g,
+							 params->ctl_2g,
+							 params->ctl_5g);
+}
 
 QDF_STATUS target_if_register_regulatory_tx_ops(struct wlan_lmac_if_tx_ops
 						*tx_ops)
@@ -434,6 +475,8 @@ QDF_STATUS target_if_register_regulatory_tx_ops(struct wlan_lmac_if_tx_ops
 
 	reg_ops->unregister_ch_avoid_event_handler =
 		tgt_if_regulatory_unregister_ch_avoid_event_handler;
+
+	reg_ops->send_ctl_info = tgt_if_regulatory_send_ctl_info;
 
 	return QDF_STATUS_SUCCESS;
 }
