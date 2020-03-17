@@ -56,6 +56,14 @@
 #define SW_AUDIOWIZARD_HIFI 		0x0d
 //Jessy ---
 
+//Jessy +++ AudioWizard muti-channel mode
+#define AUDIO_SET_AUDIOWIZARD_FORCE_CHANNEL	_IOWR(CAL_IOCTL_MAGIC, \
+							222, void *)
+#define SW_AUDIOWIZARD_CHANNELS_1 	0x03
+#define SW_AUDIOWIZARD_CHANNELS_2 		0x05
+#define SW_AUDIOWIZARD_CHANNELS_M 		0x08
+//Jessy ---
+
 /* ASUS_BSP +++ Audio mode and device */
 #define AUDIO_SET_MODE			_IOWR(CAL_IOCTL_MAGIC, \
 							225, void *)
@@ -146,6 +154,9 @@ enum {
 	ADM_LSM_AUDPROC_PERSISTENT_CAL_TYPE,
 //Jessy +++ AudioWizard hifi & ringtone mode
 	AUDIOWIZARD_FORCE_PRESET_TYPE,
+//Jessy ---
+//Jessy +++ AudioWizard muti-channel mode
+	AUDIOWIZARD_FORCE_CHANNEL_TYPE,
 //Jessy ---
 /* ASUS_BSP +++ Audio mode and device */
 	SET_MODE_TYPE,

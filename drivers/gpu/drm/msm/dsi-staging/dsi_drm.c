@@ -31,6 +31,7 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 
 extern int fts_ts_resume(void);
+bool dsi_on = false;
 
 static struct dsi_display_mode_priv_info default_priv_info = {
 	.panel_jitter_numer = DEFAULT_PANEL_JITTER_NUMERATOR,
@@ -155,8 +156,6 @@ static int dsi_bridge_attach(struct drm_bridge *bridge)
 
 }
 
-bool dsi_on = false;
-
 static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 {
 	int rc = 0;
@@ -213,7 +212,6 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	SDE_ATRACE_END("dsi_display_enable");
 
 	fts_ts_resume();
-
 	rc = dsi_display_splash_res_cleanup(c_bridge->display);
 	if (rc)
 		pr_err("Continuous splash pipeline cleanup failed, rc=%d\n",
@@ -977,28 +975,42 @@ int dsi_conn_post_kickoff(struct drm_connector *connector)
 }
 
 struct drm_bridge *bridge4pm;
-int display_early_init = 0;
 extern struct mutex dsi_op_mutex;
+int display_early_init = 0;
+bool display_on_trig_by_early = false;
 
-void dsi_suspend (void)
+void dsi_suspend(void)
 {
 	mutex_lock(&dsi_op_mutex);
 
-	dsi_bridge_disable(bridge4pm);
-	dsi_bridge_post_disable(bridge4pm);
+	/*
+	 * if display is trigger on by early on
+	 * when suspend called before the actual system has called
+	 * then we should turned off display here
+	 */
+	if (!display_on_trig_by_early)
+		goto exit;
+
+	display_on_trig_by_early = false;
 	display_early_init = 0;
 
+exit:
 	mutex_unlock(&dsi_op_mutex);
 }
 EXPORT_SYMBOL(dsi_suspend);
 
-void dsi_resume (void)
+void dsi_resume(void)
 {
 	mutex_lock(&dsi_op_mutex);
 
-	display_early_init = 1;
-	dsi_bridge_pre_enable(bridge4pm);
-	dsi_bridge_enable(bridge4pm);
+	/* last time is early init and not panel off yet */
+	if (!display_early_init && !dsi_on) {
+		/* mark display early on here, reset this flag by system calling */
+		display_on_trig_by_early = true;
+		display_early_init = 1;
+		dsi_bridge_pre_enable(bridge4pm);
+		dsi_bridge_enable(bridge4pm);
+	}
 
 	mutex_unlock(&dsi_op_mutex);
 }

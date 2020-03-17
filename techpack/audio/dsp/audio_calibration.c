@@ -29,6 +29,10 @@ struct input_dev *audiowizard;
 
 //Jessy ---
 
+//Jessy +++ AudioWizard muti-channel mode
+struct input_dev *audiowizard_channel;
+//Jessy ---
+
 /* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
 static struct kset *activeinputpid_uevent_kset;
 static struct kobject *activeinputpid_kobj;
@@ -40,7 +44,7 @@ static int audio_mode = -1;
 static int audmode = -1;
 static int rcv_device = -1;
 static int rcvdev = -1;
-bool fts_set_pmode(bool pmode);
+/* bool fts_set_pmode(bool pmode); */
 /* ASUS_BSP --- Audio mode and device */
 
 /* ASUS_BSP +++ Add uevent to IMS for Line audio_mode = 0 when Line VoIP incall */
@@ -79,6 +83,29 @@ static void send_audiowizard_state(struct input_dev *dev ,int audiowizard_state)
         input_report_switch(audiowizard,SW_AUDIOWIZARD_RINGTONG,0);
         input_report_switch(audiowizard,SW_AUDIOWIZARD_HIFI,0);
     }
+}
+//Jessy ---
+
+//Jessy +++ AudioWizard muti-channel mode
+static void send_audiowizard_channel(struct input_dev *dev ,int channel)
+{
+    if(channel == 1 ){
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_2,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_M,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_1,1);
+    } else if (channel == 2) {
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_1,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_M,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_2,1);    
+    } else if (channel > 2) {
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_1,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_2,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_M,1);
+    } else {
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_1,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_2,0);
+        input_report_switch(audiowizard_channel,SW_AUDIOWIZARD_CHANNELS_M,0);
+    }    
 }
 //Jessy ---
 
@@ -444,9 +471,11 @@ static void check_audio_and_set_pmode(void)
 {
 	if ((audio_mode == AUDIO_DRV_MODE_IN_CALL || audio_mode == AUDIO_DRV_MODE_IN_COMMUNICATION) &&
 			rcv_device == AUDIO_DRV_DEVICE_RECEIVER) {
-		fts_set_pmode(true);
+		/* fts_set_pmode(true); */
+		printk("fts_set_pmode to true\n");
 	} else {
-		fts_set_pmode(false);
+		/* fts_set_pmode(false); */
+		printk("fts_set_pmode to false\n");
 	}
 }
 
@@ -517,6 +546,8 @@ static long audio_cal_shared_ioctl(struct file *file, unsigned int cmd,
 	/* ASUS_BSP --- */
 	struct audio_cal_basic *data = NULL;
 
+        int audiowizard_force_channel = 2;//Jessy +++ AudioWizard muti-channel mode
+
 	pr_debug("%s\n", __func__);
 
 	switch (cmd) {
@@ -543,6 +574,21 @@ static long audio_cal_shared_ioctl(struct file *file, unsigned int cmd,
             goto done;
 //Jessy ---
 
+//Jessy +++ AudioWizard muti-channel mode
+        case AUDIO_SET_AUDIOWIZARD_FORCE_CHANNEL:
+            mutex_lock(&audio_cal.cal_mutex[AUDIOWIZARD_FORCE_CHANNEL_TYPE]);
+            if (copy_from_user(&audiowizard_force_channel, (void *)arg,
+                    sizeof(audiowizard_force_channel))) {
+                pr_err("%s: Could not copy audiowizard_channel from user\n", __func__);
+                ret = -EFAULT;
+            }
+            printk("audio_cal_shared_ioctl AUDIO_SET_AUDIOWIZARD_FORCE_CHANNEL audiowizard_force_channel:%d",audiowizard_force_channel);
+            send_audiowizard_channel(audiowizard_channel,audiowizard_force_channel);
+            input_sync(audiowizard_channel);
+            mutex_unlock(&audio_cal.cal_mutex[AUDIOWIZARD_FORCE_CHANNEL_TYPE]);
+            goto done;
+//Jessy ---
+
 	/* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
 	case AUDIO_SET_ACTIVEINPUT_PID:
 		mutex_lock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEINPUT_PID_TYPE]);
@@ -561,19 +607,23 @@ static long audio_cal_shared_ioctl(struct file *file, unsigned int cmd,
 	/* ASUS_BSP --- */
 
 	/* ASUS_BSP +++ Add uevent for receiver checking */
-        case AUDIO_SET_ACTIVEOUTPUT_PID:
+	case AUDIO_SET_ACTIVEOUTPUT_PID:
 		mutex_lock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEOUTPUT_PID_TYPE]);
 		if (copy_from_user(&active_outputpid, (void *)arg, sizeof(active_outputpid))) {
-                        pr_err("%s: Could not copy state from user\n", __func__);
-                        ret = -EFAULT;
-                }
-                printk("active_outputpid=%d\n", active_outputpid);
-		if (active_outputpid == 0) {
-			send_rcv_notification_uevent(0);	/* previous outputpid's track was removed */
+			pr_err("%s: Could not copy state from user\n", __func__);
+			ret = -EFAULT;
 		}
-                mutex_unlock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEOUTPUT_PID_TYPE]);
-                goto done;
-        /* ASUS_BSP --- */
+		printk("active_outputpid=%d\n", active_outputpid);
+		if (active_outputpid == 0) {
+			/* previous outputpid's track was removed */
+			send_rcv_notification_uevent(0);
+		} else {
+			/* outputpid's track is added */
+			send_rcv_notification_uevent(rcv_device);
+		}
+		mutex_unlock(&audio_cal.cal_mutex[AUDIO_SET_ACTIVEOUTPUT_PID_TYPE]);
+		goto done;
+	/* ASUS_BSP --- */
 
 	/* ASUS_BSP +++ Audio mode */
 	case AUDIO_SET_MODE:
@@ -756,6 +806,11 @@ static long audio_cal_ioctl(struct file *f,
 							221, compat_uptr_t)
 //Jessy ---
 
+//Jessy +++ AudioWizard muti-channel mode
+#define AUDIO_SET_AUDIOWIZARD_FORCE_CHANNEL32	_IOWR(CAL_IOCTL_MAGIC, \
+							222, compat_uptr_t)
+//Jessy ---
+
 /* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
 #define AUDIO_SET_ACTIVEINPUT_PID32 _IOWR(CAL_IOCTL_MAGIC, \
 							232,compat_uptr_t)
@@ -798,6 +853,12 @@ static long audio_cal_compat_ioctl(struct file *f,
 //Jessy +++ AudioWizard hifi & ringtone mode
 	case AUDIO_SET_AUDIOWIZARD_FORCE_PRESET32:
 		cmd64 = AUDIO_SET_AUDIOWIZARD_FORCE_PRESET;
+		break;
+//Jessy ---
+
+//Jessy +++ AudioWizard muti-channel mode
+	case AUDIO_SET_AUDIOWIZARD_FORCE_CHANNEL32:
+		cmd64 = AUDIO_SET_AUDIOWIZARD_FORCE_CHANNEL;
 		break;
 //Jessy ---
 
@@ -852,7 +913,7 @@ static void send_activeinput_pid_uevent(int activeinputpid, int failedinputpid)
 	if (activeinputpid_kobj) {
 		char uevent_buf1[512];
 		char uevent_buf2[512];
-		char *envp[] = { uevent_buf1, uevent_buf2, NULL }; 
+		char *envp[] = { uevent_buf1, uevent_buf2, NULL };
 		snprintf(uevent_buf1, sizeof(uevent_buf1), "ACTIVEINPUT_PID=%d", activeinputpid);
 		snprintf(uevent_buf2, sizeof(uevent_buf2), "FAILEDINPUT_PID=%d", failedinputpid);
 		kobject_uevent_env(activeinputpid_kobj, KOBJ_CHANGE, envp);
@@ -919,6 +980,19 @@ int __init audio_cal_init(void)
 		pr_err("%s: failed to register inputevent audiowizard\n", __func__);
 //Jessy ---
 
+//Jessy +++ AudioWizard muti-channel mode
+	audiowizard_channel= input_allocate_device();
+	if(!audiowizard_channel)
+		pr_err("%s: failed to allocate inputevent audiowizard_channel\n", __func__);
+	audiowizard_channel->name = "audiowizard_channel";
+	input_set_capability(audiowizard_channel,EV_SW,SW_AUDIOWIZARD_CHANNELS_1);
+	input_set_capability(audiowizard_channel,EV_SW,SW_AUDIOWIZARD_CHANNELS_2);
+    	input_set_capability(audiowizard_channel,EV_SW,SW_AUDIOWIZARD_CHANNELS_M);
+	ret = input_register_device(audiowizard_channel);
+	if (ret<0)
+		pr_err("%s: failed to register inputevent audiowizard_channel\n", __func__);
+//Jessy ---
+
 /* ASUS_BSP +++ Add warning uevent for input occupied issue ( TT1290090 ) */
 	activeinputpid_uevent_init();
 /* ASUS_BSP --- */
@@ -945,6 +1019,10 @@ void audio_cal_exit(void)
 
 //Jessy +++ AudioWizard hifi & ringtone mode
     input_free_device(audiowizard);
+//Jessy ---
+
+//Jessy +++ AudioWizard muti-channel mode
+    input_free_device(audiowizard_channel);
 //Jessy ---
 
 	for (; i < MAX_CAL_TYPES; i++) {

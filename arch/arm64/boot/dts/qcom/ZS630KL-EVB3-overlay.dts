@@ -48,20 +48,10 @@
                 pins = "gpio53";
          };
 };
+
 &qupv3_se1_i2c {
         status = "ok";
-        //vcnl36863@60 {
-        //        compatible = "capella,vcnl36863";
-        //        reg = <0x60>;
-        //        vcc_l7c_3p0-supply = <&pm8150l_l7>;
-        //        vcc_l8c_1p8-supply = <&pm8150l_l8>;
-        //        interrupt-parent = <&tlmm>;
-        //        interrupts = <119 8>;
-        //        capella,intrpin-gpios = <&tlmm 119 0x00>;
-        //        capella,slave_address = <0x60>;
-        //        capella,enable-gpios = <&tlmm 36 0x00>;
-        //};
-        vcnl36863@60 {
+                vcnl36863@60 {
 			compatible = "qcom,vcnl36863";
 			reg = <0x60>;
 			pinctrl-names = "alsps_gpio_high","alsps_gpio_low";
@@ -70,7 +60,9 @@
 			qcom,alsps-gpio = <&tlmm 119 0x0>;
 			qcom,alsps-enable-gpio = <&tlmm 36 0x0>;
 			vcc_psensor-supply = <&pm8150l_l7>;
+			vcc_alsps_i2c-supply = <&pm8150l_l8>;
 		};
+
         MSP430FR2311@48 {
 			compatible = "MCU,MSP430FR2311";
 			reg = <0x48>;
@@ -87,5 +79,5 @@
 			MCU,mcuwakeup-gpios = <&tlmm 10 0x00>;
 			MCU,slave_address = <0x48>;
         };
-};
 
+};

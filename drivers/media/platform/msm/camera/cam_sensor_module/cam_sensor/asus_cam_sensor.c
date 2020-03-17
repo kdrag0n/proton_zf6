@@ -7,7 +7,7 @@
 #include "cam_eeprom_dev.h"//EEPROM
 #include <linux/thermal.h>
 
-
+#pragma GCC diagnostic ignored "-Wgcc-compat"
 #undef	pr_fmt
 #define pr_fmt(fmt) "SENSOR-ATD %s(): " fmt, __func__
 
@@ -1077,7 +1077,7 @@ static void compareCameraSN()
 
 static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_id)
 {
-	int num, i;
+	int num;
 	char* load_file_name;
 	int wrong_data = 0;
 
@@ -1109,7 +1109,7 @@ static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_i
 
 	//check data: AWB 0x02~0x07 can't be Null or 0
 	if (num >= 8) {
-		for(i = 2; i < 8; i=i+2)
+		for(int i = 2; i < 8; i=i+2)
 		{
 			int32_t check_data = 0;
 			if (e_ctrl->cal_data.mapdata+i != NULL && e_ctrl->cal_data.mapdata+(i+1) != NULL)
@@ -1180,11 +1180,14 @@ static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_i
 		}
 		//ASUS_BSP +++ Combine dit cali data and EEPROM data into EEPROM_CTRL->mapdata
 		/*Copy pdaf cali data from eeprom*/
-		memcpy(e_ctrl->cal_data.mapdata + 0x116A, g_eeprom_info[0].mapdata + PDAF_CALI_START, PDAF_CALI_SIZE);
-		/*Read Remosaic for sm8150*/
+		if (g_eeprom_info[0].mapdata != NULL)
 		{
-			uint32_t cur_ptr = 0x116A + PDAF_CALI_SIZE;
-			memcpy(e_ctrl->cal_data.mapdata + cur_ptr, g_eeprom_info[0].mapdata + REMOSAIC_CALI_START, REMOSAIC_CALI_SIZE);
+			memcpy(e_ctrl->cal_data.mapdata + 0x116A, g_eeprom_info[0].mapdata + PDAF_CALI_START, PDAF_CALI_SIZE);
+			/*Read Remosaic for sm8150*/
+			{
+				uint32_t cur_ptr = 0x116A + PDAF_CALI_SIZE;
+				memcpy(e_ctrl->cal_data.mapdata + cur_ptr, g_eeprom_info[0].mapdata + REMOSAIC_CALI_START, REMOSAIC_CALI_SIZE);
+			}
 		}
 		//ASUS_BSP --- Combine dit cali data and EEPROM data into EEPROM_CTRL->mapdata
 

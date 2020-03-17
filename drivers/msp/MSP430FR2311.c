@@ -33,7 +33,6 @@
 #include <linux/regulator/consumer.h>
 //#include <asm/setup.h>
 #include <linux/jiffies.h>
-#include <linux/extcon.h>
 #include "MSP430FR2311.h"
 #define MSP430FR2311_I2C_NAME "msp430fr2311"
 
@@ -346,7 +345,7 @@ do {
 
 extern bool read_kernel_file(const char*, void (*)(char*, unsigned int) );
 
-void read_cali_file() {	
+void read_cali_file(void) {	
 	const char mcu_cali[]= {"/vendor/firmware/mcu_cali"};
 	read_kernel_file(mcu_cali,  process_cali_item);
 }
@@ -577,7 +576,7 @@ static int MSP43FR2311_Update_Firmware(void) {
 }
 
 
-int MSP430FR2311_Get_Steps() {
+int MSP430FR2311_Get_Steps(void) {
 	char getsteps[] = { 0xAA, 0x55, 0x10};
 	char steps[] = { 0, 0};
 //	int i=0;
@@ -623,6 +622,8 @@ int MSP430FR2311_Get_Version(char * version) {
 	return 0;
 }
 
+#define MCU_SHOW_INFO_IN_SETTING
+#ifdef MCU_SHOW_INFO_IN_SETTING
 #include "../power/supply/qcom/fg-core.h"
 #include "../power/supply/qcom/fg-reg.h"
 #include "../power/supply/qcom/fg-alg.h"
@@ -632,6 +633,22 @@ extern void asus_extcon_set_name(struct extcon_dev *edev, const char *name);
 struct extcon_dev *mcu_ver_extcon;
 char mcuVersion[13];
 
+void registerMCUVersion(void) {
+	int rc=0;
+	mcu_ver_extcon = extcon_dev_allocate(asus_fg_extcon_cable);
+	if (IS_ERR(mcu_ver_extcon)) {
+		rc = PTR_ERR(mcu_ver_extcon);
+		pr_err("[MCU] failed to allocate ASUS mcu_ver_extcon device rc=%d\n", rc);
+	}
+	asus_extcon_set_fnode_name(mcu_ver_extcon, "mcu");
+	rc = extcon_dev_register(mcu_ver_extcon);
+	if (rc < 0) {
+		pr_err("[MCU] failed to register ASUS mcu_ver_extcon device rc=%d\n", rc);
+	}
+	sprintf(mcuVersion, "%d%02d%02d%02X",  gFWVersion[0],gFWVersion[1],gFWVersion[2],gFWVersion[3]);
+	asus_extcon_set_name(mcu_ver_extcon, mcuVersion);
+}
+#endif
 
 int MSP430FR2311_Check_Version(void) {
 	memset(gFWVersion, 0x0, sizeof(gFWVersion));
@@ -676,7 +693,10 @@ int MSP430FR2311_Check_Version(void) {
 			g_motor_status = 1; //probe success
 
 			read_cali_file();
-			
+
+#ifdef MCU_SHOW_INFO_IN_SETTING
+			registerMCUVersion();
+#endif			
 		} else {
 			pr_err("[MCU] Firmware need to be updated\n"); 
 		}
@@ -712,7 +732,7 @@ void mcu_loop_test(void) {
 	msleep(delay);
 }
 
-int MSP430FR2311_Pulldown_Drv_Power() {
+int MSP430FR2311_Pulldown_Drv_Power(void) {
 	char MSP430PullDownDrvMode[]={0xAA, 0x55, 0x0E, 0x00};
 	if (MCUState<MCU_READY) {
 		pr_err("[MCU] Not ready!, state=%d", MCUState);
@@ -727,7 +747,7 @@ int MSP430FR2311_Pulldown_Drv_Power() {
 }
 
 
-void mcu_do_later_power_down() {
+void mcu_do_later_power_down(void) {
 
 	mutex_lock(&MSP430FR2311_control_mutex);
 	if (iCloseCounter!=0) {
@@ -1530,12 +1550,21 @@ static int MSP430FR2311_parse_dt(struct device *dev)
 }
 #endif
 
+extern bool g_Charger_mode;
+
 static int MSP430FR2311_probe(struct i2c_client *client,
 	const struct i2c_device_id *id)
 {
 	int ret = 0;
 
 pr_err("Randy MCU probe\n");
+
+	if (g_Charger_mode == 1) {
+		pr_err("Randy MCU probe, in charging mode, skip MCU probe\n");
+		
+			return -EBUSY;
+		}
+
 
 	mcu_info = kzalloc(sizeof(struct MSP430FR2311_info), GFP_KERNEL);
 	if (!mcu_info)

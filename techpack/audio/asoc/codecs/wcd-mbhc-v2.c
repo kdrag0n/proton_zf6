@@ -9,7 +9,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -34,11 +33,6 @@
 #include "wcd-mbhc-legacy.h"
 #include "wcd-mbhc-adc.h"
 #include "wcd-mbhc-v2-api.h"
-
-/* ASUS_BSP +++ Fix TT1282832:headset hook key sometimes can't play or pause music (system suspend) */
-#include <linux/ktime.h>
-static struct wakeup_source hook_key_wake_lock;
-/* ASUS_BSP --- */
 
 void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
 			  struct snd_soc_jack *jack, int status, int mask)
@@ -665,7 +659,6 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 						SND_JACK_LINEOUT |
 						SND_JACK_ANC_HEADPHONE |
 						SND_JACK_UNSUPPORTED);
-			mbhc->force_linein = false;
 		}
 
 		if (mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET &&
@@ -721,6 +714,25 @@ void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
 				}
 				pr_debug("%s: Marking jack type as SND_JACK_LINEOUT\n",
 				__func__);
+			}
+		}
+
+		/* Do not calculate impedance again for lineout
+		 * as during playback pa is on and impedance values
+		 * will not be correct resulting in lineout detected
+		 * as headphone.
+		 */
+		if ((is_pa_on) && mbhc->force_linein == true) {
+			jack_type = SND_JACK_LINEOUT;
+			mbhc->current_plug = MBHC_PLUG_TYPE_HIGH_HPH;
+			if (mbhc->hph_status) {
+				mbhc->hph_status &= ~(SND_JACK_HEADSET |
+						SND_JACK_LINEOUT |
+						SND_JACK_UNSUPPORTED);
+				wcd_mbhc_jack_report(mbhc,
+						&mbhc->headset_jack,
+						mbhc->hph_status,
+						WCD_MBHC_JACK_MASK);
 			}
 		}
 
@@ -1047,6 +1059,10 @@ static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
 	struct wcd_mbhc *mbhc = data;
 
 	pr_debug("%s: enter\n", __func__);
+	if (mbhc == NULL) {
+		pr_err("%s: NULL irq data\n", __func__);
+		return IRQ_NONE;
+	}
 	if (unlikely((mbhc->mbhc_cb->lock_sleep(mbhc, true)) == false)) {
 		pr_warn("%s: failed to hold suspend\n", __func__);
 		r = IRQ_NONE;
@@ -1169,13 +1185,8 @@ static irqreturn_t wcd_mbhc_btn_press_handler(int irq, void *data)
 		goto done;
 	}
 	mask = wcd_mbhc_get_button_mask(mbhc);
-	if (mask == SND_JACK_BTN_0)	{
-		/* ASUS_BSP +++ Fix TT1282832:headset hook key sometimes can't play or pause music (system suspend) */
-		__pm_wakeup_event(&hook_key_wake_lock, 3000);
-		pr_err("%s:after Wakelock 3 sec for hook_key \n",__func__);
-		/* ASUS_BSP --- */
+	if (mask == SND_JACK_BTN_0)
 		mbhc->btn_press_intr = true;
-	}
 
 	if (mbhc->current_plug != MBHC_PLUG_TYPE_HEADSET) {
 		pr_debug("%s: Plug isn't headset, ignore button press\n",
@@ -1615,8 +1626,6 @@ int wcd_mbhc_start(struct wcd_mbhc *mbhc, struct wcd_mbhc_config *mbhc_cfg)
 		dev_dbg(card->dev,
 			"%s: skipping USB c analog configuration\n", __func__);
 	}
-	/* ASUS_BSP +++ Fix TT1282832:headset hook key sometimes can't play or pause music (system suspend) */
-	wakeup_source_init(&hook_key_wake_lock, "hook_key_lock");
 
 	/* Parse fsa switch handle */
 	if (mbhc_cfg->enable_usbc_analog) {

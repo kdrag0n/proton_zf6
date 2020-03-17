@@ -87,7 +87,11 @@ struct dsi_display *g_display;
 static struct mutex asus_lcd_tcon_cmd_mutex;
 struct mutex dsi_op_mutex;
 char asus_lcd_reg_buffer[4095];
+
 char asus_lcd_cabc_mode[2] = {0x55, 0};
+int  asus_lcd_cabc_user_req_mode = 0;
+bool asus_lcd_cabc_locked_off = false;
+
 int asus_lcd_dimming_on = 1; //default resume with dimming
 int asus_lcd_dimming_conf = 4;
 bool asus_lcd_procfs_registered = false;
@@ -4869,8 +4873,10 @@ error_disable_clks:
 
 void asus_lcd_cabc_set(int mode)
 {
-	asus_lcd_cabc_mode[1] = mode;
-	asus_lcd_set_tcon_cmd(asus_lcd_cabc_mode, ARRAY_SIZE(asus_lcd_cabc_mode));
+	if (!asus_lcd_cabc_locked_off && asus_lcd_cabc_mode[1] != mode) {
+		asus_lcd_cabc_mode[1] = mode;
+		asus_lcd_set_tcon_cmd(asus_lcd_cabc_mode, ARRAY_SIZE(asus_lcd_cabc_mode));
+	}
 }
 EXPORT_SYMBOL(asus_lcd_cabc_set);
 
@@ -4879,6 +4885,30 @@ int asus_lcd_cabc_get(void)
 	return asus_lcd_cabc_mode[1];
 }
 EXPORT_SYMBOL(asus_lcd_cabc_get);
+
+/*
+ * Lock the cabc state and turn cabc off
+ */
+void asus_lcd_cabc_off_locking(void)
+{
+	if (!asus_lcd_cabc_locked_off) {
+		asus_lcd_cabc_set(0);
+		asus_lcd_cabc_locked_off = true;
+	}
+}
+EXPORT_SYMBOL(asus_lcd_cabc_off_locking);
+
+/*
+ * Restore user wanted cabc state after unlock
+ */
+void asus_lcd_cabc_restore(void)
+{
+	if (asus_lcd_cabc_locked_off) {
+		asus_lcd_cabc_locked_off = false;
+		asus_lcd_cabc_set(asus_lcd_cabc_user_req_mode);
+	}
+}
+EXPORT_SYMBOL(asus_lcd_cabc_restore);
 
 static ssize_t asus_lcd_cabc_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
@@ -4901,6 +4931,10 @@ static ssize_t asus_lcd_cabc_proc_write(struct file *filp, const char *buff, siz
 		mode = 0x2;
 	else if(strncmp(messages, "3", 1) == 0) //moving
 		mode = 0x3;
+
+	// record user wanted cabc mode if kerenl need to restore correct mode
+	// after manually turned it off, this variable is always the right mode
+	asus_lcd_cabc_user_req_mode = mode;
 
 	asus_lcd_cabc_set(mode);
 

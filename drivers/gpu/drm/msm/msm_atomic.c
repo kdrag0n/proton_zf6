@@ -28,6 +28,7 @@
 #define MULTIPLE_CONN_DETECTED(x) (x > 1)
 
 extern int asus_lcd_bridge_enable;
+extern bool asus_igc_need_commit;  //depends on #if ASUS_KERNEL_IGC_TABLE
 int asus_lcd_crtc_id = -1;
 extern int display_early_init;
 
@@ -276,6 +277,7 @@ msm_disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 		if (connector->state->crtc) {
 			if (connector->state->crtc->index == asus_lcd_crtc_id) {
 				asus_lcd_bridge_enable = 0;
+				asus_igc_need_commit = true;
 			}
 		}
 		drm_bridge_disable(encoder->bridge);

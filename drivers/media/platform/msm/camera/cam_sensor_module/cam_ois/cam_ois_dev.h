@@ -111,7 +111,6 @@ struct cam_ois_intf_params {
  *
  */
 struct cam_ois_ctrl_t {
-	char device_name[CAM_CTX_DEV_NAME_MAX_LENGTH];
 	struct platform_device *pdev;
 	struct mutex ois_mutex;
 	struct cam_hw_soc_info soc_info;
@@ -125,6 +124,7 @@ struct cam_ois_ctrl_t {
 	struct i2c_settings_array i2c_mode_data;
 	enum msm_camera_device_type_t ois_device_type;
 	enum cam_ois_state cam_ois_state;
+	char device_name[20];
 	char ois_name[32];
 	uint8_t ois_fw_flag;
 	uint8_t is_ois_calib;

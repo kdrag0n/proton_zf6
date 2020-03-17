@@ -2856,13 +2856,11 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 
 //Jessy +++
 	if (((topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_SPK) ||
-                (topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP && channel_mode == 2) ||
-                (topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP_HIIMP && channel_mode == 2) 
+		(topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP && channel_mode == 2) ||
+		(topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_HP_HIIMP && channel_mode == 2)
 		) && perf_mode == LEGACY_PCM_MODE  && path == ADM_PATH_PLAYBACK){
-                bit_width = 24;
-                pr_err("%s: Force open adm in 24-bit for topology 0x%x\n",
-                        __func__, topology);
-        }
+		bit_width = 24;
+	}
 //Jessy ---
 
 	port_id = q6audio_convert_virtual_to_portid(port_id);
@@ -2913,14 +2911,19 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 	}
 
 	if ((topology == VPM_TX_SM_ECNS_V2_COPP_TOPOLOGY) ||
-	    (topology == VPM_TX_DM_FLUENCE_COPP_TOPOLOGY) ||
-	    (topology == VPM_TX_DM_RFECNS_COPP_TOPOLOGY)||
 	    (topology == VPM_TX_DM_FLUENCE_EF_COPP_TOPOLOGY)) {
 		if ((rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_8K) &&
 		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_16K) &&
 		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_32K) &&
 		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_48K))
-		rate = 16000;
+			rate = 16000;
+	}
+	if ((topology == VPM_TX_DM_FLUENCE_COPP_TOPOLOGY) ||
+	    (topology == VPM_TX_DM_RFECNS_COPP_TOPOLOGY)) {
+		if ((rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_8K) &&
+		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_16K) &&
+		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_32K))
+			rate = 16000;
 	}
 
 	if (topology == FFECNS_TOPOLOGY) {

@@ -884,12 +884,14 @@ extern int HALLsensor_platform_unregister(void);
  * @ALSPS_INT_PS_CLOSE : [1:0] (0,1)
  * @ALSPS_INT_PS_AWAY : [1:0] (1,0)
  * @ALSPS_INT_ALS : [2] (1)
+ * @ALSPS_INT_PS_POCKET : [3] (1)
  */
 #define ALSPS_INT_PS_CLOSE 				(1)
 #define ALSPS_INT_PS_AWAY     			(2) 
 #define ALSPS_INT_PS_MASK				(3<< 0)
 #define ALSPS_INT_ALS           				(4)
 #define ALSPS_INT_ALS_MASK				(1<< 2)
+#define ALSPS_INT_PS_POCKET		     		(8)
 
 /**
  * psensor_hw - the i2c control functions for proximity sensor.

@@ -168,7 +168,6 @@ struct cam_eeprom_intf_params {
  *
  */
 struct cam_eeprom_ctrl_t {
-	char device_name[CAM_CTX_DEV_NAME_MAX_LENGTH];
 	struct platform_device *pdev;
 	struct spi_device *spi;
 	struct mutex eeprom_mutex;
@@ -183,6 +182,7 @@ struct cam_eeprom_ctrl_t {
 	enum cam_eeprom_state cam_eeprom_state;
 	bool userspace_probe;
 	struct cam_eeprom_memory_block_t cal_data;
+	char device_name[20];
 };
 
 int32_t cam_eeprom_update_i2c_info(struct cam_eeprom_ctrl_t *e_ctrl,

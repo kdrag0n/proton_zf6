@@ -44,11 +44,17 @@
 #define DEFAULT_PANEL_PREFILL_LINES	25
 #define TICKS_IN_MICRO_SECOND		1000000
 
+//TODO: fix this
+extern int mipi_dsi_dcs_set_display_cabc(struct mipi_dsi_device *dsi);
+extern int mipi_dsi_dcs_set_display_dimming(struct mipi_dsi_device *dsi);
 extern int fts_ts_suspend(void);
 extern int fts_power_source_ctrl_global(int enable);
+extern bool fts_gesture_check(void);
 extern void asus_lcd_dim_conf_apply(void);
 extern void asus_wled_fsc_validate(void);
 extern int g_msm_drv_shutdown_in_progress;
+extern void asus_lcd_cabc_off_locking(void);
+extern void asus_lcd_cabc_restore(void);
 
 extern char asus_lcd_cabc_mode[2];
 extern int asus_lcd_dimming_on;
@@ -62,6 +68,7 @@ enum dsi_dsc_ratio_type {
 
 int lastBL = 1023;
 int asus_lcd_bridge_enable = 0;
+int asus_lcd_regulator_status = 1;
 
 static u32 dsi_dsc_rc_buf_thresh[] = {0x0e, 0x1c, 0x2a, 0x38, 0x46, 0x54,
 		0x62, 0x69, 0x70, 0x77, 0x79, 0x7b, 0x7d, 0x7e};
@@ -115,12 +122,10 @@ static char dsi_dsc_rc_range_bpg_offset[] = {2, 0, 0, -2, -4, -6, -8, -8,
 
 bool bl_off_to_wait_on = false;
 
-bool fts_gesture_check(void);
-
 // ASUS_BSP: low backlight controller switch
 #define WLED_MAX_LEVEL_ENABLE           4095
 #define WLED_MIN_LEVEL_DISABLE          0
-#define LCD_BL_THRESHOLD_BOE            80
+#define LCD_BL_THRESHOLD_BOE            160
 static bool g_bl_full_dcs = false;
 static int g_last_bl = 0x0;
 static int g_bl_threshold = LCD_BL_THRESHOLD_BOE;
@@ -469,7 +474,16 @@ static int dsi_panel_power_on(struct dsi_panel *panel)
 			pr_err("[%s] failed to enable vregs, rc=%d\n", panel->name, rc);
 			goto exit;
 		}
- 	}
+
+		asus_lcd_regulator_status = 1;
+ 	} else if (asus_lcd_regulator_status == 0) {
+		rc = dsi_pwr_enable_regulator(&panel->power_info, true);
+		if (rc) {
+			pr_err("[%s] failed to enable vregs, rc=%d\n", panel->name, rc);
+			goto exit;
+		}
+		asus_lcd_regulator_status = 1;
+	}
 
 	rc = dsi_panel_set_pinctrl_state(panel, true);
 	if (rc) {
@@ -531,6 +545,7 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 		rc = dsi_pwr_enable_regulator(&panel->power_info, false);
 		if (rc)
 			pr_err("[%s] failed to enable vregs, rc=%d\n", panel->name, rc);
+		asus_lcd_regulator_status = 0;
 	}
 
 	return rc;
@@ -722,6 +737,12 @@ void dsi_panel_set_backlight_asus_logic(struct dsi_panel *panel, u32 bl_level)
 		}
 		g_bl_full_dcs = true;
 	}
+
+	if (bl_level <= g_bl_threshold) {
+		asus_lcd_cabc_off_locking();
+	} else {
+		asus_lcd_cabc_restore();
+	}
 }
 
 static int dsi_panel_update_pwm_backlight(struct dsi_panel *panel,
@@ -788,8 +809,7 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 
 	switch (bl->type) {
 	case DSI_BACKLIGHT_WLED:
-		rc = backlight_device_set_brightness(bl->raw_bd, bl_lvl);
-		break;
+		backlight_device_set_brightness(bl->raw_bd, bl_lvl);
 	case DSI_BACKLIGHT_DCS:
 		//rc = dsi_panel_update_backlight(panel, bl_lvl);
 		dsi_panel_set_backlight_asus_logic(panel, bl_lvl);

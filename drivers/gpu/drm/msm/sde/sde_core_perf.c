@@ -481,6 +481,12 @@ static u64 _sde_core_perf_get_core_clk_rate(struct sde_kms *kms)
 
 			clk_rate = max(tmp_rate, clk_rate);
 
+			/*
+			 * increase MDP clock rate to prevent underrun
+			 * the actual clock rate will be rounded later
+			 */
+			clk_rate = clk_rate * 172 / 100;
+
 			clk_rate = clk_round_rate(kms->perf.core_clk, clk_rate);
 		}
 	}

@@ -11,6 +11,7 @@
  * GNU General Public License for more details.
  */
 
+
 &soc {
 	led_flash_rear: qcom,camera-flash@0 {
 		cell-index = <0>;
@@ -127,20 +128,6 @@
 		status = "ok";
 	};
 
-	ois_rear: qcom,ois@0 {
-		cell-index = <0>;
-		cci-master = <0>;
-		reg = <0x0>;
-		compatible = "qcom,ois";
-		cam_v_custom1-supply = <&pm8150_l13>;
-		regulator-names = "cam_v_custom1";
-		rgltr-cntrl-support;
-		rgltr-min-voltage = <2704000>;
-		rgltr-max-voltage = <2704000>;
-		rgltr-load-current = <0>;
-		status = "ok";
-	};
-
         //ASUS_BSP Byron porting ST Laser +++
 	tof0: qcom,tof@0{
 		cell-index = <0>;
@@ -157,24 +144,6 @@
 		//xsdn-gpio = <10>;
 	};
         //ASUS_BSP Byron porting ST Laser ---
-
-        /* icm206xx +++++ */
-        icm206xx: qcom,icm206xx@0 {
-                cell-index = <0>;
-                reg = <0x68>;
-                compatible = "invn,icm20690";
-                cci-master = <1>;
-                cci-device = <0>;
-                icm206xx-supply = <&pm8150l_l7>;
-                cci-supply = <&pm8150l_l1>;
-                pinctrl-names = "cam_default", "cam_suspend";
-                pinctrl-0 = <&cam_icm_active>;
-                pinctrl-1 = <&cam_icm_suspend>;
-                invn,gpio-int = <&tlmm 131 1>;
-                invn,use-interrupt;
-                invn,place = "Landscape Left Back Side";
-        };
-        /* icm206xx ----- */
 
 	eeprom_rear0: qcom,eeprom@10 {
 		cell-index = <0>;
@@ -231,7 +200,23 @@
 		rgltr-load-current = <300000>;
 		status = "ok";
 	};
-
+        /* icm206xx +++++ */
+        icm206xx: qcom,icm206xx@0 {
+                cell-index = <0>;
+                reg = <0x68>;
+                compatible = "invn,icm20690";
+                cci-master = <1>;
+                cci-device = <0>;
+                icm206xx-supply = <&pm8150l_l7>;
+                cci-supply = <&pm8150l_l1>;
+                pinctrl-names = "cam_default", "cam_suspend";
+                pinctrl-0 = <&cam_icm_active>;
+                pinctrl-1 = <&cam_icm_suspend>;
+                invn,gpio-int = <&tlmm 131 1>;
+                invn,use-interrupt;
+                invn,place = "Landscape Left Back Side";
+        };
+        /* icm206xx ----- */
 	qcom,cam-sensor@0 {
 		cell-index = <0>;
 		compatible = "qcom,cam-sensor";

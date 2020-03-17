@@ -106,7 +106,7 @@
 #ifdef CAMERA_CCI
 #define ICM_SENSOR_NAME "icm20690"
 
-struct cam_subdev *g_icm_v4l2_dev_str = NULL;
+static struct cam_subdev *g_icm_v4l2_dev_str = NULL;
 
 struct icm_ctrl_t {
     struct platform_device *pdev;
@@ -678,66 +678,14 @@ static void icm_remap_gyro_data(struct axis_data *data, int place)
 	data->ry = tmp[remap->src_y] * remap->sign_y;
 	data->rz = tmp[remap->src_z] * remap->sign_z;
 }
- struct axis_data Gyro_record_data;
- struct axis_data G_record_data;
-bool Gyro_debug_log_f = 0;
-bool G_debug_log_f = 0;
- /*ASUS BSP: workaround for input device driver, which will ignore value that isn't changed and causing sensor HAL report wrong data*/
-static void workaroundForInputDeviceDriver(struct icm_sensor *sensor, int sensor_type)
-{
-	static struct axis_data pre_data;
-	switch (sensor_type) {
-	case 0:
-		if(G_debug_log_f == 1){
-			icm_dbgmsg("G x=%d, y=%d, z=%d\n", sensor->axis.x, sensor->axis.y, sensor->axis.z);
-			G_debug_log_f = 0;
-		}
-		if (pre_data.x == sensor->axis.x || pre_data.y == sensor->axis.y || pre_data.z == sensor->axis.z) {
-			//if (pre_data.x != sensor->axis.x || pre_data.y != sensor->axis.y || pre_data.z != sensor->axis.z) {
-				input_report_abs(sensor->accel_dev, ABS_X, -40000);
-				input_report_abs(sensor->accel_dev, ABS_Y, -40000);
-				input_report_abs(sensor->accel_dev, ABS_Z, -40000);
-				input_sync(sensor->accel_dev);
-			//}
-		}
-		pre_data.x = sensor->axis.x;
-		pre_data.y = sensor->axis.y;
-		pre_data.z = sensor->axis.z;
-		G_record_data.x = sensor->axis.x;
-		G_record_data.y = sensor->axis.y;
-		G_record_data.z = sensor->axis.z;
-		break;
-	case 1:
-		if(Gyro_debug_log_f == 1){
-			icm_dbgmsg("Gyro x=%d, y=%d, z=%d\n", sensor->axis.rx, sensor->axis.ry, sensor->axis.rz);
-			Gyro_debug_log_f = 0;
-		}
-		if (pre_data.rx == sensor->axis.rx || pre_data.ry == sensor->axis.ry || pre_data.rz == sensor->axis.rz) {
-			//if (pre_data.rx != sensor->axis.rx || pre_data.ry != sensor->axis.ry || pre_data.rz != sensor->axis.rz) {
-				input_report_abs(sensor->gyro_dev, ABS_RX, -40000);
-				input_report_abs(sensor->gyro_dev, ABS_RY, -40000);
-				input_report_abs(sensor->gyro_dev, ABS_RZ, -40000);
-				input_sync(sensor->gyro_dev);
-			//}
-		}
-		pre_data.rx = sensor->axis.rx;
-		pre_data.ry = sensor->axis.ry;
-		pre_data.rz = sensor->axis.rz;
-		
-		Gyro_record_data.rx = sensor->axis.rx;
-		Gyro_record_data.ry = sensor->axis.ry;
-		Gyro_record_data.rz = sensor->axis.rz;
-		break;
-	default:
-		break;
-	}
-}
-bool g_skip_first_data = false;
-bool gyro_data_ready = true;
-u64 gyro_last_enable_time_ns = 0;
+static bool Gyro_debug_log_f = 0;
+static bool G_debug_log_f = 0;
+static bool g_skip_first_data = false;
+static bool gyro_data_ready = true;
+static u64 gyro_last_enable_time_ns = 0;
 /*ASUS BSP: this function check if waiting enough time (80ms) since gyro sensor enabled
 			there is a counter used to prevent data always not ready*/
-bool icm_is_gyro_data_ready()
+bool icm_is_gyro_data_ready(void)
 {
 	struct timespec ts;
 	static int l_counter = 0;
@@ -768,7 +716,8 @@ bool icm_is_gyro_data_ready()
  * sensor HAL, FIFO overflow and motion detection interrupt should be
  * handle by separate function.
  */
-static int icm_read_single_event(struct icm_sensor *sensor)
+static struct timespec g_timestamp;
+static int icm_read_single_event(struct icm_sensor *sensor, struct timespec timestamp1)
 {
 	int ret = 0;
 	u32 shift;
@@ -780,7 +729,10 @@ static int icm_read_single_event(struct icm_sensor *sensor)
 		}
 		/*ASUS_BSP: skip first accelerometer data since it's wrong*/
 		if (!g_skip_first_data) {
-			workaroundForInputDeviceDriver(sensor, 0);
+			if (G_debug_log_f == 1){
+				icm_dbgmsg("G x=%d, y=%d, z=%d\n", sensor->axis.x, sensor->axis.y, sensor->axis.z);
+				G_debug_log_f = 0;
+			}
 			shift = icm_accel_fs_shift[sensor->cfg.accel_fs];
 			input_report_abs(sensor->accel_dev, ABS_X,
 				(sensor->axis.x << shift));
@@ -788,6 +740,10 @@ static int icm_read_single_event(struct icm_sensor *sensor)
 				(sensor->axis.y << shift));
 			input_report_abs(sensor->accel_dev, ABS_Z,
 				(sensor->axis.z << shift));
+			input_report_abs(sensor->accel_dev, ABS_WHEEL,
+				timestamp1.tv_sec);
+			input_report_abs(sensor->accel_dev, ABS_GAS,
+				timestamp1.tv_nsec);
 			input_sync(sensor->accel_dev);
 		} else{
 			g_skip_first_data = false;
@@ -803,7 +759,10 @@ static int icm_read_single_event(struct icm_sensor *sensor)
 		icm_remap_gyro_data(&sensor->axis,
 			sensor->pdata->place);
 		if (icm_is_gyro_data_ready()) {
-			workaroundForInputDeviceDriver(sensor, 1);
+			if (Gyro_debug_log_f == 1){
+				icm_dbgmsg("Gyro x=%d, y=%d, z=%d\n", sensor->axis.rx, sensor->axis.ry, sensor->axis.rz);
+				Gyro_debug_log_f = 0;
+			}
 			shift = icm_gyro_fs_shift[sensor->cfg.fsr];
 			input_report_abs(sensor->gyro_dev, ABS_RX,
 				(sensor->axis.rx >> shift));
@@ -811,6 +770,10 @@ static int icm_read_single_event(struct icm_sensor *sensor)
 				(sensor->axis.ry >> shift));
 			input_report_abs(sensor->gyro_dev, ABS_RZ,
 				(sensor->axis.rz >> shift));
+			input_report_abs(sensor->gyro_dev, ABS_WHEEL,
+				timestamp1.tv_sec);
+			input_report_abs(sensor->gyro_dev, ABS_GAS,
+				timestamp1.tv_nsec);
 			input_sync(sensor->gyro_dev);
 		}
 	}
@@ -822,6 +785,7 @@ void data_retry_wq(struct work_struct *work)
 {
 	int ret = 0;
 	int l_gpio_value = 0;
+	struct timespec l_timestamp;
 	struct icm_sensor *sensor = NULL;
 	if (!g_icm_ctrl) {
 		icm_errmsg("null icm ctrl!\n");
@@ -841,7 +805,8 @@ void data_retry_wq(struct work_struct *work)
 			=> sensor has disabled
 	*/
 	if (l_gpio_value && g_next_retry_time_ms && sensor->power_enabled) {
-		ret = icm_read_single_event(sensor);
+		l_timestamp = ktime_to_timespec(ktime_get_boottime());
+		ret = icm_read_single_event(sensor, l_timestamp);
 	}
 	if (!l_gpio_value || !g_next_retry_time_ms || !sensor->power_enabled || !ret) {
 		icm_dbgmsg("stop retry work with l_gpio_value = %d, retry_time_ms = %lu, power_enabled = %d, ret = %d\n",
@@ -874,6 +839,11 @@ static u64 g_irq_counter = 0;
  * Called by the kernel single threaded after an interrupt occurs. Read
  * the sensor data and generate an input event for it.
  */
+static irqreturn_t icm_interrupt_routine(int irq, void *data)
+{
+	g_timestamp = ktime_to_timespec(ktime_get_boottime());
+	return IRQ_WAKE_THREAD;
+}
 static irqreturn_t icm_interrupt_thread(int irq, void *data)
 {
 	int ret = 0;
@@ -886,7 +856,7 @@ static irqreturn_t icm_interrupt_thread(int irq, void *data)
 		icm_errmsg("power_enabled = false, just exit\n");
 		goto exit;
 	}
-	ret = icm_read_single_event(sensor);
+	ret = icm_read_single_event(sensor, g_timestamp);
 	if (ret) {
 		icm_errmsg("data read failed, start retry work!\n");
 		g_next_retry_time_ms = 100;
@@ -1593,8 +1563,7 @@ static int icm_gyro_set_enable(struct icm_sensor *sensor, bool enable)
 	if(enable==1){
 		Gyro_debug_log_f = 1;
 	}else if (enable == 0){
-		Gyro_debug_log_f = 0;
-		icm_dbgmsg("Gyro x=%d, y=%d, z=%d\n", Gyro_record_data.rx, Gyro_record_data.ry, Gyro_record_data.rz);
+		icm_dbgmsg("Gyro x=%d, y=%d, z=%d\n", sensor->axis.rx, sensor->axis.ry, sensor->axis.rz);
 	}
 	if ((enable && l_count == 0) || (!enable && l_count == 1)) {
 		if (g_icm_ctrl && enable) {
@@ -2412,8 +2381,7 @@ static int icm_accel_set_enable(struct icm_sensor *sensor, bool enable)
 	if(enable==1){
 		G_debug_log_f = 1;
 	}else if (enable == 0){
-		G_debug_log_f = 0;
-		icm_dbgmsg("G x=%d, y=%d, z=%d\n", G_record_data.rx, G_record_data.ry, G_record_data.rz);
+		icm_dbgmsg("G x=%d, y=%d, z=%d\n", sensor->axis.x, sensor->axis.y, sensor->axis.z);
 	}
 	if ((enable && l_count == 0) || (!enable && l_count == 1)) {
 		if (g_icm_ctrl && enable) {
@@ -3658,7 +3626,7 @@ static int icm_platform_probe(struct platform_device *pdev)
 		sensor->irq = gpio_to_irq(sensor->pdata->gpio_int);
 
 		ret = request_threaded_irq(sensor->irq,
-				     NULL, icm_interrupt_thread,
+				     icm_interrupt_routine, icm_interrupt_thread,
 				     sensor->pdata->int_flags | IRQF_ONESHOT,
 				     "icm", sensor);
 		disable_irq(sensor->irq);

@@ -215,7 +215,7 @@
  * define your own fw_file, the sample one to be replaced is invalid
  * NOTE: if FTS_GET_VENDOR_ID_NUM > 1, it's the fw corresponding with FTS_VENDOR_ID
  */
-#define FTS_UPGRADE_FW_FILE                      "include/firmware/ASUS_KIRIN_8719_04_VER0x61_I2C_20190511_app.i"
+#define FTS_UPGRADE_FW_FILE                      "include/firmware/ASUS_KIRIN_8719_04_VER0x63_I2C_20190829_app.i"
 
 /*
  * if FTS_GET_VENDOR_ID_NUM >= 2, fw corrsponding with FTS_VENDOR_ID2

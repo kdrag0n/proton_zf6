@@ -19,14 +19,14 @@
 #include "asus_cam_sensor.h" //ASUS_BSP Zhengwei "porting sensor ATD"
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
-
-
 static int g_cam0_power_up = 0;
 static int g_cam2_power_up = 0;
 int cam_sensor_is_power_up()
 {
 	return g_cam0_power_up | g_cam2_power_up;
 }
+
+
 static void cam_sensor_update_req_mgr(
 	struct cam_sensor_ctrl_t *s_ctrl,
 	struct cam_packet *csl_packet)
@@ -103,7 +103,6 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	struct cam_cmd_buf_desc *cmd_desc = NULL;
 	struct i2c_settings_array *i2c_reg_settings = NULL;
 	size_t len_of_buff = 0;
-	size_t remain_len = 0;
 	uint32_t *offset = NULL;
 	struct cam_config_dev_cmd config;
 	struct i2c_data_settings *i2c_data = NULL;
@@ -125,31 +124,18 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 		&generic_ptr,
 		&len_of_buff);
 	if (rc < 0) {
-		CAM_ERR(CAM_SENSOR, "Failed in getting the packet: %d", rc);
+		CAM_ERR(CAM_SENSOR, "Failed in getting the buffer: %d", rc);
 		return rc;
 	}
 
-	remain_len = len_of_buff;
-	if ((sizeof(struct cam_packet) > len_of_buff) ||
-		((size_t)config.offset >= len_of_buff -
-		sizeof(struct cam_packet))) {
-		CAM_ERR(CAM_SENSOR,
-			"Inval cam_packet strut size: %zu, len_of_buff: %zu",
-			 sizeof(struct cam_packet), len_of_buff);
-		rc = -EINVAL;
-		goto rel_pkt_buf;
-	}
-
-	remain_len -= (size_t)config.offset;
 	csl_packet = (struct cam_packet *)(generic_ptr +
 		(uint32_t)config.offset);
-
-	if (cam_packet_util_validate_packet(csl_packet,
-		remain_len)) {
-		CAM_ERR(CAM_SENSOR, "Invalid packet params");
+	if (config.offset > len_of_buff) {
+		CAM_ERR(CAM_SENSOR,
+			"offset is out of bounds: off: %lld len: %zu",
+			 config.offset, len_of_buff);
 		rc = -EINVAL;
 		goto rel_pkt_buf;
-
 	}
 
 	if ((csl_packet->header.op_code & 0xFFFFFF) !=
@@ -390,7 +376,7 @@ int32_t cam_sensor_update_slave_info(struct cam_cmd_probe *probe_info,
 
 int32_t cam_handle_cmd_buffers_for_probe(void *cmd_buf,
 	struct cam_sensor_ctrl_t *s_ctrl,
-	int32_t cmd_buf_num, uint32_t cmd_buf_length, size_t remain_len)
+	int32_t cmd_buf_num, int cmd_buf_length)
 {
 	int32_t rc = 0;
 
@@ -399,13 +385,6 @@ int32_t cam_handle_cmd_buffers_for_probe(void *cmd_buf,
 		struct cam_cmd_i2c_info *i2c_info = NULL;
 		struct cam_cmd_probe *probe_info;
 
-		if (remain_len <
-			(sizeof(struct cam_cmd_i2c_info) +
-			sizeof(struct cam_cmd_probe))) {
-			CAM_ERR(CAM_SENSOR,
-				"not enough buffer for cam_cmd_i2c_info");
-			return -EINVAL;
-		}
 		i2c_info = (struct cam_cmd_i2c_info *)cmd_buf;
 		rc = cam_sensor_update_i2c_info(i2c_info, s_ctrl);
 		if (rc < 0) {
@@ -424,8 +403,7 @@ int32_t cam_handle_cmd_buffers_for_probe(void *cmd_buf,
 		break;
 	case 1: {
 		rc = cam_sensor_update_power_settings(cmd_buf,
-			cmd_buf_length, &s_ctrl->sensordata->power_info,
-			remain_len);
+			cmd_buf_length, &s_ctrl->sensordata->power_info);
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed in updating power settings");
@@ -446,11 +424,10 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 	uint32_t *cmd_buf;
 	void *ptr;
 	size_t len;
-	struct cam_packet *pkt = NULL;
-	struct cam_cmd_buf_desc *cmd_desc = NULL;
+	struct cam_packet *pkt;
+	struct cam_cmd_buf_desc *cmd_desc;
 	uintptr_t cmd_buf1 = 0;
 	uintptr_t packet = 0;
-	size_t    remain_len = 0;
 
 	rc = cam_mem_get_cpu_buf(handle,
 		&packet, &len);
@@ -458,21 +435,7 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 		CAM_ERR(CAM_SENSOR, "Failed to get the command Buffer");
 		return -EINVAL;
 	}
-
 	pkt = (struct cam_packet *)packet;
-	if (pkt == NULL) {
-		CAM_ERR(CAM_SENSOR, "packet pos is invalid");
-		rc = -EINVAL;
-		goto rel_pkt_buf;
-	}
-
-	if ((len < sizeof(struct cam_packet)) ||
-		(pkt->cmd_buf_offset >= (len - sizeof(struct cam_packet)))) {
-		CAM_ERR(CAM_SENSOR, "Not enough buf provided");
-		rc = -EINVAL;
-		goto rel_pkt_buf;
-	}
-
 	cmd_desc = (struct cam_cmd_buf_desc *)
 		((uint32_t *)&pkt->payload + pkt->cmd_buf_offset/4);
 	if (cmd_desc == NULL) {
@@ -497,25 +460,12 @@ int32_t cam_handle_mem_ptr(uint64_t handle, struct cam_sensor_ctrl_t *s_ctrl)
 				"Failed to parse the command Buffer Header");
 			goto rel_pkt_buf;
 		}
-		if (cmd_desc[i].offset >= len) {
-			CAM_ERR(CAM_SENSOR,
-				"offset past length of buffer");
-			rc = -EINVAL;
-			goto rel_pkt_buf;
-		}
-		remain_len = len - cmd_desc[i].offset;
-		if (cmd_desc[i].length > remain_len) {
-			CAM_ERR(CAM_SENSOR,
-				"Not enough buffer provided for cmd");
-			rc = -EINVAL;
-			goto rel_pkt_buf;
-		}
 		cmd_buf = (uint32_t *)cmd_buf1;
 		cmd_buf += cmd_desc[i].offset/4;
 		ptr = (void *) cmd_buf;
 
 		rc = cam_handle_cmd_buffers_for_probe(ptr, s_ctrl,
-			i, cmd_desc[i].length, remain_len);
+			i, cmd_desc[i].length);
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed to parse the command Buffer Header");
@@ -563,6 +513,8 @@ void cam_sensor_query_cap(struct cam_sensor_ctrl_t *s_ctrl,
 		s_ctrl->sensordata->subdev_id[SUB_MODULE_LED_FLASH];
 	query_cap->ois_slot_id =
 		s_ctrl->sensordata->subdev_id[SUB_MODULE_OIS];
+	query_cap->ir_led_slot_id =
+		s_ctrl->sensordata->subdev_id[SUB_MODULE_IR_LED];
 	query_cap->slot_info =
 		s_ctrl->soc_info.index;
 }
@@ -955,13 +907,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
 				CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG);
-
-			s_ctrl->i2c_data.init_settings.request_id = -1;
-
 			if (rc < 0) {
 				CAM_ERR(CAM_SENSOR,
 					"cannot apply init settings");
-				delete_request(&s_ctrl->i2c_data.init_settings);
 				goto release_mutex;
 			}
 			rc = delete_request(&s_ctrl->i2c_data.init_settings);
@@ -970,20 +918,16 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 					"Fail in deleting the Init settings");
 				goto release_mutex;
 			}
+			s_ctrl->i2c_data.init_settings.request_id = -1;
 		}
 
 		if (s_ctrl->i2c_data.config_settings.is_settings_valid &&
 			(s_ctrl->i2c_data.config_settings.request_id == 0)) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
 				CAM_SENSOR_PACKET_OPCODE_SENSOR_CONFIG);
-
-			s_ctrl->i2c_data.config_settings.request_id = -1;
-
 			if (rc < 0) {
 				CAM_ERR(CAM_SENSOR,
 					"cannot apply config settings");
-				delete_request(
-					&s_ctrl->i2c_data.config_settings);
 				goto release_mutex;
 			}
 			rc = delete_request(&s_ctrl->i2c_data.config_settings);
@@ -993,6 +937,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				goto release_mutex;
 			}
 			s_ctrl->sensor_state = CAM_SENSOR_CONFIG;
+			s_ctrl->i2c_data.config_settings.request_id = -1;
 		}
 	}
 		break;
