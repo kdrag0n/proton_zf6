@@ -116,52 +116,6 @@
 #define ACS_WEIGHT_SOFTAP_TX_POWER_THROUGHPUT_CFG(weights) \
 	(((weights) & 0xf00000) >> 20)
 
-#ifdef FEATURE_WLAN_CH_AVOID
-sapSafeChannelType safe_channels[NUM_CHANNELS] = {
-	{1, true},
-	{2, true},
-	{3, true},
-	{4, true},
-	{5, true},
-	{6, true},
-	{7, true},
-	{8, true},
-	{9, true},
-	{10, true},
-	{11, true},
-	{12, true},
-	{13, true},
-	{14, true},
-	{36, true},
-	{40, true},
-	{44, true},
-	{48, true},
-	{52, true},
-	{56, true},
-	{60, true},
-	{64, true},
-	{100, true},
-	{104, true},
-	{108, true},
-	{112, true},
-	{116, true},
-	{120, true},
-	{124, true},
-	{128, true},
-	{132, true},
-	{136, true},
-	{140, true},
-	{144, true},
-	{149, true},
-	{153, true},
-	{157, true},
-	{161, true},
-	{165, true},
-	{169, true},
-	{173, true},
-};
-#endif
-
 typedef struct {
 	uint16_t chStartNum;
 	uint32_t weight;
@@ -390,88 +344,6 @@ static void sap_process_avoid_ie(tHalHandle hal,
 }
 #endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
 
-#ifdef FEATURE_WLAN_CH_AVOID
-/*==========================================================================
-   FUNCTION    sap_update_unsafe_channel_list
-
-   DESCRIPTION
-    Function  Undate unsafe channel list table
-
-   DEPENDENCIES
-    NA.
-
-   IN
-    SapContext pointer
-
-   RETURN VALUE
-    NULL
-   ============================================================================*/
-void sap_update_unsafe_channel_list(tHalHandle hal, struct sap_context *sap_ctx)
-{
-	uint16_t i, j;
-	uint16_t unsafe_channel_list[NUM_CHANNELS];
-	uint16_t unsafe_channel_count = 0;
-	tpAniSirGlobal mac_ctx = NULL;
-
-	qdf_device_t qdf_ctx = cds_get_context(QDF_MODULE_ID_QDF_DEVICE);
-
-	if (!qdf_ctx) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_FATAL,
-			  "qdf_ctx is NULL");
-		return;
-	}
-	mac_ctx = PMAC_STRUCT(hal);
-
-	/* Flush, default set all channel safe */
-	for (i = 0; i < NUM_CHANNELS; i++) {
-		safe_channels[i].isSafe = true;
-	}
-
-	/* Try to find unsafe channel */
-#if defined(FEATURE_WLAN_STA_AP_MODE_DFS_DISABLE)
-	for (i = 0; i < NUM_CHANNELS; i++) {
-		if (sap_ctx->dfs_ch_disable == true) {
-			if (wlan_reg_is_dfs_ch(mac_ctx->pdev,
-					safe_channels[i].channelNumber)) {
-				safe_channels[i].isSafe = false;
-				QDF_TRACE(QDF_MODULE_ID_SAP,
-					QDF_TRACE_LEVEL_INFO_HIGH,
-					"%s: DFS Ch %d is not safe in"
-					" Concurrent mode",
-					__func__,
-					safe_channels[i].channelNumber);
-			}
-		}
-	}
-#endif
-	pld_get_wlan_unsafe_channel(qdf_ctx->dev,
-				    unsafe_channel_list,
-				     &unsafe_channel_count,
-				     sizeof(unsafe_channel_list));
-
-	unsafe_channel_count = QDF_MIN(unsafe_channel_count,
-				       (uint16_t)NUM_CHANNELS);
-
-	for (i = 0; i < unsafe_channel_count; i++) {
-		for (j = 0; j < NUM_CHANNELS; j++) {
-			if (safe_channels[j].channelNumber ==
-			    unsafe_channel_list[i]) {
-				/* Found unsafe channel, update it */
-				safe_channels[j].isSafe = false;
-				QDF_TRACE(QDF_MODULE_ID_SAP,
-					  QDF_TRACE_LEVEL_ERROR,
-					  FL("CH %d is not safe"),
-					  unsafe_channel_list[i]);
-				break;
-			}
-		}
-	}
-
-	return;
-}
-
-#endif /* FEATURE_WLAN_CH_AVOID */
-
 /**
  * sap_channel_in_acs_channel_list() - check if channel in acs channel list
  * @channel_num: channel to check
@@ -489,13 +361,14 @@ uint8_t sap_channel_in_acs_channel_list(uint8_t channel_num,
 {
 	uint8_t i = 0;
 
-	if ((NULL == sap_ctx->acs_cfg->ch_list) ||
+	if ((NULL == sap_ctx->acs_cfg->master_ch_list) ||
 	    (NULL == spect_info_params))
 		return channel_num;
 
 	if (channel_num > 0 && channel_num <= 252) {
-		for (i = 0; i < sap_ctx->acs_cfg->ch_list_count; i++) {
-			if ((sap_ctx->acs_cfg->ch_list[i]) == channel_num)
+		for (i = 0; i < sap_ctx->acs_cfg->master_ch_list_count; i++) {
+			if ((sap_ctx->acs_cfg->master_ch_list[i]) ==
+								channel_num)
 				return channel_num;
 		}
 		return SAP_CHANNEL_NOT_SELECTED;
@@ -589,17 +462,11 @@ static bool sap_chan_sel_init(tHalHandle halHandle,
 	uint16_t channelnum = 0;
 	tpAniSirGlobal pMac = PMAC_STRUCT(halHandle);
 	bool chSafe = true;
-#ifdef FEATURE_WLAN_CH_AVOID
-	uint16_t i;
-#endif
 	uint32_t dfs_master_cap_enabled;
 	bool include_dfs_ch = true;
 	uint8_t chan_num;
 	bool sta_sap_scc_on_dfs_chan =
 		policy_mgr_is_sta_sap_scc_allowed_on_dfs_chan(pMac->psoc);
-
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH, "In %s",
-		  __func__);
 
 	pSpectInfoParams->numSpectChans =
 		pMac->scan.base_channels.numChannels;
@@ -668,19 +535,8 @@ static bool sap_chan_sel_init(tHalHandle halHandle,
 			}
 		}
 
-#ifdef FEATURE_WLAN_CH_AVOID
-		for (i = 0; i < NUM_CHANNELS; i++) {
-			if ((safe_channels[i].channelNumber == *pChans) &&
-			    (false == safe_channels[i].isSafe)) {
-				QDF_TRACE(QDF_MODULE_ID_SAP,
-					  QDF_TRACE_LEVEL_INFO_HIGH,
-					  "In %s, Ch %d is not safe", __func__,
-					  *pChans);
-				chSafe = false;
-				break;
-			}
-		}
-#endif /* FEATURE_WLAN_CH_AVOID */
+		if (!policy_mgr_is_safe_channel(pMac->psoc, *pChans))
+			chSafe = false;
 
 		/* OFDM rates are not supported on channel 14 */
 		if (*pChans == 14 &&
@@ -773,8 +629,8 @@ uint32_t sapweight_rssi_count(struct sap_context *sap_ctx, int8_t rssi,
 	rssicountWeight = rssiWeight + countWeight;
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "In %s, rssiWeight=%d, countWeight=%d, rssicountWeight=%d",
-		  __func__, rssiWeight, countWeight, rssicountWeight);
+		  "rssiWeight=%d, countWeight=%d, rssicountWeight=%d",
+		  rssiWeight, countWeight, rssicountWeight);
 
 	return rssicountWeight;
 }
@@ -826,12 +682,8 @@ static uint32_t sap_weight_channel_noise_floor(struct sap_context *sap_ctx,
 	    ACS_WEIGHT_CFG_TO_LOCAL(sap_ctx->auto_channel_select_weight,
 				    softap_nf_weight_cfg);
 
-	if (channel_stat == NULL || channel_stat->channelfreq == 0) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
-			  "In %s, sanity check failed return max weight",
-			  __func__);
+	if (channel_stat == NULL || channel_stat->channelfreq == 0)
 		return softap_nf_weight_local;
-	}
 
 	noise_floor_weight = (channel_stat->noise_floor == 0) ? 0 :
 			    (ACS_WEIGHT_COMPUTE(
@@ -847,8 +699,8 @@ static uint32_t sap_weight_channel_noise_floor(struct sap_context *sap_ctx,
 		noise_floor_weight = 0;
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "In %s, nf=%d, nfwc=%d, nfwl=%d, nfw=%d",
-		  __func__, channel_stat->noise_floor,
+		  "nf=%d, nfwc=%d, nfwl=%d, nfw=%d",
+		  channel_stat->noise_floor,
 		  softap_nf_weight_cfg, softap_nf_weight_local,
 		  noise_floor_weight);
 
@@ -880,12 +732,8 @@ static uint32_t sap_weight_channel_free(struct sap_context *sap_ctx,
 	    ACS_WEIGHT_CFG_TO_LOCAL(sap_ctx->auto_channel_select_weight,
 				    softap_channel_free_weight_cfg);
 
-	if (channel_stat == NULL || channel_stat->channelfreq == 0) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
-			  "In %s, sanity check failed return max weight",
-			  __func__);
+	if (channel_stat == NULL || channel_stat->channelfreq == 0)
 		return softap_channel_free_weight_local;
-	}
 
 	rx_clear_count = channel_stat->rx_clear_count -
 			channel_stat->tx_frame_count -
@@ -907,8 +755,8 @@ static uint32_t sap_weight_channel_free(struct sap_context *sap_ctx,
 		channel_free_weight = softap_channel_free_weight_local;
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "In %s, rcc=%d, cc=%d, tc=%d, rc=%d, cfwc=%d, cfwl=%d, cfw=%d",
-		  __func__, rx_clear_count, cycle_count,
+		  "rcc=%d, cc=%d, tc=%d, rc=%d, cfwc=%d, cfwl=%d, cfw=%d",
+		  rx_clear_count, cycle_count,
 		 channel_stat->tx_frame_count,
 		 channel_stat->rx_frame_count,
 		  softap_channel_free_weight_cfg,
@@ -941,12 +789,8 @@ static uint32_t sap_weight_channel_txpwr_range(struct sap_context *sap_ctx,
 	    ACS_WEIGHT_CFG_TO_LOCAL(sap_ctx->auto_channel_select_weight,
 				    softap_txpwr_range_weight_cfg);
 
-	if (channel_stat == NULL || channel_stat->channelfreq == 0) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
-			  "In %s, sanity check failed return max weight",
-			  __func__);
+	if (channel_stat == NULL || channel_stat->channelfreq == 0)
 		return softap_txpwr_range_weight_local;
-	}
 
 	txpwr_weight_low_speed = (channel_stat->chan_tx_pwr_range == 0) ? 0 :
 				(ACS_WEIGHT_COMPUTE(
@@ -960,8 +804,8 @@ static uint32_t sap_weight_channel_txpwr_range(struct sap_context *sap_ctx,
 		txpwr_weight_low_speed = softap_txpwr_range_weight_local;
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "In %s, tpr=%d, tprwc=%d, tprwl=%d, tprw=%d",
-		  __func__, channel_stat->chan_tx_pwr_range,
+		  "tpr=%d, tprwc=%d, tprwl=%d, tprw=%d",
+		  channel_stat->chan_tx_pwr_range,
 		  softap_txpwr_range_weight_cfg,
 		  softap_txpwr_range_weight_local,
 		  txpwr_weight_low_speed);
@@ -993,12 +837,8 @@ static uint32_t sap_weight_channel_txpwr_tput(struct sap_context *sap_ctx,
 	    ACS_WEIGHT_CFG_TO_LOCAL(sap_ctx->auto_channel_select_weight,
 				    softap_txpwr_tput_weight_cfg);
 
-	if (channel_stat == NULL || channel_stat->channelfreq == 0) {
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
-			  "In %s, sanity check failed return max weight",
-			  __func__);
+	if (channel_stat == NULL || channel_stat->channelfreq == 0)
 		return softap_txpwr_tput_weight_local;
-	}
 
 	txpwr_weight_high_speed = (channel_stat->chan_tx_pwr_throughput == 0)
 				  ? 0 : (ACS_WEIGHT_COMPUTE(
@@ -1012,8 +852,8 @@ static uint32_t sap_weight_channel_txpwr_tput(struct sap_context *sap_ctx,
 		txpwr_weight_high_speed = softap_txpwr_tput_weight_local;
 
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "In %s, tpt=%d, tptwc=%d, tptwl=%d, tptw=%d",
-		  __func__, channel_stat->chan_tx_pwr_throughput,
+		  "tpt=%d, tptwc=%d, tptwl=%d, tptw=%d",
+		  channel_stat->chan_tx_pwr_throughput,
 		  softap_txpwr_tput_weight_cfg,
 		  softap_txpwr_tput_weight_local,
 		  txpwr_weight_high_speed);
@@ -2551,105 +2391,6 @@ static bool sap_is_ch_non_overlap(struct sap_context *sap_ctx, uint16_t ch)
 	return false;
 }
 
-#ifdef FEATURE_WLAN_CH_AVOID
-/**
- * sap_select_channel_no_scan_result() - select SAP channel when no scan results
- * are available.
- * @sap_ctx: Sap context
- *
- * Returns: channel number if success, 0 otherwise
- */
-static uint8_t sap_select_channel_no_scan_result(tHalHandle hal,
-						 struct sap_context *sap_ctx)
-{
-	enum channel_state ch_type;
-	uint8_t i, first_safe_ch_in_range = SAP_CHANNEL_NOT_SELECTED;
-	uint32_t dfs_master_cap_enabled;
-	uint32_t start_ch_num = sap_ctx->acs_cfg->start_ch;
-	uint32_t end_ch_num = sap_ctx->acs_cfg->end_ch;
-	tpAniSirGlobal mac_ctx = NULL;
-
-	mac_ctx = PMAC_STRUCT(hal);
-
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  FL("start - end: %d - %d"), start_ch_num, end_ch_num);
-
-	sme_cfg_get_int(hal, WNI_CFG_DFS_MASTER_ENABLED,
-				&dfs_master_cap_enabled);
-
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		"%s: dfs_master %x", __func__, dfs_master_cap_enabled);
-
-	/* get a channel in PCL and within the range */
-	for (i = 0; i < sap_ctx->acs_cfg->pcl_ch_count; i++) {
-		if ((sap_ctx->acs_cfg->pcl_channels[i] < start_ch_num) ||
-		    (sap_ctx->acs_cfg->pcl_channels[i] > end_ch_num))
-			continue;
-
-		first_safe_ch_in_range = sap_ctx->acs_cfg->pcl_channels[i];
-		break;
-	}
-
-	if (SAP_CHANNEL_NOT_SELECTED != first_safe_ch_in_range)
-		return first_safe_ch_in_range;
-
-	for (i = 0; i < NUM_CHANNELS; i++) {
-		if ((safe_channels[i].channelNumber < start_ch_num) ||
-		    (safe_channels[i].channelNumber > end_ch_num))
-			continue;
-
-		ch_type = wlan_reg_get_channel_state(mac_ctx->pdev,
-				safe_channels[i].channelNumber);
-
-		if ((ch_type == CHANNEL_STATE_DISABLE) ||
-			(ch_type == CHANNEL_STATE_INVALID))
-			continue;
-		if ((!dfs_master_cap_enabled) &&
-			(CHANNEL_STATE_DFS == ch_type)) {
-			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-				"%s: DFS master mode disabled. Skip DFS channel %d",
-				__func__, safe_channels[i].channelNumber);
-			continue;
-		}
-		if ((sap_ctx->dfs_mode == ACS_DFS_MODE_DISABLE) &&
-		    (CHANNEL_STATE_DFS == ch_type))
-			continue;
-
-		if (safe_channels[i].isSafe == true) {
-			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-				FL("channel %d in the configuration is safe"),
-				safe_channels[i].channelNumber);
-			first_safe_ch_in_range = safe_channels[i].channelNumber;
-			break;
-		}
-
-		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-			FL("channel %d in the configuration is unsafe"),
-			safe_channels[i].channelNumber);
-	}
-
-	/* if no channel selected return SAP_CHANNEL_NOT_SELECTED */
-	return first_safe_ch_in_range;
-}
-#else
-static uint8_t sap_select_channel_no_scan_result(tHalHandle hal,
-						 struct sap_context *sap_ctx)
-{
-	uint32_t start_ch_num = sap_ctx->acs_cfg->start_ch;
-
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  FL("start - end: %d - %d"),
-		  start_ch_num,
-		  sap_ctx->acs_cfg->end_ch);
-
-	sap_ctx->acs_cfg->pri_ch = start_ch_num;
-	sap_ctx->acs_cfg->ht_sec_ch = 0;
-
-	/* pick the first channel in configured range */
-	return start_ch_num;
-}
-#endif /* FEATURE_WLAN_CH_AVOID */
-
 /**
  * sap_select_channel() - select SAP channel
  * @hal: Pointer to HAL handle
@@ -2678,12 +2419,6 @@ uint8_t sap_select_channel(tHalHandle hal, struct sap_context *sap_ctx,
 	tpAniSirGlobal mac_ctx;
 
 	mac_ctx = PMAC_STRUCT(hal);
-	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
-		  "In %s, Running SAP Ch Select", __func__);
-
-#ifdef FEATURE_WLAN_CH_AVOID
-	sap_update_unsafe_channel_list(hal, sap_ctx);
-#endif
 
 	/*
 	 * If ACS weight is not enabled on noise_floor/channel_free/tx_power,
@@ -2697,7 +2432,7 @@ uint8_t sap_select_channel(tHalHandle hal, struct sap_context *sap_ctx,
 #ifndef SOFTAP_CHANNEL_RANGE
 		return SAP_CHANNEL_NOT_SELECTED;
 #else
-		return sap_select_channel_no_scan_result(hal, sap_ctx);
+		return sap_select_default_oper_chan(sap_ctx->acs_cfg);
 #endif
 	}
 

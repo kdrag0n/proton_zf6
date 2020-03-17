@@ -2306,6 +2306,8 @@ static void ol_txrx_pdev_pre_detach(struct cdp_pdev *ppdev, int force)
 	OL_RX_REORDER_TRACE_DETACH(pdev);
 	OL_RX_PN_TRACE_DETACH(pdev);
 
+	htt_pktlogmod_exit(pdev);
+
 	/*
 	 * WDI event detach
 	 */
@@ -2346,8 +2348,6 @@ static void ol_txrx_pdev_detach(struct cdp_pdev *ppdev, int force)
 			   "NULL pdev passed to %s\n", __func__);
 		return;
 	}
-
-	htt_pktlogmod_exit(pdev);
 
 	qdf_spin_lock_bh(&pdev->req_list_spinlock);
 	if (pdev->req_list_depth > 0)
@@ -3866,9 +3866,8 @@ int ol_txrx_peer_release_ref(ol_txrx_peer_handle peer,
 				  debug_id,
 				  qdf_atomic_read(&peer->access_list[debug_id]),
 				  peer, rc,
-				  qdf_atomic_read(&peer->fw_create_pending)
-									== 1 ?
-				  "(No Maps received)" : "");
+				  qdf_atomic_read(&peer->fw_create_pending) ==
+				  1 ? "(No Maps received)" : "");
 
 		ol_txrx_peer_tx_queue_free(pdev, peer);
 
@@ -3892,9 +3891,7 @@ int ol_txrx_peer_release_ref(ol_txrx_peer_handle peer,
 		qdf_spin_unlock_bh(&pdev->peer_ref_mutex);
 		if (!ref_silent)
 			ol_txrx_info_high("[%d][%d]: ref delete peer %pK ref_cnt -> %d",
-					  debug_id,
-					  access_list,
-					  peer, rc);
+					  debug_id, access_list, peer, rc);
 	}
 	return rc;
 ERR_STATE:
@@ -3975,14 +3972,20 @@ static QDF_STATUS ol_txrx_clear_peer(struct cdp_pdev *ppdev, uint8_t sta_id)
  */
 void peer_unmap_timer_handler(void *data)
 {
-	if (cds_is_self_recovery_enabled()) {
-		if (!cds_is_driver_recovering() && !cds_is_fw_down())
-			cds_trigger_recovery(QDF_PEER_UNMAP_TIMEDOUT);
-		else
-			ol_txrx_err("Recovery is in progress, ignore!");
-	} else {
-		QDF_BUG(0);
-	}
+	ol_txrx_peer_handle peer = (ol_txrx_peer_handle)data;
+
+	if (!peer)
+		return;
+
+	ol_txrx_err("all unmap events not received for peer %pK, ref_cnt %d",
+		    peer, qdf_atomic_read(&peer->ref_cnt));
+	ol_txrx_err("peer %pK (%02x:%02x:%02x:%02x:%02x:%02x)",
+		    peer,
+		    peer->mac_addr.raw[0], peer->mac_addr.raw[1],
+		    peer->mac_addr.raw[2], peer->mac_addr.raw[3],
+		    peer->mac_addr.raw[4], peer->mac_addr.raw[5]);
+
+	cds_trigger_recovery(QDF_PEER_UNMAP_TIMEDOUT);
 }
 
 

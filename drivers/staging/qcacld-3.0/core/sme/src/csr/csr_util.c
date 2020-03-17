@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -52,6 +52,9 @@ uint8_t csr_wpa_oui[][CSR_WPA_OUI_SIZE] = {
 	,                       /* CCKM */
 #endif /* FEATURE_WLAN_ESE */
 };
+
+#define FT_PSK_IDX   4
+#define FT_8021X_IDX 3
 
 /*
  * PLEASE DO NOT ADD THE #IFDEF IN BELOW TABLE,
@@ -126,6 +129,12 @@ uint8_t csr_rsn_oui[][CSR_RSN_OUI_SIZE] = {
 	{0x00, 0x00, 0x00, 0x00},
 	{0x00, 0x00, 0x00, 0x00},
 #endif
+#define ENUM_OSEN 21
+	/* OSEN RSN */
+	{0x50, 0x6F, 0x9A, 0x01},
+#define ENUM_FT_SUITEB_SHA384 22
+	/* FT Suite-B SHA384 */
+	{0x00, 0x0F, 0xAC, 0x0D},
 
 	/* define new oui here, update #define CSR_OUI_***_INDEX  */
 };
@@ -294,6 +303,7 @@ const char *get_e_roam_cmd_status_str(eRoamCmdStatus val)
 		CASE_RETURN_STR(eCSR_ROAM_NAPI_OFF);
 		CASE_RETURN_STR(eCSR_ROAM_CHANNEL_COMPLETE_IND);
 		CASE_RETURN_STR(eCSR_ROAM_SAE_COMPUTE);
+		CASE_RETURN_STR(eCSR_ROAM_FIPS_PMK_REQUEST);
 	default:
 		return "unknown";
 	}
@@ -1035,8 +1045,6 @@ uint16_t csr_check_concurrent_channel_overlap(tpAniSirGlobal mac_ctx,
 	uint16_t sap_lfreq, sap_hfreq, intf_lfreq, intf_hfreq, sap_cch = 0;
 	QDF_STATUS status;
 
-	sme_debug("sap_ch: %d sap_phymode: %d", sap_ch, sap_phymode);
-
 	if (mac_ctx->roam.configParam.cc_switch_mode ==
 			QDF_MCC_TO_SCC_SWITCH_DISABLE)
 		return 0;
@@ -1090,9 +1098,6 @@ uint16_t csr_check_concurrent_channel_overlap(tpAniSirGlobal mac_ctx,
 					session, &sap_ch, &sap_hbw, &sap_cfreq,
 					&intf_ch, &intf_hbw, &intf_cfreq);
 
-			sme_debug("%d: sap_ch:%d sap_hbw:%d sap_cfreq:%d intf_ch:%d intf_hbw:%d, intf_cfreq:%d",
-					i, sap_ch, sap_hbw, sap_cfreq,
-					intf_ch, intf_hbw, intf_cfreq);
 		}
 		if (intf_ch && ((intf_ch > 14 && sap_ch > 14) ||
 				(intf_ch <= 14 && sap_ch <= 14)))
@@ -1100,8 +1105,8 @@ uint16_t csr_check_concurrent_channel_overlap(tpAniSirGlobal mac_ctx,
 	}
 
 	sme_debug("intf_ch:%d sap_ch:%d cc_switch_mode:%d, dbs:%d",
-			intf_ch, sap_ch, cc_switch_mode,
-			policy_mgr_is_dbs_enable(mac_ctx->psoc));
+		  intf_ch, sap_ch, cc_switch_mode,
+		  policy_mgr_is_dbs_enable(mac_ctx->psoc));
 
 	if (intf_ch && sap_ch != intf_ch &&
 	    !policy_mgr_is_force_scc(mac_ctx->psoc)) {
@@ -1110,12 +1115,13 @@ uint16_t csr_check_concurrent_channel_overlap(tpAniSirGlobal mac_ctx,
 		intf_lfreq = intf_cfreq - intf_hbw;
 		intf_hfreq = intf_cfreq + intf_hbw;
 
-		sme_err("SAP:  OCH: %03d OCF: %d CCH: %03d CF: %d BW: %d LF: %d HF: %d INTF: OCH: %03d OCF: %d CCH: %03d CF: %d BW: %d LF: %d HF: %d",
-			sap_ch, cds_chan_to_freq(sap_ch),
-			cds_freq_to_chan(sap_cfreq), sap_cfreq, sap_hbw * 2,
-			sap_lfreq, sap_hfreq, intf_ch,
-			cds_chan_to_freq(intf_ch), cds_freq_to_chan(intf_cfreq),
-			intf_cfreq, intf_hbw * 2, intf_lfreq, intf_hfreq);
+		sme_debug("SAP:  OCH: %03d OCF: %d CCH: %03d CF: %d BW: %d LF: %d HF: %d INTF: OCH: %03d OCF: %d CCH: %03d CF: %d BW: %d LF: %d HF: %d",
+			  sap_ch, cds_chan_to_freq(sap_ch),
+			  cds_freq_to_chan(sap_cfreq), sap_cfreq, sap_hbw * 2,
+			  sap_lfreq, sap_hfreq, intf_ch,
+			  cds_chan_to_freq(intf_ch),
+			  cds_freq_to_chan(intf_cfreq),
+			  intf_cfreq, intf_hbw * 2, intf_lfreq, intf_hfreq);
 
 		if (!(((sap_lfreq > intf_lfreq && sap_lfreq < intf_hfreq) ||
 			(sap_hfreq > intf_lfreq && sap_hfreq < intf_hfreq)) ||
@@ -1154,8 +1160,8 @@ uint16_t csr_check_concurrent_channel_overlap(tpAniSirGlobal mac_ctx,
 	if (intf_ch == sap_ch)
 		intf_ch = 0;
 
-	sme_err("##Concurrent Channels %s Interfering",
-		intf_ch == 0 ? "Not" : "Are");
+	sme_debug("##Concurrent Channels %s Interfering",
+		  intf_ch == 0 ? "Not" : "Are");
 	return intf_ch;
 }
 #endif
@@ -1755,7 +1761,6 @@ uint32_t csr_translate_to_wni_cfg_dot11_mode(tpAniSirGlobal pMac,
 
 	switch (csrDot11Mode) {
 	case eCSR_CFG_DOT11_MODE_AUTO:
-		sme_debug("eCSR_CFG_DOT11_MODE_AUTO");
 		if (IS_FEATURE_SUPPORTED_BY_FW(DOT11AX))
 			ret = WNI_CFG_DOT11_MODE_11AX;
 		else if (IS_FEATURE_SUPPORTED_BY_FW(DOT11AC))
@@ -2306,9 +2311,11 @@ bool csr_is_profile_rsn(struct csr_roam_profile *pProfile)
 	case eCSR_AUTH_TYPE_OWE:
 	case eCSR_AUTH_TYPE_SUITEB_EAP_SHA256:
 	case eCSR_AUTH_TYPE_SUITEB_EAP_SHA384:
+	case eCSR_AUTH_TYPE_FT_SUITEB_EAP_SHA384:
 		fRSNProfile = true;
 		break;
 	case eCSR_AUTH_TYPE_SAE:
+	case eCSR_AUTH_TYPE_FT_SAE:
 		fRSNProfile = true;
 		break;
 
@@ -2588,7 +2595,7 @@ static bool csr_validate_sta_bcn_intrvl(tpAniSirGlobal mac_ctx,
 		 *  MCC should not be enabled so making it
 		 * false to enforce on same channel
 		 */
-		sme_err("*** MCC with SAP+STA sessions ****");
+		sme_debug("*** MCC with SAP+STA sessions ****");
 		*status = QDF_STATUS_SUCCESS;
 		return true;
 	}
@@ -2748,6 +2755,10 @@ bool csr_is_auth_type11r(tpAniSirGlobal mac, eCsrAuthType auth_type,
 		break;
 	case eCSR_AUTH_TYPE_FT_RSN_PSK:
 	case eCSR_AUTH_TYPE_FT_RSN:
+	case eCSR_AUTH_TYPE_FT_SAE:
+	case eCSR_AUTH_TYPE_FT_SUITEB_EAP_SHA384:
+	case eCSR_AUTH_TYPE_FT_FILS_SHA256:
+	case eCSR_AUTH_TYPE_FT_FILS_SHA384:
 		return true;
 	default:
 		break;
@@ -3144,6 +3155,24 @@ static bool csr_is_auth_suiteb_eap_384(tpAniSirGlobal mac,
 				csr_rsn_oui[ENUM_SUITEB_EAP384], oui);
 }
 
+/*
+ * csr_is_auth_ft_suiteb_eap_384() - check whether oui is SuiteB EAP384
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is FT SuiteB EAP384, false otherwise
+ */
+static
+bool csr_is_auth_ft_suiteb_eap_384(tpAniSirGlobal mac,
+				   uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+				   uint8_t suite_count, uint8_t oui[])
+{
+	return csr_is_oui_match(mac, all_suites, suite_count,
+				csr_rsn_oui[ENUM_FT_SUITEB_SHA384], oui);
+}
+
 #ifdef WLAN_FEATURE_SAE
 /*
  * csr_is_auth_wpa_sae() - check whether oui is SAE
@@ -3158,8 +3187,31 @@ static bool csr_is_auth_wpa_sae(tpAniSirGlobal mac,
 			       uint8_t all_suites[][CSR_RSN_OUI_SIZE],
 			       uint8_t suite_count, uint8_t oui[])
 {
-	return csr_is_oui_match
-		(mac, all_suites, suite_count, csr_rsn_oui[ENUM_SAE], oui);
+	bool is_sae_auth;
+
+	is_sae_auth = (csr_is_oui_match(mac, all_suites, suite_count,
+					csr_rsn_oui[ENUM_SAE], oui));
+	return is_sae_auth;
+}
+
+/*
+ * csr_is_auth_ft_sae() - check whether oui is SAE
+ * @mac: Global MAC context
+ * @all_suites: pointer to all supported akm suites
+ * @suite_count: all supported akm suites count
+ * @oui: Oui needs to be matched
+ *
+ * Return: True if OUI is FT-SAE, false otherwise
+ */
+static bool csr_is_auth_ft_sae(tpAniSirGlobal mac,
+			       uint8_t all_suites[][CSR_RSN_OUI_SIZE],
+			       uint8_t suite_count, uint8_t oui[])
+{
+	bool is_ft_sae_auth;
+
+	is_ft_sae_auth = csr_is_oui_match(mac, all_suites, suite_count,
+					  csr_rsn_oui[ENUM_FT_SAE], oui);
+	return is_ft_sae_auth;
 }
 #endif
 
@@ -3316,7 +3368,8 @@ static void csr_is_fils_auth(tpAniSirGlobal mac_ctx,
 
 #ifdef WLAN_FEATURE_SAE
 /**
- * csr_check_sae_auth() - update negotiated auth if matches to SAE auth type
+ * csr_check_sae_auth() - update negotiated auth and oui if matches to SAE auth
+ * type
  * @mac_ctx: pointer to mac context
  * @authsuites: auth suites
  * @c_auth_suites: auth suites count
@@ -3327,17 +3380,28 @@ static void csr_is_fils_auth(tpAniSirGlobal mac_ctx,
  *
  * Return: None
  */
-static void csr_check_sae_auth(tpAniSirGlobal mac_ctx,
-	uint8_t authsuites[][CSR_RSN_OUI_SIZE], uint8_t c_auth_suites,
-	uint8_t authentication[], tCsrAuthList *auth_type,
-	uint8_t index, eCsrAuthType *neg_authtype)
+static void
+csr_check_sae_auth(tpAniSirGlobal mac_ctx,
+		   uint8_t authsuites[][CSR_RSN_OUI_SIZE],
+		   uint8_t c_auth_suites,
+		   uint8_t authentication[], tCsrAuthList *auth_type,
+		   uint8_t index, eCsrAuthType *neg_authtype)
 {
 	if ((*neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
-	   csr_is_auth_wpa_sae(mac_ctx, authsuites,
-	   c_auth_suites, authentication)) {
+	    csr_is_auth_ft_sae(mac_ctx, authsuites, c_auth_suites,
+			       authentication)) {
+		if (eCSR_AUTH_TYPE_FT_SAE == auth_type->authType[index])
+			*neg_authtype = eCSR_AUTH_TYPE_FT_SAE;
+		else if (eCSR_AUTH_TYPE_OPEN_SYSTEM == auth_type->authType[index])
+			*neg_authtype = eCSR_AUTH_TYPE_OPEN_SYSTEM;
+	}
+
+	if ((*neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+	    csr_is_auth_wpa_sae(mac_ctx, authsuites,
+				c_auth_suites, authentication)) {
 		if (eCSR_AUTH_TYPE_SAE == auth_type->authType[index])
 			*neg_authtype = eCSR_AUTH_TYPE_SAE;
-		if (eCSR_AUTH_TYPE_OPEN_SYSTEM == auth_type->authType[index])
+		else if (eCSR_AUTH_TYPE_OPEN_SYSTEM == auth_type->authType[index])
 			*neg_authtype = eCSR_AUTH_TYPE_OPEN_SYSTEM;
 	}
 	sme_debug("negotiated auth type is %d", *neg_authtype);
@@ -3366,6 +3430,7 @@ static void csr_check_sae_auth(tpAniSirGlobal mac_ctx,
  * @negotiated_mccipher: negotiated multicast cipher
  * @gp_mgmt_cipher: group management cipher
  * @mgmt_encryption_type: group management encryption type
+ * @adaptive_11r: is adaptive 11r connection
  *
  * This routine will get all RSN information
  *
@@ -3381,7 +3446,8 @@ static bool csr_get_rsn_information(tpAniSirGlobal mac_ctx,
 				    eCsrAuthType *negotiated_authtype,
 				    eCsrEncryptionType *negotiated_mccipher,
 				    uint8_t *gp_mgmt_cipher,
-				    tAniEdType *mgmt_encryption_type)
+				    tAniEdType *mgmt_encryption_type,
+				    bool adaptive_11r)
 {
 	bool acceptable_cipher = false;
 	bool group_mgmt_acceptable_cipher = false;
@@ -3501,29 +3567,78 @@ static bool csr_get_rsn_information(tpAniSirGlobal mac_ctx,
 				neg_authtype = eCSR_AUTH_TYPE_CCKM_RSN;
 		}
 #endif
-		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN)
-				&& csr_is_auth_rsn(mac_ctx, authsuites,
-					c_auth_suites, authentication)) {
+		if (neg_authtype == eCSR_AUTH_TYPE_UNKNOWN &&
+		    csr_is_auth_rsn(mac_ctx, authsuites,
+				    c_auth_suites, authentication)) {
+			/*
+			 * For adaptive 11r connection send FT-802.1X akm in
+			 * association request
+			 */
+			if (adaptive_11r &&
+			    eCSR_AUTH_TYPE_FT_RSN == auth_type->authType[i]) {
+				neg_authtype = eCSR_AUTH_TYPE_FT_RSN;
+				qdf_mem_copy(authentication,
+					     csr_rsn_oui[FT_8021X_IDX],
+					     CSR_WPA_OUI_SIZE);
+			}
+
 			if (eCSR_AUTH_TYPE_RSN == auth_type->authType[i])
 				neg_authtype = eCSR_AUTH_TYPE_RSN;
 		}
-		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN)
-				&& csr_is_auth_rsn_psk(mac_ctx, authsuites,
+		if (neg_authtype == eCSR_AUTH_TYPE_UNKNOWN &&
+		    csr_is_auth_rsn_psk(mac_ctx, authsuites,
 					c_auth_suites, authentication)) {
+			/*
+			 * For adaptive 11r connection send FT-PSK akm in
+			 * association request
+			 */
+			if (adaptive_11r &&
+			    eCSR_AUTH_TYPE_FT_RSN_PSK == auth_type->authType[i]) {
+				neg_authtype = eCSR_AUTH_TYPE_FT_RSN_PSK;
+				qdf_mem_copy(authentication,
+					     csr_rsn_oui[FT_PSK_IDX],
+					     CSR_WPA_OUI_SIZE);
+			}
+
 			if (eCSR_AUTH_TYPE_RSN_PSK == auth_type->authType[i])
 				neg_authtype = eCSR_AUTH_TYPE_RSN_PSK;
 		}
 #ifdef WLAN_FEATURE_11W
-		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN)
-			&& csr_is_auth_rsn_psk_sha256(mac_ctx, authsuites,
-					c_auth_suites, authentication)) {
+		if (neg_authtype == eCSR_AUTH_TYPE_UNKNOWN &&
+		    csr_is_auth_rsn_psk_sha256(mac_ctx, authsuites,
+					       c_auth_suites, authentication)) {
+			/*
+			 * For adaptive 11r connection send AP advertises only
+			 * PSK AKM. STA can choose FT-PSK akm in association
+			 * request if FT capable.
+			 */
+			if (adaptive_11r &&
+			    eCSR_AUTH_TYPE_FT_RSN_PSK == auth_type->authType[i]) {
+				neg_authtype = eCSR_AUTH_TYPE_FT_RSN_PSK;
+				qdf_mem_copy(authentication,
+					     csr_rsn_oui[FT_PSK_IDX],
+					     CSR_WPA_OUI_SIZE);
+			}
+
 			if (eCSR_AUTH_TYPE_RSN_PSK_SHA256 ==
 					auth_type->authType[i])
 				neg_authtype = eCSR_AUTH_TYPE_RSN_PSK_SHA256;
 		}
 		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
-				csr_is_auth_rsn8021x_sha256(mac_ctx, authsuites,
-					c_auth_suites, authentication)) {
+		    csr_is_auth_rsn8021x_sha256(mac_ctx,
+						authsuites, c_auth_suites,
+						authentication)) {
+			/*
+			 * For adaptive 11r connection send FT-802.1x akm in
+			 * association request
+			 */
+			if (adaptive_11r &&
+			    eCSR_AUTH_TYPE_FT_RSN == auth_type->authType[i]) {
+				neg_authtype = eCSR_AUTH_TYPE_FT_RSN;
+				qdf_mem_copy(authentication,
+					     csr_rsn_oui[FT_8021X_IDX],
+					     CSR_WPA_OUI_SIZE);
+			}
 			if (eCSR_AUTH_TYPE_RSN_8021X_SHA256 ==
 					auth_type->authType[i])
 				neg_authtype = eCSR_AUTH_TYPE_RSN_8021X_SHA256;
@@ -3548,6 +3663,15 @@ static bool csr_get_rsn_information(tpAniSirGlobal mac_ctx,
 			if (eCSR_AUTH_TYPE_SUITEB_EAP_SHA384 ==
 						auth_type->authType[i])
 				neg_authtype = eCSR_AUTH_TYPE_SUITEB_EAP_SHA384;
+		}
+		if ((neg_authtype == eCSR_AUTH_TYPE_UNKNOWN) &&
+		    csr_is_auth_ft_suiteb_eap_384(mac_ctx, authsuites,
+						  c_auth_suites,
+						  authentication)) {
+			if (eCSR_AUTH_TYPE_FT_SUITEB_EAP_SHA384 ==
+						auth_type->authType[i])
+				neg_authtype =
+					eCSR_AUTH_TYPE_FT_SUITEB_EAP_SHA384;
 		}
 
 		/*
@@ -3699,10 +3823,10 @@ static bool csr_is_rsn_match(tpAniSirGlobal mac_ctx, tCsrAuthList *pAuthType,
 	 * settings in the profile.
 	 */
 	fRSNMatch = csr_get_rsn_information(mac_ctx, pAuthType, enType,
-					pEnMcType, &pIes->RSN,
-					NULL, NULL, NULL, NULL,
-					pNegotiatedAuthType,
-					pNegotiatedMCCipher, NULL, NULL);
+					    pEnMcType, &pIes->RSN, NULL, NULL,
+					    NULL, NULL, pNegotiatedAuthType,
+					    pNegotiatedMCCipher, NULL, NULL,
+					    false);
 #ifdef WLAN_FEATURE_11W
 	/* If all the filter matches then finally checks for PMF capabilities */
 	if (fRSNMatch)
@@ -3991,7 +4115,8 @@ uint8_t csr_construct_rsn_ie(tpAniSirGlobal pMac, uint32_t sessionId,
 					MulticastCypher, AuthSuite,
 					&RSNCapabilities, &negAuthType, NULL,
 					gp_mgmt_cipher_suite,
-					&pProfile->mgmt_encryption_type);
+					&pProfile->mgmt_encryption_type,
+					session->is_adaptive_11r_connection);
 		if (!fRSNMatch)
 			break;
 
@@ -6208,7 +6333,6 @@ bool csr_is_set_key_allowed(tpAniSirGlobal pMac, uint32_t sessionId)
 	 * The current work-around is to process setcontext_rsp no matter
 	 * what the state is.
 	 */
-	sme_debug("is not what it intends to. Must be revisit or removed");
 	if ((NULL == pSession)
 	    || (csr_is_conn_state_disconnected(pMac, sessionId)
 		&& (pSession->pCurRoamProfile != NULL)

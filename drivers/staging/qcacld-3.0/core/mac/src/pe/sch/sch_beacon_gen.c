@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -451,7 +451,6 @@ sch_set_fixed_beacon_fields(tpAniSirGlobal mac_ctx, tpPESession session)
 		populate_dot11f_ht_info(mac_ctx, &bcn_2->HTInfo, session);
 	}
 	if (session->vhtCapability) {
-		pe_debug("Populate VHT IEs in Beacon");
 		populate_dot11f_vht_caps(mac_ctx, session, &bcn_2->VHTCaps);
 		populate_dot11f_vht_operation(mac_ctx, session,
 					      &bcn_2->VHTOperation);
@@ -922,6 +921,12 @@ static QDF_STATUS write_beacon_to_memory(tpAniSirGlobal pMac, uint16_t size,
 
 	/* copy end of beacon only if length > 0 */
 	if (length > 0) {
+		if (size + psessionEntry->schBeaconOffsetEnd >
+		    SIR_MAX_BEACON_SIZE) {
+			pe_err("beacon tmp fail size %d BeaconOffsetEnd %d",
+			       size, psessionEntry->schBeaconOffsetEnd);
+			return QDF_STATUS_E_FAILURE;
+		}
 		for (i = 0; i < psessionEntry->schBeaconOffsetEnd; i++)
 			psessionEntry->pSchBeaconFrameBegin[size++] =
 				psessionEntry->pSchBeaconFrameEnd[i];

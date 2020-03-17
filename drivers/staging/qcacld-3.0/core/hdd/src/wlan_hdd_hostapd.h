@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -237,13 +237,34 @@ int wlan_hdd_disable_channels(struct hdd_context *hdd_ctx);
  * hdd_check_and_disconnect_sta_on_invalid_channel() - Disconnect STA if it is
  * on invalid channel
  * @hdd_ctx: pointer to hdd context
+ * @reason: Mac Disconnect reason code as per @enum eSirMacReasonCodes
  *
  * STA should be disconnected before starting the SAP if it is on indoor
  * channel.
  *
  * Return: void
  */
-void hdd_check_and_disconnect_sta_on_invalid_channel(
-						struct hdd_context *hdd_ctx);
+void
+hdd_check_and_disconnect_sta_on_invalid_channel(struct hdd_context *hdd_ctx,
+						tSirMacReasonCodes reason);
+
+/**
+ * hdd_stop_sap_due_to_invalid_channel() - to stop sap in case of invalid chnl
+ * @work: pointer to work structure
+ *
+ * Let's say SAP detected RADAR and trying to select the new channel and if no
+ * valid channel is found due to none of the channels are available or
+ * regulatory restriction then SAP needs to be stopped. so SAP state-machine
+ * will create a work to stop the bss
+ *
+ * stop bss has to happen through worker thread because radar indication comes
+ * from FW through mc thread or main host thread and if same thread is used to
+ * do stopbss then waiting for stopbss to finish operation will halt mc thread
+ * to freeze which will trigger stopbss timeout. Instead worker thread can do
+ * the stopbss operation while mc thread waits for stopbss to finish.
+ *
+ * Return: none
+ */
+void hdd_stop_sap_due_to_invalid_channel(struct work_struct *work);
 
 #endif /* end #if !defined(WLAN_HDD_HOSTAPD_H) */

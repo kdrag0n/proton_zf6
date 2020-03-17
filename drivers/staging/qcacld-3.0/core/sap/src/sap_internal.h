@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -65,6 +65,31 @@ extern "C" {
 #define ETSI_WEATHER_CH_CAC_TIMEOUT (10 * 60 * 1000)    /* msecs - 10 min */
 #define SAP_CHAN_PREFERRED_INDOOR  1
 #define SAP_CHAN_PREFERRED_OUTDOOR 2
+
+/*SAP Specific logging*/
+
+#define sap_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_SAP, params)
+#define sap_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_SAP, params)
+#define sap_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_SAP, params)
+#define sap_info(params...) QDF_TRACE_INFO(QDF_MODULE_ID_SAP, params)
+#define sap_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_SAP, params)
+
+#define sap_nofl_alert(params...) \
+	QDF_TRACE_FATAL_NO_FL(QDF_MODULE_ID_SAP, params)
+#define sap_nofl_err(params...) \
+	QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_SAP, params)
+#define sap_nofl_warn(params...) \
+	QDF_TRACE_WARN_NO_FL(QDF_MODULE_ID_SAP, params)
+#define sap_nofl_info(params...) \
+	QDF_TRACE_INFO_NO_FL(QDF_MODULE_ID_SAP, params)
+#define sap_nofl_debug(params...) \
+	QDF_TRACE_DEBUG_NO_FL(QDF_MODULE_ID_SAP, params)
+
+#define sap_alert_rl(params...) QDF_TRACE_FATAL_RL(QDF_MODULE_ID_SAP, params)
+#define sap_err_rl(params...) QDF_TRACE_ERROR_RL(QDF_MODULE_ID_SAP, params)
+#define sap_warn_rl(params...) QDF_TRACE_WARN_RL(QDF_MODULE_ID_SAP, params)
+#define sap_info_rl(params...) QDF_TRACE_INFO_RL(QDF_MODULE_ID_SAP, params)
+#define sap_debug_rl(params...) QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_SAP, params)
 
 /*----------------------------------------------------------------------------
  *  Typedefs
@@ -134,6 +159,7 @@ struct sap_context {
 	uint32_t channel;
 	uint32_t secondary_ch;
 
+	qdf_mutex_t *acs_ch_list_protect;
 	/* Include the SME(CSR) sessionId here */
 	uint8_t sessionId;
 
@@ -336,11 +362,6 @@ sap_print_acl(struct qdf_mac_addr *macList, uint8_t size);
 bool
 sap_search_mac_list(struct qdf_mac_addr *macList, uint8_t num_mac,
 		 uint8_t *peerMac, uint8_t *index);
-
-#ifdef FEATURE_WLAN_CH_AVOID
-void sap_update_unsafe_channel_list(tHalHandle hal,
-				    struct sap_context *sap_ctx);
-#endif /* FEATURE_WLAN_CH_AVOID */
 
 QDF_STATUS sap_init_dfs_channel_nol_list(struct sap_context *sapContext);
 

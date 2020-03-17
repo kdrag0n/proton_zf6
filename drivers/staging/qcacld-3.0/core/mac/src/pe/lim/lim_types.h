@@ -455,8 +455,21 @@ void lim_process_probe_req_frame_multiple_bss(tpAniSirGlobal, uint8_t *,
 
 /* Process Auth frame when we have a session in progress. */
 void lim_process_auth_frame(tpAniSirGlobal, uint8_t *, tpPESession);
-QDF_STATUS lim_process_auth_frame_no_session(tpAniSirGlobal pMac, uint8_t *,
-						void *body);
+
+/**
+ * lim_process_auth_frame_no_session() - Process auth frame received from AP to
+ * which we are not connected currently.
+ * @mac: Pointer to global mac context
+ * @bd: Pointer to rx auth frame
+ * @body: Pointer to lim_msg->body_ptr
+ *
+ * This is possibly the pre-auth from the neighbor AP, in the same mobility
+ * domain or pre-authentication reply for WPA3 SAE roaming.
+ * This will be used in case of 11r FT.
+ */
+QDF_STATUS lim_process_auth_frame_no_session(tpAniSirGlobal mac,
+					     uint8_t *bd, void *body);
+
 
 void lim_process_assoc_req_frame(tpAniSirGlobal, uint8_t *, uint8_t, tpPESession);
 void lim_send_mlm_assoc_ind(tpAniSirGlobal pMac, tpDphHashNode pStaDs,
@@ -646,7 +659,7 @@ QDF_STATUS lim_send_link_report_action_frame(tpAniSirGlobal, tpSirMacLinkReport,
  * @pMac: pointer to global MAC context
  * @dialog_token: Dialog token to be used in the action frame
  * @num_report: number of reports in pRRMReport
- * @last_beacon_report_params: Last Beacon Report indication params
+ * @is_last_frame: is the current report last or more reports to follow
  * @pRRMReport: Pointer to the RRM report structure
  * @peer: MAC address of the peer
  * @psessionEntry: Pointer to the PE session entry
@@ -657,8 +670,7 @@ QDF_STATUS
 lim_send_radio_measure_report_action_frame(tpAniSirGlobal pMac,
 				uint8_t dialog_token,
 				uint8_t num_report,
-				struct rrm_beacon_report_last_beacon_params
-				*last_beacon_report_params,
+				bool is_last_frame,
 				tpSirMacRadioMeasureReport pRRMReport,
 				tSirMacAddr peer,
 				tpPESession psessionEntry);
@@ -714,8 +726,21 @@ static inline void lim_update_tdls_set_state_for_fw(tpPESession session_entry,
 /* / Function that handles heartbeat failure */
 void lim_handle_heart_beat_failure(tpAniSirGlobal, tpPESession);
 
-/* / Function that triggers link tear down with AP upon HB failure */
-void lim_tear_down_link_with_ap(tpAniSirGlobal, uint8_t, tSirMacReasonCodes);
+/**
+ * lim_tear_down_link_with_ap() - Tear down link with AP
+ * @mac: mac context
+ * @session_id: PE session id
+ * @reason_code: Disconnect reason code as per emun eSirMacReasonCodes
+ * @trigger: Disconnect trigger as per enum eLimDisassocTrigger
+ *
+ * Function that triggers link tear down with AP upon HB failure
+ *
+ * Return: None
+ */
+void lim_tear_down_link_with_ap(tpAniSirGlobal mac,
+				uint8_t session_id,
+				tSirMacReasonCodes reason_code,
+				enum eLimDisassocTrigger trigger);
 
 /* / Function that processes Max retries interrupt from TFP */
 void limHandleMaxRetriesInterrupt(uint32_t);

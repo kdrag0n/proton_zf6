@@ -127,15 +127,14 @@ int find_ie_location(tpAniSirGlobal pMac, tpSirRSNie pRsnIe, uint8_t EID)
 	bytesLeft = pRsnIe->length;
 
 	while (1) {
-		if (EID == pRsnIe->rsnIEdata[idx]) {
+		if (EID == pRsnIe->rsnIEdata[idx])
 			/* Found it */
 			return idx;
-		} else if (EID != pRsnIe->rsnIEdata[idx] &&
-			/* & if no more IE, */
-			   bytesLeft <= (uint16_t) (ieLen)) {
-			pe_debug("No IE (%d) in find_ie_location", EID);
+		if (EID != pRsnIe->rsnIEdata[idx] &&
+		    /* & if no more IE, */
+		    bytesLeft <= (uint16_t) (ieLen))
 			return ret_val;
-		}
+
 		bytesLeft -= ieLen;
 		ieLen = pRsnIe->rsnIEdata[idx + 1] + 2;
 		idx += ieLen;
@@ -675,8 +674,6 @@ populate_dot11f_ht_caps(tpAniSirGlobal pMac,
 	if (psessionEntry) {
 		disable_high_ht_mcs_2x2 =
 				pMac->roam.configParam.disable_high_ht_mcs_2x2;
-		pe_debug("disable HT high MCS INI param[%d]",
-			 disable_high_ht_mcs_2x2);
 		if (psessionEntry->nss == NSS_1x1_MODE) {
 			pDot11f->supportedMCSSet[1] = 0;
 		} else if (IS_24G_CH(psessionEntry->currentOperChannel) &&
@@ -851,18 +848,15 @@ static void lim_log_qos_map_set(tpAniSirGlobal pMac, tSirQosMapSet *pQosMapSet)
 
 	pe_debug("num of dscp exceptions: %d",
 		pQosMapSet->num_dscp_exceptions);
-	for (i = 0; i < pQosMapSet->num_dscp_exceptions; i++) {
-		pe_debug("dscp value: %d",
-			pQosMapSet->dscp_exceptions[i][0]);
-		pe_debug("User priority value: %d",
-			pQosMapSet->dscp_exceptions[i][1]);
-	}
-	for (i = 0; i < 8; i++) {
-		pe_debug("dscp low for up %d: %d", i,
-			pQosMapSet->dscp_range[i][0]);
-		pe_debug("dscp high for up %d: %d", i,
-			pQosMapSet->dscp_range[i][1]);
-	}
+	for (i = 0; i < pQosMapSet->num_dscp_exceptions; i++)
+		pe_nofl_debug("dscp value: %d, User priority value: %d",
+			      pQosMapSet->dscp_exceptions[i][0],
+			      pQosMapSet->dscp_exceptions[i][1]);
+
+	for (i = 0; i < 8; i++)
+		pe_nofl_debug("For up %d: dscp low: %d, dscp high: %d", i,
+			       pQosMapSet->dscp_range[i][0],
+			       pQosMapSet->dscp_range[i][1]);
 }
 
 QDF_STATUS
@@ -1174,13 +1168,10 @@ populate_dot11f_ext_cap(tpAniSirGlobal pMac,
 		pe_debug("11MC support enabled");
 		pDot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 	} else {
-		if (eLIM_AP_ROLE != psessionEntry->limSystemRole) {
-			pe_debug("11MC support enabled");
+		if (eLIM_AP_ROLE != psessionEntry->limSystemRole)
 			pDot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
-		} else  {
-			pe_debug("11MC support disabled");
+		else
 			pDot11f->num_bytes = DOT11F_IE_EXTCAP_MIN_LEN;
-		}
 	}
 
 	p_ext_cap = (struct s_ext_cap *)pDot11f->bytes;
@@ -2984,6 +2975,108 @@ static inline void fils_convert_assoc_rsp_frame2_struct(tDot11fAssocResponse
 { }
 #endif
 
+QDF_STATUS wlan_parse_ftie_sha384(uint8_t *frame, uint32_t frame_len,
+				  struct sSirAssocRsp *assoc_rsp)
+{
+	const uint8_t *ie, *ie_end, *pos;
+	uint8_t ie_len;
+	struct wlan_sha384_ftinfo_subelem *ft_subelem;
+
+	ie = wlan_get_ie_ptr_from_eid(DOT11F_EID_FTINFO, frame, frame_len);
+	if (!ie) {
+		pe_err("FT IE not present");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (!ie[1]) {
+		pe_err("FT IE length is zero");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	ie_len = ie[1];
+	if (ie_len < sizeof(struct wlan_sha384_ftinfo)) {
+		pe_err("Invalid FTIE len:%d", ie_len);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	pos = ie + 2;
+	qdf_mem_copy(&assoc_rsp->sha384_ft_info, pos,
+		     sizeof(struct wlan_sha384_ftinfo));
+	ie_end = ie + ie_len;
+	pos += sizeof(struct wlan_sha384_ftinfo);
+	ft_subelem = &assoc_rsp->sha384_ft_subelem;
+	qdf_mem_zero(ft_subelem, sizeof(*ft_subelem));
+
+	while (ie_end - pos >= 2) {
+		uint8_t id, len;
+
+		id = *pos++;
+		len = *pos++;
+		if (len < 1) {
+			pe_err("Invalid FT subelem length");
+			return QDF_STATUS_E_FAILURE;
+		}
+
+		switch (id) {
+		case FTIE_SUBELEM_R1KH_ID:
+			if (len != FTIE_R1KH_LEN) {
+				pe_err("Invalid R1KH-ID length: %d", len);
+				return QDF_STATUS_E_FAILURE;
+			}
+			ft_subelem->r1kh_id.present = 1;
+			qdf_mem_copy(ft_subelem->r1kh_id.PMK_R1_ID,
+				     pos, FTIE_R1KH_LEN);
+			break;
+		case FTIE_SUBELEM_GTK:
+			if (ft_subelem->gtk) {
+				qdf_mem_zero(ft_subelem->gtk,
+					     ft_subelem->gtk_len);
+				ft_subelem->gtk_len = 0;
+				qdf_mem_free(ft_subelem->gtk);
+			}
+
+			ft_subelem->gtk = qdf_mem_malloc(len);
+			if (!ft_subelem->gtk)
+				return QDF_STATUS_E_NOMEM;
+
+			qdf_mem_copy(ft_subelem->gtk, pos, len);
+			ft_subelem->gtk_len = len;
+			break;
+		case FTIE_SUBELEM_R0KH_ID:
+			if (len < 1 || len > FTIE_R0KH_MAX_LEN) {
+				pe_err("Invalid R0KH-ID length: %d", len);
+				return QDF_STATUS_E_FAILURE;
+			}
+			ft_subelem->r0kh_id.present = 1;
+			ft_subelem->r0kh_id.num_PMK_R0_ID = len;
+			qdf_mem_copy(ft_subelem->r0kh_id.PMK_R0_ID,
+				     pos, len);
+			break;
+		case FTIE_SUBELEM_IGTK:
+			if (ft_subelem->igtk) {
+				qdf_mem_zero(ft_subelem->igtk,
+					     ft_subelem->igtk_len);
+				ft_subelem->igtk_len = 0;
+				qdf_mem_free(ft_subelem->igtk);
+			}
+			ft_subelem->igtk = qdf_mem_malloc(len);
+			if (!ft_subelem->igtk)
+				return QDF_STATUS_E_NOMEM;
+
+			qdf_mem_copy(ft_subelem->igtk, pos, len);
+			ft_subelem->igtk_len = len;
+			break;
+		default:
+			pe_debug("Unknown subelem id %d len:%d",
+				 id, len);
+			break;
+		}
+		pos += len;
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
+
 QDF_STATUS
 sir_convert_assoc_resp_frame2_struct(tpAniSirGlobal pMac,
 		tpPESession session_entry,
@@ -3737,8 +3830,7 @@ sir_parse_beacon_ie(tpAniSirGlobal pMac,
 		qdf_mem_free(pBies);
 		return QDF_STATUS_E_FAILURE;
 	} else if (DOT11F_WARNED(status)) {
-		pe_debug("There were warnings while unpacking Beacon IEs (0x%08x, %d bytes):",
-			status, nPayload);
+		pe_debug("warnings (0x%08x, %d bytes):", status, nPayload);
 	}
 	/* & "transliterate" from a 'tDot11fBeaconIEs' to a 'tSirProbeRespBeacon'... */
 	if (!pBies->SSID.present) {
@@ -4383,6 +4475,69 @@ sir_convert_beacon_frame2_struct(tpAniSirGlobal pMac,
 } /* End sir_convert_beacon_frame2_struct. */
 
 #ifdef WLAN_FEATURE_FILS_SK
+
+/* update_ftie_in_fils_conf() - API to update fils info from auth
+ * response packet from AP
+ * @auth: auth packet pointer received from AP
+ * @auth_frame: data structure needs to be updated
+ *
+ * Return: None
+ */
+static void
+update_ftie_in_fils_conf(tDot11fAuthentication *auth,
+			 tpSirMacAuthFrameBody auth_frame)
+{
+	/**
+	 * Copy the FTIE sent by the AP in the auth request frame.
+	 * This is required for FT-FILS connection.
+	 * This FTIE will be sent in Assoc request frame without
+	 * any modification.
+	 */
+	if (auth->FTInfo.present) {
+		pe_debug("FT-FILS: r0kh_len:%d r1kh_present:%d",
+			 auth->FTInfo.R0KH_ID.num_PMK_R0_ID,
+			 auth->FTInfo.R1KH_ID.present);
+
+		auth_frame->ft_ie.present = 1;
+		if (auth->FTInfo.R1KH_ID.present) {
+			qdf_mem_copy(auth_frame->ft_ie.r1kh_id,
+				     auth->FTInfo.R1KH_ID.PMK_R1_ID,
+				     FT_R1KH_ID_LEN);
+		}
+
+		if (auth->FTInfo.R0KH_ID.present) {
+			qdf_mem_copy(auth_frame->ft_ie.r0kh_id,
+				     auth->FTInfo.R0KH_ID.PMK_R0_ID,
+				     auth->FTInfo.R0KH_ID.num_PMK_R0_ID);
+			auth_frame->ft_ie.r0kh_id_len =
+					auth->FTInfo.R0KH_ID.num_PMK_R0_ID;
+		}
+
+		if (auth_frame->ft_ie.gtk_ie.present) {
+			pe_debug("FT-FILS: GTK present");
+			qdf_mem_copy(&auth_frame->ft_ie.gtk_ie,
+				     &auth->FTInfo.GTK,
+				     sizeof(struct mac_ft_gtk_ie));
+		}
+
+		if (auth_frame->ft_ie.igtk_ie.present) {
+			pe_debug("FT-FILS: IGTK present");
+			qdf_mem_copy(&auth_frame->ft_ie.igtk_ie,
+				     &auth->FTInfo.IGTK,
+				     sizeof(struct mac_ft_igtk_ie));
+		}
+
+		qdf_mem_copy(auth_frame->ft_ie.anonce, auth->FTInfo.Anonce,
+			     FT_NONCE_LEN);
+		qdf_mem_copy(auth_frame->ft_ie.snonce, auth->FTInfo.Snonce,
+			     FT_NONCE_LEN);
+
+		qdf_mem_copy(auth_frame->ft_ie.mic, auth->FTInfo.MIC,
+			     FT_MIC_LEN);
+		auth_frame->ft_ie.element_count = auth->FTInfo.IECount;
+	}
+}
+
 /* sir_update_auth_frame2_struct_fils_conf: API to update fils info from auth
  * packet type 2
  * @auth: auth packet pointer received from AP
@@ -4390,8 +4545,9 @@ sir_convert_beacon_frame2_struct(tpAniSirGlobal pMac,
  *
  * Return: None
  */
-static void sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
-				tpSirMacAuthFrameBody auth_frame)
+static void
+sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
+					tpSirMacAuthFrameBody auth_frame)
 {
 	if (auth->AuthAlgo.algo != SIR_FILS_SK_WITHOUT_PFS)
 		return;
@@ -4420,6 +4576,9 @@ static void sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
 			auth->RSNOpaque.num_data);
 		auth_frame->rsn_ie.length = auth->RSNOpaque.num_data;
 	}
+
+	update_ftie_in_fils_conf(auth, auth_frame);
+
 }
 #else
 static void sir_update_auth_frame2_struct_fils_conf(tDot11fAuthentication *auth,
@@ -5874,9 +6033,9 @@ QDF_STATUS
 populate_dot11f_beacon_report(tpAniSirGlobal pMac,
 			      tDot11fIEMeasurementReport *pDot11f,
 			      tSirMacBeaconReport *pBeaconReport,
-			      struct rrm_beacon_report_last_beacon_params
-			      *last_beacon_report_params)
+			      bool is_last_frame)
 {
+	tDot11fIEbeacon_report_frm_body_fragment_id *frm_body_frag_id;
 
 	pDot11f->report.Beacon.regClass = pBeaconReport->regClass;
 	pDot11f->report.Beacon.channel = pBeaconReport->channel;
@@ -5903,35 +6062,29 @@ populate_dot11f_beacon_report(tpAniSirGlobal pMac,
 			pBeaconReport->numIes;
 	}
 
-	if (last_beacon_report_params &&
-	    last_beacon_report_params->last_beacon_ind) {
-		pe_debug("Including Last Beacon Report in RRM Frame, report_id %d, frag_id %d",
-			last_beacon_report_params->report_id,
-			last_beacon_report_params->frag_id);
-		pDot11f->report.Beacon.beacon_report_frm_body_fragment_id.
-			present = 1;
-		pDot11f->report.Beacon.beacon_report_frm_body_fragment_id.
-			beacon_report_id = last_beacon_report_params->report_id;
-		pDot11f->report.Beacon.beacon_report_frm_body_fragment_id.
-			fragment_id_number = last_beacon_report_params->frag_id;
+	if (pBeaconReport->last_bcn_report_ind_support) {
+		pe_debug("Including Last Beacon Report in RRM Frame");
+		frm_body_frag_id = &pDot11f->report.Beacon.
+			beacon_report_frm_body_fragment_id;
 
-		pDot11f->report.Beacon.last_beacon_report_indication.present = 1;
+		frm_body_frag_id->present = 1;
+		frm_body_frag_id->beacon_report_id =
+			pBeaconReport->frame_body_frag_id.id;
+		frm_body_frag_id->fragment_id_number =
+			pBeaconReport->frame_body_frag_id.frag_id;
+		frm_body_frag_id->more_fragments =
+			pBeaconReport->frame_body_frag_id.more_frags;
 
-		if (last_beacon_report_params->frag_id ==
-		    (last_beacon_report_params->num_frags - 1)) {
-			pDot11f->report.Beacon.
-				beacon_report_frm_body_fragment_id.
-				more_fragments = 0;
-			pDot11f->report.Beacon.last_beacon_report_indication.
-				last_fragment = 1;
-			pe_debug("Last Fragment");
-		} else {
-			pDot11f->report.Beacon.
-				beacon_report_frm_body_fragment_id.
-				more_fragments = 1;
-			pDot11f->report.Beacon.last_beacon_report_indication.
-				last_fragment = 0;
-		}
+		pDot11f->report.Beacon.last_beacon_report_indication.present =
+			1;
+
+		pDot11f->report.Beacon.last_beacon_report_indication.
+			last_fragment = is_last_frame;
+		pe_debug("id %d frag_id %d more_frags %d is_last_frame %d",
+			 frm_body_frag_id->beacon_report_id,
+			 frm_body_frag_id->fragment_id_number,
+			 frm_body_frag_id->more_fragments,
+			 is_last_frame);
 	}
 	return QDF_STATUS_SUCCESS;
 
@@ -5999,13 +6152,54 @@ void populate_mdie(tpAniSirGlobal pMac,
 
 }
 
-void populate_ft_info(tpAniSirGlobal pMac, tDot11fIEFTInfo *pDot11f)
+#ifdef WLAN_FEATURE_FILS_SK
+void populate_fils_ft_info(tpAniSirGlobal mac, tDot11fIEFTInfo *ft_info,
+			   tpPESession pe_session)
 {
-	pDot11f->present = 1;
-	pDot11f->IECount = 0;   /* TODO: put valid data during reassoc. */
-	/* All other info is zero. */
+	struct pe_fils_session *ft_fils_info = pe_session->fils_info;
 
+	if (!ft_fils_info)
+		return;
+
+	if (!ft_fils_info->ft_ie.present) {
+		ft_info->present = 0;
+		pe_err("FT IE doesn't exist");
+		return;
+	}
+
+	ft_info->IECount = ft_fils_info->ft_ie.element_count;
+
+	qdf_mem_copy(ft_info->MIC, ft_fils_info->ft_ie.mic,
+		     FT_MIC_LEN);
+
+	qdf_mem_copy(ft_info->Anonce, ft_fils_info->ft_ie.anonce,
+		     FT_NONCE_LEN);
+
+	qdf_mem_copy(ft_info->Snonce, ft_fils_info->ft_ie.snonce,
+		     FT_NONCE_LEN);
+
+	if (ft_fils_info->ft_ie.r0kh_id_len > 0) {
+		ft_info->R0KH_ID.present = 1;
+		qdf_mem_copy(ft_info->R0KH_ID.PMK_R0_ID,
+			     ft_fils_info->ft_ie.r0kh_id,
+			     ft_fils_info->ft_ie.r0kh_id_len);
+		ft_info->R0KH_ID.num_PMK_R0_ID =
+				ft_fils_info->ft_ie.r0kh_id_len;
+	}
+
+	ft_info->R1KH_ID.present = 1;
+	qdf_mem_copy(ft_info->R1KH_ID.PMK_R1_ID,
+		     ft_fils_info->ft_ie.r1kh_id,
+		     FT_R1KH_ID_LEN);
+
+	qdf_mem_copy(&ft_info->GTK, &ft_fils_info->ft_ie.gtk_ie,
+		     sizeof(struct mac_ft_gtk_ie));
+	qdf_mem_copy(&ft_info->IGTK, &ft_fils_info->ft_ie.igtk_ie,
+		     sizeof(struct mac_ft_igtk_ie));
+
+	ft_info->present = 1;
 }
+#endif
 
 void populate_dot11f_assoc_rsp_rates(tpAniSirGlobal pMac,
 				     tDot11fIESuppRates *pSupp,
@@ -6342,8 +6536,6 @@ QDF_STATUS populate_dot11f_he_caps(tpAniSirGlobal mac_ctx, tpPESession session,
 	} else {
 		he_cap->ppet.ppe_threshold.num_ppe_th = 0;
 	}
-
-	lim_log_he_cap(mac_ctx, he_cap);
 
 	return QDF_STATUS_SUCCESS;
 }

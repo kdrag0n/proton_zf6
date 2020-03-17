@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -32,6 +32,9 @@
 
 #define CSR_INVALID_SCANRESULT_HANDLE       (NULL)
 #define CSR_NUM_WLM_LATENCY_LEVEL   4
+
+#define CFG_PMKID_MODES_OKC                        (0x1)
+#define CFG_PMKID_MODES_PMKSA_CACHING              (0x2)
 
 typedef enum {
 	/* never used */
@@ -67,6 +70,8 @@ typedef enum {
 	eCSR_AUTH_TYPE_OWE,
 	eCSR_AUTH_TYPE_SUITEB_EAP_SHA256,
 	eCSR_AUTH_TYPE_SUITEB_EAP_SHA384,
+	eCSR_AUTH_TYPE_FT_SAE,
+	eCSR_AUTH_TYPE_FT_SUITEB_EAP_SHA384,
 	eCSR_NUM_OF_SUPPORT_AUTH_TYPE,
 	eCSR_AUTH_TYPE_FAILED = 0xff,
 	eCSR_AUTH_TYPE_UNKNOWN = eCSR_AUTH_TYPE_FAILED,
@@ -478,6 +483,7 @@ typedef enum {
 	eCSR_ROAM_SAE_COMPUTE,
 	/* LFR3 Roam sync complete */
 	eCSR_ROAM_SYNCH_COMPLETE,
+	eCSR_ROAM_FIPS_PMK_REQUEST,
 } eRoamCmdStatus;
 
 /* comment inside indicates what roaming callback gets */
@@ -915,6 +921,7 @@ typedef struct tagCsrRoamHTProfile {
 	uint8_t apChanWidth;
 } tCsrRoamHTProfile;
 #endif
+
 typedef struct tagCsrRoamConnectedProfile {
 	tSirMacSSid SSID;
 	bool handoffPermitted;
@@ -929,6 +936,9 @@ typedef struct tagCsrRoamConnectedProfile {
 	tCsrEncryptionList EncryptionInfo;
 	eCsrEncryptionType mcEncryptionType;
 	tCsrEncryptionList mcEncryptionInfo;
+	/* group management cipher suite used for 11w */
+	tAniEdType mgmt_encryption_type;
+	uint8_t country_code[WNI_CFG_COUNTRY_CODE_LEN];
 	uint32_t vht_channel_width;
 	tCsrKeys Keys;
 	/*
@@ -1205,6 +1215,13 @@ typedef struct tagCsrConfigParam {
 	uint32_t roam_preauth_retry_count;
 	uint32_t roam_preauth_no_ack_timeout;
 	bool isRoamOffloadEnabled;
+	bool enable_disconnect_roam_offload;
+	bool enable_idle_roam;
+	uint32_t idle_roam_rssi_delta;
+	uint32_t idle_roam_inactive_time;
+	uint32_t idle_data_packet_count;
+	uint32_t idle_roam_band;
+	int32_t idle_roam_min_rssi;
 #endif
 	bool obssEnabled;
 	uint8_t conc_custom_rule1;
@@ -1290,7 +1307,7 @@ typedef struct tagCsrConfigParam {
 	bool qcn_ie_support;
 	uint8_t fils_max_chan_guard_time;
 	uint16_t pkt_err_disconn_th;
-	bool is_force_1x1;
+	enum force_1x1_type is_force_1x1_enable;
 	uint16_t num_11b_tx_chains;
 	uint16_t num_11ag_tx_chains;
 	uint32_t disallow_duration;
@@ -1300,9 +1317,12 @@ typedef struct tagCsrConfigParam {
 	uint8_t oce_feature_bitmap;
 	struct csr_mbo_thresholds mbo_thresholds;
 	uint32_t btm_offload_config;
+	uint32_t pmkid_modes;
 	uint32_t btm_solicited_timeout;
 	uint32_t btm_max_attempt_cnt;
 	uint32_t btm_sticky_time;
+	uint32_t btm_query_bitmask;
+	uint32_t btm_trig_min_candidate_score;
 	uint32_t offload_11k_enable_bitmask;
 	bool wep_tkip_in_he;
 	struct csr_neighbor_report_offload_params neighbor_report_offload;
@@ -1313,6 +1333,20 @@ typedef struct tagCsrConfigParam {
 	bool enable_bss_load_roam_trigger;
 	uint32_t bss_load_threshold;
 	uint32_t bss_load_sample_time;
+	int32_t bss_load_trigger_rssi_threshold_5ghz;
+	int32_t bss_load_trigger_rssi_threshold_24ghz;
+	uint32_t roam_scan_inactivity_time;
+	uint32_t roam_inactive_data_packet_count;
+	uint32_t roam_scan_period_after_inactivity;
+	int32_t disconnect_roam_min_rssi;
+	int32_t bmiss_roam_min_rssi;
+	uint32_t btm_roam_score_delta;
+	uint32_t idle_roam_score_delta;
+#ifdef WLAN_ADAPTIVE_11R
+	bool enable_adaptive_11r;
+#endif
+	bool enable_pending_list_req;
+	bool disable_4way_hs_offload;
 } tCsrConfigParam;
 
 /* Tush */
@@ -1320,6 +1354,11 @@ typedef struct tagCsrUpdateConfigParam {
 	tCsr11dinfo Csr11dinfo;
 } tCsrUpdateConfigParam;
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
+typedef void (*sme_get_raom_scan_ch_Callback)(
+				hdd_handle_t hdd_handle,
+				struct roam_scan_ch_resp *roam_ch,
+				void *context);
+
 #define csr_roamIsRoamOffloadEnabled(pMac) \
 	(pMac->roam.configParam.isRoamOffloadEnabled)
 #define DEFAULT_REASSOC_FAILURE_TIMEOUT 1000
@@ -1412,7 +1451,8 @@ struct csr_roam_info {
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 	uint8_t roamSynchInProgress;
 	uint8_t synchAuthStatus;
-	uint8_t kck[SIR_KCK_KEY_LEN];
+	uint8_t kck[KCK_256BIT_KEY_LEN];
+	uint8_t kck_len;
 	uint8_t kek[SIR_KEK_KEY_LEN_FILS];
 	uint8_t kek_len;
 	uint32_t pmk_len;
@@ -1465,6 +1505,7 @@ struct csr_roam_info {
 	struct sir_sae_info *sae_info;
 #endif
 	uint16_t roam_reason;
+	struct wlan_ies *disconnect_ies;
 };
 
 typedef struct tagCsrFreqScanInfo {
@@ -1506,6 +1547,8 @@ typedef struct sSirSmeAssocIndToUpperLayerCnf {
 	/* Extended capabilities of STA */
 	uint8_t              ecsa_capable;
 
+	uint32_t ies_len;
+	uint8_t *ies;
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
 	tSirMacCapabilityInfo capability_info;
@@ -1707,9 +1750,44 @@ typedef QDF_STATUS (*csr_session_close_cb)(uint8_t session_id);
 #ifdef WLAN_FEATURE_SAE
 #define CSR_IS_AUTH_TYPE_SAE(auth_type) \
 	(eCSR_AUTH_TYPE_SAE == auth_type)
+
+#define CSR_IS_AKM_FT_SAE(auth_type) \
+	(eCSR_AUTH_TYPE_FT_SAE == (auth_type))
+
+#define CSR_IS_FW_FT_SAE_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_FT_SAE)) ? true : false)
+
+#define CSR_IS_FW_SAE_ROAM_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_SAE)) ? true : false)
+
 #else
 #define CSR_IS_AUTH_TYPE_SAE(auth_type) (false)
+
+#define CSR_IS_AKM_FT_SAE(auth_type) (false)
+
+#define CSR_IS_FW_FT_SAE_SUPPORTED(fw_akm_bitmap) (false)
+#define CSR_IS_FW_SAE_ROAM_SUPPORTED(fw_akm_bitmap) (false)
 #endif
+
+#define CSR_IS_FW_OWE_ROAM_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_OWE)) ? true : false)
+
+#define CSR_IS_AKM_FT_SUITEB_SHA384(auth_type) \
+	(eCSR_AUTH_TYPE_FT_SUITEB_EAP_SHA384 == (auth_type))
+
+#define CSR_IS_AKM_FILS(auth_type) \
+	((eCSR_AUTH_TYPE_FILS_SHA256 == auth_type) || \
+	 (eCSR_AUTH_TYPE_FILS_SHA384 == auth_type))
+
+#define CSR_IS_AKM_FT_FILS(auth_type) \
+	((eCSR_AUTH_TYPE_FT_FILS_SHA256 == (auth_type)) || \
+	 (eCSR_AUTH_TYPE_FT_FILS_SHA384 == (auth_type)))
+
+#define CSR_IS_FW_FT_SUITEB_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_FT_SUITEB_SHA384))  ? true : false)
+
+#define CSR_IS_FW_FT_FILS_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_FT_FILS))  ? true : false)
 
 QDF_STATUS csr_set_channels(tpAniSirGlobal pMac, tCsrConfigParam *pParam);
 
@@ -1786,4 +1864,24 @@ csr_get_channel_status(tpAniSirGlobal mac, uint32_t channel_id);
  * Return: none
  */
 void csr_clear_channel_status(tpAniSirGlobal mac);
+
+typedef void (*csr_ani_callback)(int8_t *ani, void *context);
+
+#ifdef WLAN_FEATURE_11W
+/**
+ * csr_update_pmf_cap_from_connected_profile() - Update pmf cap from profile
+ * @profile: connected profile
+ * @filter: scan filter
+ *
+ * Return: None
+ */
+void
+csr_update_pmf_cap_from_connected_profile(tCsrRoamConnectedProfile *profile,
+					  struct scan_filter *filter);
+#else
+static inline void
+csr_update_pmf_cap_from_connected_profile(tCsrRoamConnectedProfile *profile,
+					  struct scan_filter *filter)
+{}
+#endif
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -329,7 +329,7 @@ struct roam_cmd {
 	bool fStopWds;
 	tSirMacAddr peerMac;
 	tSirMacReasonCodes reason;
-	eCsrRoamDisconnectReason disconnect_reason;
+	tSirMacReasonCodes disconnect_reason;
 };
 
 struct setkey_cmd {
@@ -391,6 +391,8 @@ struct csr_neighbor_roamconfig {
 	uint32_t nhi_rssi_scan_rssi_delta;
 	uint32_t nhi_rssi_scan_delay;
 	int32_t nhi_rssi_scan_rssi_ub;
+	uint32_t full_roam_scan_period;
+	bool enable_scoring_for_roam;
 };
 
 /*
@@ -534,6 +536,13 @@ struct csr_config {
 	uint8_t allowDFSChannelRoam;
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 	bool isRoamOffloadEnabled;
+	bool enable_disconnect_roam_offload;
+	bool enable_idle_roam;
+	uint32_t idle_roam_rssi_delta;
+	uint32_t idle_roam_inactive_time;
+	uint32_t idle_data_packet_count;
+	uint32_t idle_roam_band;
+	int32_t idle_roam_min_rssi;
 #endif
 	bool obssEnabled;
 	bool ignore_peer_erp_info;
@@ -594,7 +603,7 @@ struct csr_config {
 	bool qcn_ie_support;
 	uint8_t fils_max_chan_guard_time;
 	uint16_t pkt_err_disconn_th;
-	bool is_force_1x1;
+	enum force_1x1_type is_force_1x1_enable;
 	uint16_t num_11b_tx_chains;
 	uint16_t num_11ag_tx_chains;
 	uint32_t disallow_duration;
@@ -607,9 +616,12 @@ struct csr_config {
 	uint8_t oce_feature_bitmap;
 	struct csr_mbo_thresholds mbo_thresholds;
 	uint32_t btm_offload_config;
+	uint32_t pmkid_modes;
 	uint32_t btm_solicited_timeout;
 	uint32_t btm_max_attempt_cnt;
 	uint32_t btm_sticky_time;
+	uint32_t btm_query_bitmask;
+	uint32_t btm_trig_min_candidate_score;
 	uint32_t offload_11k_enable_bitmask;
 	bool wep_tkip_in_he;
 	struct csr_neighbor_report_offload_params neighbor_report_offload;
@@ -621,6 +633,21 @@ struct csr_config {
 	uint32_t bss_load_threshold;
 	uint32_t bss_load_sample_time;
 	bool roaming_scan_policy;
+	int32_t bss_load_trigger_rssi_threshold_5ghz;
+	int32_t bss_load_trigger_rssi_threshold_24ghz;
+	uint32_t roam_scan_inactivity_time;
+	uint32_t roam_inactive_data_packet_count;
+	uint32_t roam_scan_period_after_inactivity;
+	int32_t disconnect_roam_min_rssi;
+	int32_t bmiss_roam_min_rssi;
+	uint32_t btm_roam_score_delta;
+	uint32_t idle_roam_score_delta;
+	uint32_t btm_min_candidate_score;
+#ifdef WLAN_ADAPTIVE_11R
+	bool enable_adaptive_11r;
+#endif
+	bool enable_pending_list_req;
+	bool disable_4way_hs_offload;
 };
 
 struct csr_channel_powerinfo {
@@ -698,6 +725,7 @@ struct csr_scanstruct {
 	bool fcc_constraint;
 	uint8_t max_scan_count;
 	bool defer_update_channel_list;
+	bool pending_channel_list_req;
 	wlan_scan_requester requester_id;
 };
 
@@ -829,6 +857,12 @@ struct csr_disconnect_stats {
 	uint32_t peer_kickout;
 };
 
+/**
+ * struct csr_roam_session - CSR per-vdev context
+ * @vdev_id: ID of the vdev for which this entry is applicable
+ * @is_bcn_recv_start: Allow to process bcn recv indication
+ * @beacon_report_do_not_resume: Do not resume the beacon reporting after scan
+ */
 struct csr_roam_session {
 	uint8_t sessionId;      /* Session ID */
 	bool sessionActive;     /* true if it is used */
@@ -844,6 +878,7 @@ struct csr_roam_session {
 	struct rsn_caps rsn_caps;
 	tCsrRoamConnectedProfile connectedProfile;
 	struct csr_roam_connectedinfo connectedInfo;
+	struct csr_roam_connectedinfo prev_assoc_ap_info;
 	struct csr_roam_profile *pCurRoamProfile;
 	tSirBssDescription *pConnectBssDesc;
 	uint16_t NumPmkidCache; /* valid number of pmkid in the cache*/
@@ -897,6 +932,10 @@ struct csr_roam_session {
 	enum csr_roaming_reason roamingReason;
 	bool fCancelRoaming;
 	qdf_mc_timer_t hTimerRoaming;
+#ifdef WLAN_BCN_RECV_FEATURE
+	bool is_bcn_recv_start;
+	bool beacon_report_do_not_resume;
+#endif
 	/* the roamResult that is used when the roaming timer fires */
 	eCsrRoamResult roamResult;
 	/* This is the reason code for join(assoc) failure */
@@ -955,6 +994,7 @@ struct csr_roam_session {
 	bool is_fils_connection;
 	uint16_t fils_seq_num;
 	bool discon_in_progress;
+	bool is_adaptive_11r_connection;
 	struct csr_disconnect_stats disconnect_stats;
 };
 

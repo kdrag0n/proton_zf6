@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -114,8 +114,13 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 #define SIR_KRK_KEY_LEN 16
 #define SIR_BTK_KEY_LEN 32
 #define SIR_KCK_KEY_LEN 16
+#define KCK_192BIT_KEY_LEN 24
+#define KCK_256BIT_KEY_LEN 32
+
 #define SIR_KEK_KEY_LEN 16
 #define SIR_KEK_KEY_LEN_FILS 64
+#define KEK_256BIT_KEY_LEN 32
+
 #define SIR_REPLAY_CTR_LEN 8
 #define SIR_PMK_LEN  48
 #define SIR_PMKID_LEN 16
@@ -131,7 +136,38 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 #define SIR_UAPSD_FLAG_ACBE     (1 << SIR_UAPSD_BITOFFSET_ACBE)
 #define SIR_UAPSD_GET(ac, mask)      (((mask) & (SIR_UAPSD_FLAG_ ## ac)) >> SIR_UAPSD_BITOFFSET_ ## ac)
 
+/* Roam debugging related macro defines */
+#define MAX_ROAM_DEBUG_BUF_SIZE    250
+#define MAX_ROAM_EVENTS_SUPPORTED  5
+#define ROAM_FAILURE_BUF_SIZE      40
+#define TIME_STRING_LEN            24
+
+#define ROAM_CHANNEL_BUF_SIZE      300
+#define LINE_STR "========================================="
+
+/**
+ * struct mlme_roam_debug_info - Roam debug information storage structure.
+ * @trigger:            Roam trigger related data
+ * @scan:               Roam scan related data structure.
+ * @result:             Roam result parameters.
+ * @data_11kv:          Neighbor report/BTM parameters.
+ */
+struct mlme_roam_debug_info {
+       struct wmi_roam_trigger_info trigger;
+       struct wmi_roam_scan_data scan;
+       struct wmi_roam_result result;
+       struct wmi_neighbor_report_data data_11kv;
+};
 #endif
+
+/*
+ * AKM suites supported by firmware for roaming
+ */
+#define AKM_FT_SAE           0
+#define AKM_FT_SUITEB_SHA384 1
+#define AKM_FT_FILS          2
+#define AKM_SAE              3
+#define AKM_OWE              4
 
 /**
  * enum sir_roam_op_code - Operation to be done by the callback.
@@ -212,6 +248,26 @@ struct wlan_mlme_chain_cfg {
 	uint8_t max_rx_chains_2g;
 	uint8_t max_tx_chains_5g;
 	uint8_t max_rx_chains_5g;
+};
+
+/**
+ * struct wlan_beacon_report - Beacon info to be send to userspace
+ * @vdev_id: vdev id
+ * @ssid: ssid present in beacon
+ * @bssid: bssid present in beacon
+ * @frequency: channel frequency in MHz
+ * @beacon_interval: Interval between two consecutive beacons
+ * @time_stamp: time stamp at which beacon received from AP
+ * @boot_time: Boot time when beacon received
+ */
+struct wlan_beacon_report {
+	uint8_t vdev_id;
+	struct wlan_ssid ssid;
+	struct qdf_mac_addr bssid;
+	uint32_t frequency;
+	uint16_t beacon_interval;
+	qdf_time_t time_stamp;
+	qdf_time_t boot_time;
 };
 
 /* / Result codes Firmware return to Host SW */
@@ -422,10 +478,19 @@ typedef struct sSirSmeReadyReq {
 	uint16_t length;
 	uint16_t transactionId;
 	void *csr_roam_synch_cb;
+	QDF_STATUS (*csr_roam_auth_event_handle_cb)(tpAniSirGlobal mac,
+						    uint8_t vdev_id,
+						    struct qdf_mac_addr bssid);
 	void *pe_roam_synch_cb;
 	void *stop_roaming_cb;
 	QDF_STATUS (*sme_msg_cb)(tpAniSirGlobal mac,
 				 struct scheduler_msg *msg);
+	QDF_STATUS (*pe_disconnect_cb) (tpAniSirGlobal mac,
+					uint8_t vdev_id,
+					uint8_t *deauth_disassoc_frame,
+					uint16_t deauth_disassoc_frame_len,
+					uint16_t reason_code);
+	void *csr_roam_pmkid_req_cb;
 } tSirSmeReadyReq, *tpSirSmeReadyReq;
 
 /**
@@ -739,6 +804,7 @@ struct bss_description {
 	uint8_t WscIeProbeRsp[WSCIE_PROBE_RSP_LEN];
 	uint8_t reservedPadding4;
 	uint32_t tsf_delta;
+	uint32_t adaptive_11r_ap;
 #ifdef WLAN_FEATURE_FILS_SK
 	struct fils_ind_elements fils_info_element;
 #endif
@@ -877,6 +943,7 @@ typedef struct sSirSmeTsmIEInd {
 	tSirTsmIE tsmIe;
 	uint8_t sessionId;
 } tSirSmeTsmIEInd, *tpSirSmeTsmIEInd;
+
 typedef struct sAniTrafStrmMetrics {
 	uint16_t UplinkPktQueueDly;
 	uint16_t UplinkPktQueueDlyHist[4];
@@ -1051,12 +1118,14 @@ typedef struct sSirSmeJoinReq {
 	tAniEdType UCEncryptionType;
 
 	tAniEdType MCEncryptionType;
+	enum ani_akm_type akm;
 
 #ifdef WLAN_FEATURE_11W
 	tAniEdType MgmtEncryptionType;
 #endif
 
 	bool is11Rconnection;
+	bool is_adaptive_11r_connection;
 #ifdef FEATURE_WLAN_ESE
 	bool isESEFeatureIniEnabled;
 	bool isESEconnection;
@@ -1497,6 +1566,7 @@ typedef struct sSirSmeDisassocInd {
 	tAniStaStatStruct perStaStats;  /* STA stats */
 	uint16_t staId;
 	uint32_t reasonCode;
+	bool from_ap;
 } tSirSmeDisassocInd, *tpSirSmeDisassocInd;
 
 /* / Definition for Disassociation confirm */
@@ -1562,6 +1632,7 @@ typedef struct sSirSmeDeauthInd {
 	uint16_t staId;
 	uint32_t reasonCode;
 	int8_t rssi;
+	bool from_ap;
 } tSirSmeDeauthInd, *tpSirSmeDeauthInd;
 
 /* / Definition for stop BSS request message */
@@ -2135,6 +2206,18 @@ struct lim_channel_status {
 };
 
 /**
+ * enum force_1x1_type - enum to specify the type of forced 1x1 ini provided.
+ * @FORCE_1X1_DISABLED: even if the AP is present in OUI, 1x1 will not be forced
+ * @FORCE_1X1_ENABLED_FOR_AS: If antenna sharing supported, then only do 1x1.
+ * @FORCE_1X1_ENABLED_FORCED: If AP present in OUI, force 1x1 connection.
+ */
+enum force_1x1_type {
+	FORCE_1X1_DISABLED,
+	FORCE_1X1_ENABLED_FOR_AS,
+	FORCE_1X1_ENABLED_FORCED,
+};
+
+/**
  * struct lim_scan_channel_status
  * @total_channel: total number of be scanned channel
  * @channel_status_list: channel status info store in this array
@@ -2346,12 +2429,26 @@ struct sir_set_he_bss_color {
  * struct sir_create_session - Used for creating session in monitor mode
  * @type: SME host message type.
  * @msg_len: Length of the message.
+ * @vdev_id: vdev id
  * @bss_id: bss_id for creating the session.
  */
 struct sir_create_session {
 	uint16_t type;
 	uint16_t msg_len;
+	uint8_t vdev_id;
 	struct qdf_mac_addr bss_id;
+};
+
+/**
+ * struct sir_delete_session - Used for deleting session in monitor mode
+ * @type: SME host message type.
+ * @msg_len: Length of the message.
+ * @vdev_id: vdev id.
+ */
+struct sir_delete_session {
+	uint16_t type;
+	uint16_t msg_len;
+	uint8_t vdev_id;
 };
 
 /* Beacon Interval */
@@ -2615,6 +2712,20 @@ typedef struct sAniIbssRouteTable {
 } tAniIbssRouteTable;
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
+/**
+ * struct roam_scan_ch_resp - roam scan chan list response to userspace
+ * @vdev_id: vdev id
+ * @command_resp: command response or async event
+ * @ChannelList: list of roam scan channels
+ * @num_channels: number of roam scan channels
+ */
+struct roam_scan_ch_resp {
+	uint16_t vdev_id;
+	uint16_t num_channels;
+	uint32_t command_resp;
+	uint32_t *chan_list;
+};
+
 typedef struct {
 	uint8_t acvo_uapsd:1;
 	uint8_t acvi_uapsd:1;
@@ -2630,12 +2741,12 @@ typedef struct {
 	uint32_t authentication;
 	uint8_t encryption;
 	uint8_t mcencryption;
+	tAniEdType gp_mgmt_cipher_suite;
 	uint8_t ChannelCount;
 	uint8_t ChannelCache[SIR_ROAM_MAX_CHANNELS];
 #ifdef WLAN_FEATURE_11W
 	bool mfp_enabled;
 #endif
-
 } tSirRoamNetworkType;
 
 typedef struct SirMobilityDomainInfo {
@@ -2736,6 +2847,7 @@ struct roam_ext_params {
  * @pcl_weightage: PCL weightage
  * @channel_congestion_weightage: channel congestion weightage
  * @oce_wan_weightage: OCE WAN metrics weightage
+ * @vendor_roam_score_algorithm: Preferred vendor roam score algorithm
  */
 struct  sir_weight_config {
 	uint8_t rssi_weightage;
@@ -2749,6 +2861,7 @@ struct  sir_weight_config {
 	uint8_t pcl_weightage;
 	uint8_t channel_congestion_weightage;
 	uint8_t oce_wan_weightage;
+	uint32_t vendor_roam_score_algorithm;
 };
 
 struct sir_rssi_cfg_score  {
@@ -2809,6 +2922,7 @@ struct sir_score_config {
 	uint32_t band_weight_per_index;
 	uint32_t roam_score_delta;
 	uint32_t roam_score_delta_bitmap;
+	uint32_t cand_min_roam_score_delta;
 };
 
 /**
@@ -2853,6 +2967,14 @@ struct mawc_params {
 	int8_t mawc_roam_ap_rssi_threshold;
 	uint8_t mawc_roam_rssi_high_adjust;
 	uint8_t mawc_roam_rssi_low_adjust;
+};
+
+/**
+ * struct roam_sync_timeout_timer_info - Info related to roam sync timer
+ * @vdev_id: Vdev id for which host waiting roam sync ind from fw
+ */
+struct roam_sync_timeout_timer_info {
+	uint8_t vdev_id;
 };
 
 typedef struct sSirRoamOffloadScanReq {
@@ -2907,6 +3029,10 @@ typedef struct sSirRoamOffloadScanReq {
 	struct pmkid_mode_bits pmkid_modes;
 	uint32_t roam_preauth_retry_count;
 	uint32_t roam_preauth_no_ack_timeout;
+
+	/* Idle/Disconnect roam parameters */
+	struct wmi_idle_roam_params idle_roam_params;
+	struct wmi_disconnect_roam_params disconnect_roam_params;
 #endif
 	struct roam_ext_params roam_params;
 	uint8_t  middle_of_roaming;
@@ -2929,8 +3055,10 @@ typedef struct sSirRoamOffloadScanReq {
 	uint32_t btm_solicited_timeout;
 	uint32_t btm_max_attempt_cnt;
 	uint32_t btm_sticky_time;
+	uint32_t btm_query_bitmask;
 	uint32_t rct_validity_timer;
 	uint32_t disassoc_timer_threshold;
+	uint32_t btm_trig_min_candidate_score;
 	struct wmi_11k_offload_params offload_11k_params;
 	uint32_t ho_delay_for_rx;
 	uint32_t min_delay_btw_roam_scans;
@@ -2940,6 +3068,13 @@ typedef struct sSirRoamOffloadScanReq {
 	bool bss_load_trig_enabled;
 	struct wmi_bss_load_config bss_load_config;
 	bool roaming_scan_policy;
+	uint32_t roam_scan_inactivity_time;
+	uint32_t roam_inactive_data_packet_count;
+	uint32_t roam_scan_period_after_inactivity;
+	uint32_t full_roam_scan_period;
+	struct roam_trigger_min_rssi min_rssi_params[NUM_OF_ROAM_TRIGGERS];
+	struct roam_trigger_score_delta score_delta_param[NUM_OF_ROAM_TRIGGERS];
+	bool is_adaptive_11r_connection;
 } tSirRoamOffloadScanReq, *tpSirRoamOffloadScanReq;
 
 typedef struct sSirRoamOffloadScanRsp {
@@ -3895,7 +4030,8 @@ typedef struct sSirSmeRoamOffloadSynchInd {
 	uint8_t rssi;
 	uint8_t roamReason;
 	uint32_t chan_freq;
-	uint8_t kck[SIR_KCK_KEY_LEN];
+	uint8_t kck[KCK_256BIT_KEY_LEN];
+	uint8_t kck_len;
 	uint32_t kek_len;
 	uint8_t kek[SIR_KEK_KEY_LEN_FILS];
 	uint32_t   pmk_len;
@@ -3940,6 +4076,29 @@ struct sir_wisa_params {
 	uint8_t vdev_id;
 };
 
+/**
+ * typedef enum wifi_scan_flags - wifi scan flags
+ * @WIFI_SCAN_FLAG_INTERRUPTED: Indicates that scan results are not complete
+ *				because probes were not sent on some channels
+ */
+typedef enum {
+	WIFI_SCAN_FLAG_INTERRUPTED = 1,
+} wifi_scan_flags;
+
+typedef enum {
+	WIFI_BAND_UNSPECIFIED,
+	WIFI_BAND_BG = 1,       /* 2.4 GHz */
+	WIFI_BAND_A = 2,        /* 5 GHz without DFS */
+	WIFI_BAND_ABG = 3,      /* 2.4 GHz + 5 GHz; no DFS */
+	WIFI_BAND_A_DFS_ONLY = 4,       /* 5 GHz DFS only */
+	/* 5 is reserved */
+	WIFI_BAND_A_WITH_DFS = 6,       /* 5 GHz with DFS */
+	WIFI_BAND_ABG_WITH_DFS = 7,     /* 2.4 GHz + 5 GHz with DFS */
+
+	/* Keep it last */
+	WIFI_BAND_MAX
+} tWifiBand;
+
 #ifdef FEATURE_WLAN_EXTSCAN
 
 #define WLAN_EXTSCAN_MAX_CHANNELS                 36
@@ -3971,29 +4130,6 @@ typedef enum {
 	/* Keep this last */
 	eSIR_EXTSCAN_CALLBACK_TYPE_MAX,
 } tSirExtScanCallbackType;
-
-/**
- * typedef enum wifi_scan_flags - wifi scan flags
- * @WIFI_SCAN_FLAG_INTERRUPTED: Indicates that scan results are not complete
- *				because probes were not sent on some channels
- */
-typedef enum {
-	WIFI_SCAN_FLAG_INTERRUPTED = 1,
-} wifi_scan_flags;
-
-typedef enum {
-	WIFI_BAND_UNSPECIFIED,
-	WIFI_BAND_BG = 1,       /* 2.4 GHz */
-	WIFI_BAND_A = 2,        /* 5 GHz without DFS */
-	WIFI_BAND_ABG = 3,      /* 2.4 GHz + 5 GHz; no DFS */
-	WIFI_BAND_A_DFS_ONLY = 4,       /* 5 GHz DFS only */
-	/* 5 is reserved */
-	WIFI_BAND_A_WITH_DFS = 6,       /* 5 GHz with DFS */
-	WIFI_BAND_ABG_WITH_DFS = 7,     /* 2.4 GHz + 5 GHz with DFS */
-
-	/* Keep it last */
-	WIFI_BAND_MAX
-} tWifiBand;
 
 /**
  * enum wifi_extscan_event_type - extscan event type
@@ -7000,6 +7136,7 @@ struct sme_rcpi_req {
  * @REASSOC_IN_PROGRESS: reassociation is in progress
  * @EAPOL_IN_PROGRESS: STA/P2P-CLI is in middle of EAPOL/WPS exchange
  * @SAP_EAPOL_IN_PROGRESS: SAP/P2P-GO is in middle of EAPOL/WPS exchange
+ * @SAP_CONNECTION_IN_PROGRESS: SAP/P2P-GO is in middle of connection.
  */
 enum scan_reject_states {
 	SCAN_REJECT_DEFAULT = 0,
@@ -7007,6 +7144,7 @@ enum scan_reject_states {
 	REASSOC_IN_PROGRESS,
 	EAPOL_IN_PROGRESS,
 	SAP_EAPOL_IN_PROGRESS,
+	SAP_CONNECTION_IN_PROGRESS,
 };
 
 /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -650,7 +650,8 @@
 #define SIR_MAX_BEACON_SIZE    512
 #define SIR_MAX_PROBE_RESP_SIZE 512
 
-/* / Status Code (present in Management response frames) enum */
+/* Status Code (present in Management response frames) enum */
+/* (IEEE Std 802.11-2016, 9.4.1.9, Table 9-46) */
 
 typedef enum eSirMacStatusCodes {
 	eSIR_MAC_SUCCESS_STATUS = 0,    /* Reserved */
@@ -728,9 +729,8 @@ typedef enum eSirMacStatusCodes {
 	eSIR_MAC_DEST_STA_NOT_QSTA_STATUS = 50, /* The Destination STA is not a QoS STA */
 	eSIR_MAC_INVALID_LISTEN_INTERVAL_STATUS = 51,   /* Association denied because the ListenInterval is too large */
 
-	eSIR_MAC_DSSS_CCK_RATE_MUST_SUPPORT_STATUS = 52,        /* FIXME: */
-	eSIR_MAC_DSSS_CCK_RATE_NOT_SUPPORT_STATUS = 53,
-	eSIR_MAC_PSMP_CONTROLLED_ACCESS_ONLY_STATUS = 54,
+	eSIR_MAC_INVALID_FT_ACTION_FRAME_COUNT = 52,
+	eSIR_MAC_INVALID_PMKID = 53,
 #ifdef FEATURE_WLAN_ESE
 	eSIR_MAC_ESE_UNSPECIFIED_QOS_FAILURE_STATUS = 200,      /* ESE-Unspecified, QoS related failure in (Re)Assoc response frames */
 	eSIR_MAC_ESE_TSPEC_REQ_REFUSED_STATUS = 201,    /* ESE-TSPEC request refused due to AP's policy configuration in AddTs Rsp, (Re)Assoc Rsp. */
@@ -757,7 +757,7 @@ typedef enum eSirMacReasonCodes {
 	eSIR_MAC_STA_NOT_PRE_AUTHENTICATED_REASON = 9,  /* Station requesting (re)association is not authenticated with responding station */
 	eSIR_MAC_PWR_CAPABILITY_BAD_REASON = 10,        /* Disassociated because the information in the Power Capability element is unacceptable */
 	eSIR_MAC_SPRTD_CHANNELS_BAD_REASON = 11,        /* Disassociated because the information in the Supported Channels element is unacceptable */
-	/* reserved                                        12 */
+	eSIR_MAC_BSS_TRANSITION_DISASSOC = 12,
 	eSIR_MAC_INVALID_IE_REASON = 13,        /* Invalid information element, i.e., an information element defined in this standard for */
 	/* which the content does not meet the specifications in Clause 7 */
 	eSIR_MAC_MIC_FAILURE_REASON = 14,       /* Message integrity code (MIC) failure */
@@ -793,7 +793,29 @@ typedef enum eSirMacReasonCodes {
 	eSIR_MAC_CIPHER_NOT_SUPPORTED_REASON = 45,      /* Peer STA does not support the requested cipher suite */
 	eSIR_MAC_DISASSOC_DUE_TO_FTHANDOFF_REASON = 46, /* FT reason */
 	/* reserved                                         47 - 65535. */
-	eSIR_BEACON_MISSED = 65534,     /* We invented this to tell beacon missed case */
+
+	/*
+	 * Internal reason codes: Add any internal reason code just after
+	 * eSIR_MAC_REASON_PROP_START and decrease the value of
+	 * eSIR_MAC_REASON_PROP_START accordingly.
+	 */
+	eSIR_MAC_REASON_PROP_START = 65519,
+	eSIR_MAC_HOST_TRIGGERED_ROAM_FAILURE  = 65519,
+	eSIR_MAC_FW_TRIGGERED_ROAM_FAILURE = 65520,
+	eSIR_MAC_GATEWAY_REACHABILITY_FAILURE = 65521,
+	eSIR_MAC_UNSUPPORTED_CHANNEL_CSA = 65522,
+	eSIR_MAC_OPER_CHANNEL_DISABLED_INDOOR = 65523,
+	eSIR_MAC_OPER_CHANNEL_USER_DISABLED = 65524,
+	eSIR_MAC_DEVICE_RECOVERY = 65525,
+	eSIR_MAC_KEY_TIMEOUT = 65526,
+	eSIR_MAC_OPER_CHANNEL_BAND_CHANGE = 65527,
+	eSIR_MAC_IFACE_DOWN = 65528,
+	eSIR_MAC_PEER_XRETRY_FAIL = 65529,
+	eSIR_MAC_PEER_INACTIVITY = 65530,
+	eSIR_MAC_SA_QUERY_TIMEOUT = 65531,
+	eSIR_MAC_CHANNEL_SWITCH_FAILED = 65532,
+	eSIR_MAC_BEACON_MISSED = 65533,
+	eSIR_MAC_USER_TRIGGERED_ROAM_FAILURE = 65534,
 } tSirMacReasonCodes;
 
 /* BA Initiator v/s Recipient */
@@ -1987,6 +2009,7 @@ typedef struct sSirMacAuthFrameBody {
 	uint8_t challengeText[SIR_MAC_AUTH_CHALLENGE_LENGTH];
 #ifdef WLAN_FEATURE_FILS_SK
 	tSirMacRsnInfo rsn_ie;
+	struct mac_ft_ie ft_ie;
 	uint8_t assoc_delay_info;
 	uint8_t session[SIR_FILS_SESSION_LENGTH];
 	uint8_t wrapped_data_len;
@@ -2085,6 +2108,43 @@ typedef struct sSirMacLinkReport {
 } tSirMacLinkReport, *tpSirMacLinkReport;
 
 #define BEACON_REPORT_MAX_IES 224       /* Refer IEEE 802.11k-2008, Table 7-31d */
+/* Max number of beacon reports per channel supported in the driver */
+#define MAX_BEACON_REPORTS 8
+/* Offset of IEs after Fixed Fields in Beacon Frame */
+#define BEACON_FRAME_IES_OFFSET 12
+
+/**
+ * struct bcn_report_frame_body_frag_id - beacon report reported frame body
+ *					  fragment ID sub element params
+ * @id: report ID
+ * @frag_id: fragment ID
+ * @more_frags: more frags present or not present
+ */
+struct bcn_report_frame_body_frag_id {
+	uint8_t id;
+	uint8_t frag_id;
+	bool more_frags;
+};
+
+/**
+ * struct sSirMacBeaconReport - Beacon Report Structure
+ * @regClass: Regulatory Class
+ * @channel: Channel for which the current report is being sent
+ * @measStartTime: RRM scan start time for this report
+ * @measDuration: Scan duration for the current channel
+ * @phyType: Condensed Phy Type
+ * @bcnProbeRsp: Beacon or probe response being reported
+ * @rsni: Received signal-to-noise indication
+ * @rcpi: Received Channel Power indication
+ * @bssid: BSSID of the AP requesting the beacon report
+ * @antennaId: Number of Antennas used for measurement
+ * @parentTSF: measuring STA's TSF timer value
+ * @numIes: Number of IEs included in the beacon frames
+ * @last_bcn_report_ind_support: Support for Last beacon report indication
+ * @is_last_bcn_report: Is the current report last or more reports present
+ * @frame_body_frag_id: Reported Frame Body Frag Id sub-element params
+ * @Ies: IEs included in the beacon report
+ */
 typedef struct sSirMacBeaconReport {
 	uint8_t regClass;
 	uint8_t channel;
@@ -2098,6 +2158,9 @@ typedef struct sSirMacBeaconReport {
 	uint8_t antennaId;
 	uint32_t parentTSF;
 	uint8_t numIes;
+	uint8_t last_bcn_report_ind_support;
+	uint8_t is_last_bcn_report;
+	struct bcn_report_frame_body_frag_id frame_body_frag_id;
 	uint8_t Ies[BEACON_REPORT_MAX_IES];
 
 } tSirMacBeaconReport, *tpSirMacBeaconReport;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -73,7 +73,7 @@
 #define GET_LIM_PROCESS_DEFD_MESGS(pMac) (pMac->lim.gLimProcessDefdMsgs)
 #define SET_LIM_PROCESS_DEFD_MESGS(pMac, val) \
 		pMac->lim.gLimProcessDefdMsgs = val; \
-		pe_debug("%s Defer LIM messages - value %d", __func__, val);
+		pe_debug("Defer LIM msg %d", val);
 
 /* LIM exported function templates */
 #define LIM_MIN_BCN_PR_LENGTH  12
@@ -255,13 +255,59 @@ tMgmtFrmDropReason lim_is_pkt_candidate_for_drop(tpAniSirGlobal pMac,
 						 uint8_t *pRxPacketInfo,
 						 uint32_t subType);
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
-QDF_STATUS pe_roam_synch_callback(tpAniSirGlobal mac_ctx,
-	struct sSirSmeRoamOffloadSynchInd *roam_sync_ind_ptr,
-	tpSirBssDescription  bss_desc_ptr, enum sir_roam_op_code reason);
+/**
+ * pe_roam_synch_callback() - Callback registered at wma, gets invoked when
+ * ROAM SYNCH event is received from firmware
+ * @mac_ctx: global mac context
+ * @roam_sync_ind_ptr: Structure with roam synch parameters
+ * @bss_desc_ptr: bss_description pointer for new bss to which the firmware has
+ * started roaming
+ * @reason: Operation to be done by the callback
+ *
+ * This is a PE level callback called from WMA to complete the roam synch
+ * propagation at PE level and also fill the BSS descriptor which will be
+ * helpful further to complete the roam synch propagation.
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+pe_roam_synch_callback(tpAniSirGlobal mac_ctx,
+		       struct sSirSmeRoamOffloadSynchInd *roam_sync_ind_ptr,
+		       tpSirBssDescription  bss_desc_ptr,
+		       enum sir_roam_op_code reason);
+
+/**
+ * pe_disconnect_callback() - Callback to handle deauth event is received
+ * from firmware
+ * @mac: pointer to global mac context
+ * @vdev_id: VDEV in which the event was received
+ * @deauth_disassoc_frame: Deauth/disassoc frame received from firmware
+ * @deauth_disassoc_frame_len: Length of @deauth_disassoc_frame
+ * @reason_code: Fw sent reason code if disassoc/deauth frame is not
+ * available
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+pe_disconnect_callback(tpAniSirGlobal mac, uint8_t vdev_id,
+		       uint8_t *deauth_disassoc_frame,
+		       uint16_t deauth_disassoc_frame_len,
+		       uint16_t reason_code);
 #else
-static inline QDF_STATUS pe_roam_synch_callback(tpAniSirGlobal mac_ctx,
-	struct sSirSmeRoamOffloadSynchInd *roam_sync_ind_ptr,
-	tpSirBssDescription  bss_desc_ptr, enum sir_roam_op_code reason)
+static inline QDF_STATUS
+pe_roam_synch_callback(tpAniSirGlobal mac,
+		       struct sSirSmeRoamOffloadSynchInd *roam_sync_ind_ptr,
+		       tpSirBssDescription  bss_desc_ptr,
+		       enum sir_roam_op_code reason)
+{
+	return QDF_STATUS_E_NOSUPPORT;
+}
+
+static inline QDF_STATUS
+pe_disconnect_callback(tpAniSirGlobal mac, uint8_t vdev_id,
+		       uint8_t *deauth_disassoc_frame,
+		       uint16_t deauth_disassoc_frame_len,
+		       uint16_t reason_code)
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }
@@ -288,10 +334,21 @@ void lim_update_lost_link_info(tpAniSirGlobal mac, tpPESession session,
 void lim_mon_init_session(tpAniSirGlobal mac_ptr,
 			  struct sir_create_session *msg);
 
+/**
+ * lim_mon_deinit_session() - delete PE session for monitor mode operation
+ * @mac_ptr: mac pointer
+ * @msg: Pointer to struct sir_delete_session type.
+ *
+ * Return: NONE
+ */
+void lim_mon_deinit_session(tpAniSirGlobal mac_ptr,
+			    struct sir_delete_session *msg);
+
 #define limGetQosMode(psessionEntry, pVal) (*(pVal) = (psessionEntry)->limQosEnabled)
 #define limGetWmeMode(psessionEntry, pVal) (*(pVal) = (psessionEntry)->limWmeEnabled)
 #define limGetWsmMode(psessionEntry, pVal) (*(pVal) = (psessionEntry)->limWsmEnabled)
 #define limGet11dMode(psessionEntry, pVal) (*(pVal) = (psessionEntry)->lim11dEnabled)
+
 /* ----------------------------------------------------------------------- */
 static inline void lim_get_phy_mode(tpAniSirGlobal pMac, uint32_t *phyMode,
 				    tpPESession psessionEntry)

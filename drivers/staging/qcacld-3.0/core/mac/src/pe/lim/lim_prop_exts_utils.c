@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -178,22 +178,45 @@ static void lim_objmgr_update_vdev_nss(struct wlan_objmgr_psoc *psoc,
 	wlan_vdev_obj_unlock(vdev);
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
 }
+
+#ifdef WLAN_ADAPTIVE_11R
 /**
- * lim_extract_ap_capability() - extract AP's HCF/WME/WSM capability
- * @mac_ctx: Pointer to Global MAC structure
- * @p_ie: Pointer to starting IE in Beacon/Probe Response
- * @ie_len: Length of all IEs combined
- * @qos_cap: Bits are set according to capabilities
- * @prop_cap: Pointer to prop info IE.
- * @uapsd: pointer to uapsd
- * @local_constraint: Pointer to local power constraint.
- * @session: A pointer to session entry.
+ * lim_extract_adaptive_11r_cap() - check if the AP has adaptive 11r
+ * IE
+ * @ie: Pointer to the IE
+ * @ie_len: ie Length
  *
- * This function is called to extract AP's HCF/WME/WSM capability
- * from the IEs received from it in Beacon/Probe Response frames
- *
- * Return: None
+ * Return: True if adaptive 11r IE is present
  */
+static bool lim_extract_adaptive_11r_cap(uint8_t *ie, uint16_t ie_len)
+{
+	const uint8_t *adaptive_ie;
+	uint8_t data;
+	bool adaptive_11r;
+
+	adaptive_ie = wlan_get_vendor_ie_ptr_from_oui(LIM_ADAPTIVE_11R_OUI,
+						      LIM_ADAPTIVE_11R_OUI_SIZE,
+						      ie, ie_len);
+	if (!adaptive_ie)
+		return false;
+
+	if (adaptive_ie[1] < (OUI_LENGTH + 1) ||
+	    adaptive_ie[1] > MAX_ADAPTIVE_11R_IE_LEN)
+		return false;
+
+	data = *(adaptive_ie + OUI_LENGTH + 2);
+	adaptive_11r = (data & 0x1) ? true : false;
+
+	return adaptive_11r;
+}
+
+#else
+static inline bool lim_extract_adaptive_11r_cap(uint8_t *ie, uint16_t ie_len)
+{
+	return false;
+}
+#endif
+
 void
 lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 	uint16_t ie_len, uint8_t *qos_cap, uint16_t *prop_cap, uint8_t *uapsd,
@@ -242,11 +265,6 @@ lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 		mac_ctx->lim.htCapabilityPresentInBeacon = 1;
 	else
 		mac_ctx->lim.htCapabilityPresentInBeacon = 0;
-
-	pe_debug("Bcon: VHTCap.present: %d SU Beamformer: %d BSS_VHT_CAPABLE: %d",
-		beacon_struct->VHTCaps.present,
-		beacon_struct->VHTCaps.suBeamFormerCap,
-		IS_BSS_VHT_CAPABLE(beacon_struct->VHTCaps));
 
 	vht_op = &beacon_struct->VHTOperation;
 	if (IS_BSS_VHT_CAPABLE(beacon_struct->VHTCaps) &&
@@ -359,10 +377,6 @@ lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 				session->ch_center_freq_seg1 = 0;
 		}
 		session->ch_width = vht_ch_wd + 1;
-		pe_debug("cntr_freq0: %d cntr_freq1: %d width: %d",
-				session->ch_center_freq_seg0,
-				session->ch_center_freq_seg1,
-				session->ch_width);
 		if (CH_WIDTH_80MHZ < session->ch_width) {
 			session->vht_config.su_beam_former = 0;
 			session->nss = 1;
@@ -429,6 +443,9 @@ lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 
 	lim_objmgr_update_vdev_nss(mac_ctx->psoc, session->smeSessionId,
 				   session->nss);
+
+	session->is_adaptive_11r_connection =
+			lim_extract_adaptive_11r_cap(p_ie, ie_len);
 	qdf_mem_free(beacon_struct);
 	return;
 } /****** end lim_extract_ap_capability() ******/

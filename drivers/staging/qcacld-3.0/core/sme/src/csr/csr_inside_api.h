@@ -86,10 +86,11 @@
 #define CSR_ACTIVE_SCAN_LIST_CMD_TIMEOUT (1000*30)
 #endif
 /* ***************************************************************************
- * The MAX BSSID Count should be lower than the command timeout value and it
- * can be of a fraction of 1/3 to 1/2 of the total command timeout value.
+ * The MAX BSSID Count should be lower than the command timeout value.
+ * As in some case auth timeout can take upto 5 sec (in case of SAE auth) try
+ * (command timeout/5000 - 1) candidates.
  * ***************************************************************************/
-#define CSR_MAX_BSSID_COUNT     (SME_ACTIVE_LIST_CMD_TIMEOUT_VALUE/3000) - 2
+#define CSR_MAX_BSSID_COUNT     (SME_ACTIVE_LIST_CMD_TIMEOUT_VALUE/5000) - 1
 #define CSR_CUSTOM_CONC_GO_BI    100
 extern uint8_t csr_wpa_oui[][CSR_WPA_OUI_SIZE];
 bool csr_is_supported_channel(tpAniSirGlobal pMac, uint8_t channelId);
@@ -334,10 +335,12 @@ eRoamCmdStatus csr_get_roam_complete_status(tpAniSirGlobal pMac,
 					    uint32_t sessionId);
 /* pBand can be NULL if caller doesn't need to get it */
 QDF_STATUS csr_roam_issue_disassociate_cmd(tpAniSirGlobal pMac,
-					uint32_t sessionId,
-					   eCsrRoamDisconnectReason reason);
+					   uint32_t sessionId,
+					   eCsrRoamDisconnectReason reason,
+					   tSirMacReasonCodes mac_reason);
 QDF_STATUS csr_roam_disconnect_internal(tpAniSirGlobal pMac, uint32_t sessionId,
-					eCsrRoamDisconnectReason reason);
+					eCsrRoamDisconnectReason reason,
+					tSirMacReasonCodes mac_reason);
 /* pCommand may be NULL */
 void csr_roam_remove_duplicate_command(tpAniSirGlobal pMac, uint32_t sessionId,
 				       tSmeCmd *pCommand,
@@ -720,14 +723,6 @@ QDF_STATUS csr_roam_reassoc(tpAniSirGlobal pMac, uint32_t sessionId,
 			    uint32_t *pRoamId);
 
 /*
- * csr_roam_reconnect() -
- * To disconnect and reconnect with the same profile
- *
- * Return QDF_STATUS. It returns fail if currently not connected
- */
-QDF_STATUS csr_roam_reconnect(tpAniSirGlobal pMac, uint32_t sessionId);
-
-/*
  * csr_roam_set_pmkid_cache() -
  * return the PMKID candidate list
  *
@@ -870,16 +865,18 @@ QDF_STATUS csr_apply_channel_and_power_list(tpAniSirGlobal pMac);
 QDF_STATUS csr_roam_connect_to_last_profile(tpAniSirGlobal pMac,
 					uint32_t sessionId);
 
-/*
- * csr_roam_disconnect() -
- *  To disconnect from a network
+/**
+ * csr_roam_disconnect() - To disconnect from a network
+ * @mac: pointer to mac context
+ * @session_id: Session ID
+ * @reason: CSR disconnect reason code as per @enum eCsrRoamDisconnectReason
+ * @mac_reason: Mac Disconnect reason code as per @enum eSirMacReasonCodes
  *
- * Reason -- To indicate the reason for disconnecting. Currently, only
- * eCSR_DISCONNECT_REASON_MIC_ERROR is meanful.
  * Return QDF_STATUS
  */
 QDF_STATUS csr_roam_disconnect(tpAniSirGlobal pMac, uint32_t sessionId,
-			       eCsrRoamDisconnectReason reason);
+			       eCsrRoamDisconnectReason reason,
+			       tSirMacReasonCodes mac_reason);
 
 /* This function is used to stop a BSS. It is similar of csr_roamIssueDisconnect
  * but this function doesn't have any logic other than blindly trying to stop
@@ -985,8 +982,6 @@ QDF_STATUS csr_dequeue_roam_command(tpAniSirGlobal pMac,
 				enum csr_roam_reason reason,
 				uint8_t session_id);
 void csr_init_occupied_channels_list(tpAniSirGlobal pMac, uint8_t sessionId);
-bool csr_neighbor_roam_is_new_connected_profile(tpAniSirGlobal pMac,
-						uint8_t sessionId);
 bool csr_neighbor_roam_connected_profile_match(tpAniSirGlobal pMac,
 					       uint8_t sessionId,
 					       struct tag_csrscan_result

@@ -296,8 +296,8 @@ static void lim_process_sae_auth_frame(tpAniSirGlobal mac_ctx,
 	body_ptr = WMA_GET_RX_MPDU_DATA(rx_pkt_info);
 	frame_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt_info);
 
-	pe_debug("Received SAE Auth frame type %d subtype %d",
-		mac_hdr->fc.type, mac_hdr->fc.subType);
+	pe_nofl_info("Received SAE Auth frame type %d subtype %d",
+		     mac_hdr->fc.type, mac_hdr->fc.subType);
 
 	if (pe_session->limMlmState != eLIM_MLM_WT_SAE_AUTH_STATE)
 		pe_err("received SAE auth response in unexpected state %x",
@@ -698,8 +698,7 @@ static void lim_process_auth_frame_type2(tpAniSirGlobal mac_ctx,
 			return;
 		}
 
-		pe_debug("Alloc new data: %pK peer", auth_node);
-		lim_print_mac_addr(mac_ctx, mac_hdr->sa, LOGD);
+		pe_debug("add new auth node: for %pM", mac_hdr->sa);
 		qdf_mem_copy((uint8_t *) auth_node->peerMacAddr,
 				mac_ctx->lim.gpLimMlmAuthReq->peerMacAddr,
 				sizeof(tSirMacAddr));
@@ -1150,11 +1149,6 @@ lim_process_auth_frame(tpAniSirGlobal mac_ctx, uint8_t *rx_pkt_info,
 	curr_seq_num = (mac_hdr->seqControl.seqNumHi << 4) |
 		(mac_hdr->seqControl.seqNumLo);
 
-	pe_debug("Sessionid: %d System role: %d limMlmState: %d: Auth response Received BSSID: "MAC_ADDRESS_STR" RSSI: %d",
-		 pe_session->peSessionId, GET_LIM_SYSTEM_ROLE(pe_session),
-		 pe_session->limMlmState, MAC_ADDR_ARRAY(mac_hdr->bssId),
-		 (uint) abs((int8_t) WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info)));
-
 	if (pe_session->prev_auth_seq_num == curr_seq_num &&
 	    mac_hdr->fc.retry) {
 		pe_debug("auth frame, seq num: %d is already processed, drop it",
@@ -1172,7 +1166,13 @@ lim_process_auth_frame(tpAniSirGlobal mac_ctx, uint8_t *rx_pkt_info,
 		return;
 	}
 	auth_alg = *(uint16_t *) body_ptr;
-	pe_debug("auth_alg %d ", auth_alg);
+
+	pe_nofl_info("Auth RX: vdev %d sys role %d lim_state %d from " QDF_MAC_ADDR_STR " rssi %d auth_alg %d seq %d",
+		     pe_session->smeSessionId, GET_LIM_SYSTEM_ROLE(pe_session),
+		     pe_session->limMlmState,
+		     QDF_MAC_ADDR_ARRAY(mac_hdr->bssId),
+		     WMA_GET_RX_RSSI_NORMALIZED(rx_pkt_info),
+		     auth_alg, curr_seq_num);
 
 	/* Restore default failure timeout */
 	if (QDF_P2P_CLIENT_MODE == pe_session->pePersona &&
@@ -1422,12 +1422,6 @@ lim_process_auth_frame(tpAniSirGlobal mac_ctx, uint8_t *rx_pkt_info,
 
 	rx_auth_frm_body = rx_auth_frame;
 
-	pe_debug("Received Auth frame with type: %d seqnum: %d status: %d %d",
-		(uint32_t) rx_auth_frm_body->authAlgoNumber,
-		(uint32_t) rx_auth_frm_body->authTransactionSeqNumber,
-		(uint32_t) rx_auth_frm_body->authStatusCode,
-		(uint32_t) mac_ctx->lim.gLimNumPreAuthContexts);
-
 	if (!lim_is_valid_fils_auth_frame(mac_ctx, pe_session,
 			rx_auth_frm_body)) {
 		pe_err("Received invalid FILS auth packet");
@@ -1490,15 +1484,56 @@ free:
 		qdf_mem_free(plainbody);
 }
 
+/**
+ * lim_process_sae_preauth_frame() - Send the WPA3 preauth SAE frame received
+ * to the user space.
+ * @mac: Global mac context
+ * @rx_pkt: Received auth packet
+ *
+ * SAE auth frame will be received with no session if its SAE preauth during
+ * roaming offloaded to the host. Forward this frame to the wpa supplicant.
+ *
+ * Return: True if auth algo is SAE else false
+ */
+static
+bool lim_process_sae_preauth_frame(tpAniSirGlobal mac, uint8_t *rx_pkt)
+{
+	tpSirMacMgmtHdr dot11_hdr;
+	uint16_t auth_alg, frm_len;
+	uint8_t *frm_body;
+
+	dot11_hdr = WMA_GET_RX_MAC_HEADER(rx_pkt);
+	frm_body = WMA_GET_RX_MPDU_DATA(rx_pkt);
+	frm_len = WMA_GET_RX_PAYLOAD_LEN(rx_pkt);
+
+	if (frm_len < 2) {
+		pe_debug("LFR3: Invalid auth frame len:%d", frm_len);
+		return false;
+	}
+
+	auth_alg = *(uint16_t *)frm_body;
+	if (auth_alg != eSIR_AUTH_TYPE_SAE)
+		return false;
+
+	pe_debug("LFR3: SAE auth frame: seq_ctrl:0x%X auth_transaction_num:%d",
+		 ((dot11_hdr->seqControl.seqNumHi << 8) |
+		  (dot11_hdr->seqControl.seqNumLo << 4) |
+		  (dot11_hdr->seqControl.fragNum)), *(uint16_t *)(frm_body + 2));
+
+	lim_send_sme_mgmt_frame_ind(mac, dot11_hdr->fc.subType,
+				    (uint8_t *)dot11_hdr,
+				    frm_len + sizeof(tSirMacMgmtHdr), 0,
+				    WMA_GET_RX_CH(rx_pkt), NULL,
+				    WMA_GET_RX_RSSI_NORMALIZED(rx_pkt));
+	return true;
+}
+
 /*----------------------------------------------------------------------
  *
  * Pass the received Auth frame. This is possibly the pre-auth from the
  * neighbor AP, in the same mobility domain.
  * This will be used in case of 11r FT.
  *
- * !!!! This is going to be renoved for the next checkin. We will be creating
- * the session before sending out the Auth. Thus when auth response
- * is received we will have a session in progress. !!!!!
  ***----------------------------------------------------------------------
  */
 QDF_STATUS lim_process_auth_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd,
@@ -1512,6 +1547,7 @@ QDF_STATUS lim_process_auth_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd,
 	tSirMacAuthFrameBody *pRxAuthFrameBody = NULL;
 	QDF_STATUS ret_status = QDF_STATUS_E_FAILURE;
 	int i;
+	bool sae_auth_frame;
 
 	pHdr = WMA_GET_RX_MAC_HEADER(pBd);
 	pBody = WMA_GET_RX_MPDU_DATA(pBd);
@@ -1520,6 +1556,15 @@ QDF_STATUS lim_process_auth_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd,
 	pe_debug("Auth Frame Received: BSSID " MAC_ADDRESS_STR " (RSSI %d)",
 		 MAC_ADDR_ARRAY(pHdr->bssId),
 		 (uint) abs((int8_t) WMA_GET_RX_RSSI_NORMALIZED(pBd)));
+
+	if (frameLen == 0) {
+		pe_err("Frame len = 0");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	sae_auth_frame = lim_process_sae_preauth_frame(pMac, pBd);
+	if (sae_auth_frame)
+		return QDF_STATUS_SUCCESS;
 
 	/* Auth frame has come on a new BSS, however, we need to find the session
 	 * from where the auth-req was sent to the new AP
@@ -1547,10 +1592,6 @@ QDF_STATUS lim_process_auth_frame_no_session(tpAniSirGlobal pMac, uint8_t *pBd,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if (frameLen == 0) {
-		pe_err("Error: Frame len = 0");
-		return QDF_STATUS_E_FAILURE;
-	}
 	lim_print_mac_addr(pMac, pHdr->bssId, LOGD);
 	lim_print_mac_addr(pMac,
 			   psessionEntry->ftPEContext.pFTPreAuthReq->preAuthbssId,

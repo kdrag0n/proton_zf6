@@ -55,6 +55,7 @@
 #include <cdp_txrx_handle.h>
 #include <pld_common.h>
 #include <htt_internal.h>
+#include <wlan_pkt_capture_ucfg_api.h>
 
 #ifndef OL_RX_INDICATION_MAX_RECORDS
 #define OL_RX_INDICATION_MAX_RECORDS 2048
@@ -86,7 +87,7 @@ struct ol_rx_ind_record {
 
 #ifdef OL_RX_INDICATION_RECORD
 static uint32_t ol_rx_ind_record_index;
-static struct ol_rx_ind_record
+struct ol_rx_ind_record
 	      ol_rx_indication_record_history[OL_RX_INDICATION_MAX_RECORDS];
 
 /**
@@ -1159,8 +1160,8 @@ ol_rx_filter(struct ol_txrx_vdev_t *vdev,
 
 #ifdef WLAN_FEATURE_TSF_PLUS
 #ifdef CONFIG_HL_SUPPORT
-static inline void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
-				   void *rx_desc, qdf_nbuf_t msdu)
+void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
+		     void *rx_desc, qdf_nbuf_t msdu)
 {
 	struct htt_rx_ppdu_desc_t *rx_ppdu_desc;
 
@@ -1175,9 +1176,24 @@ static inline void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
 	msdu->tstamp = ns_to_ktime((u_int64_t)rx_ppdu_desc->tsf32 *
 				   NSEC_PER_USEC);
 }
+
+static inline void ol_rx_timestamp_update(ol_txrx_pdev_handle pdev,
+					  qdf_nbuf_t head_msdu,
+					  qdf_nbuf_t tail_msdu)
+{
+	qdf_nbuf_t loop_msdu;
+	struct htt_host_rx_desc_base *rx_desc;
+
+	loop_msdu = head_msdu;
+	while (loop_msdu) {
+		rx_desc = htt_rx_msdu_desc_retrieve(pdev->htt_pdev, loop_msdu);
+		ol_rx_timestamp(pdev->ctrl_pdev, rx_desc, loop_msdu);
+		loop_msdu = qdf_nbuf_next(loop_msdu);
+	}
+}
 #else
-static inline void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
-				   void *rx_desc, qdf_nbuf_t msdu)
+void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
+		     void *rx_desc, qdf_nbuf_t msdu)
 {
 	struct htt_host_rx_desc_base *rx_mpdu_desc = rx_desc;
 	uint32_t tsf64_low32, tsf64_high32;
@@ -1200,10 +1216,63 @@ static inline void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
 
 	msdu->tstamp = ns_to_ktime(tsf64_ns);
 }
+
+/**
+ * ol_rx_timestamp_update() - update msdu tsf64 timestamp
+ * @pdev: pointer to txrx handle
+ * @head_msdu: pointer to head msdu
+ * @tail_msdu: pointer to tail msdu
+ *
+ * Return: none
+ */
+static inline void ol_rx_timestamp_update(ol_txrx_pdev_handle pdev,
+					  qdf_nbuf_t head_msdu,
+					  qdf_nbuf_t tail_msdu)
+{
+	qdf_nbuf_t loop_msdu;
+	uint64_t hostime, detlahostime, tsf64_time;
+	struct htt_host_rx_desc_base *rx_desc;
+
+	if (!ol_cfg_is_ptp_rx_opt_enabled(pdev->ctrl_pdev))
+		return;
+
+	if (!tail_msdu)
+		return;
+
+	hostime = ktime_get_ns();
+	rx_desc = htt_rx_msdu_desc_retrieve(pdev->htt_pdev, tail_msdu);
+	if (rx_desc->ppdu_end.wb_timestamp_lower_32 == 0 &&
+	    rx_desc->ppdu_end.wb_timestamp_upper_32 == 0) {
+		detlahostime = hostime - pdev->last_host_time;
+		do_div(detlahostime, NSEC_PER_USEC);
+		tsf64_time = pdev->last_tsf64_time + detlahostime;
+
+		rx_desc->ppdu_end.wb_timestamp_lower_32 =
+						tsf64_time & 0xFFFFFFFF;
+		rx_desc->ppdu_end.wb_timestamp_upper_32 = tsf64_time >> 32;
+	} else {
+		pdev->last_host_time = hostime;
+		pdev->last_tsf64_time =
+		  (uint64_t)rx_desc->ppdu_end.wb_timestamp_upper_32 << 32 |
+		  rx_desc->ppdu_end.wb_timestamp_lower_32;
+	}
+
+	loop_msdu = head_msdu;
+	while (loop_msdu) {
+		ol_rx_timestamp(pdev->ctrl_pdev, rx_desc, loop_msdu);
+		loop_msdu = qdf_nbuf_next(loop_msdu);
+	}
+}
 #endif
 #else
-static inline void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
-				   void *rx_desc, qdf_nbuf_t msdu)
+void ol_rx_timestamp(struct cdp_cfg *cfg_pdev,
+		     void *rx_desc, qdf_nbuf_t msdu)
+{
+}
+
+static inline void ol_rx_timestamp_update(ol_txrx_pdev_handle pdev,
+					  qdf_nbuf_t head_msdu,
+					  qdf_nbuf_t tail_msdu)
 {
 }
 #endif
@@ -1488,6 +1557,7 @@ ol_rx_in_order_indication_handler(ol_txrx_pdev_handle pdev,
 {
 	struct ol_txrx_vdev_t *vdev = NULL;
 	struct ol_txrx_peer_t *peer = NULL;
+	struct ol_txrx_peer_t *peer_head = NULL;
 	htt_pdev_handle htt_pdev = NULL;
 	int status;
 	qdf_nbuf_t head_msdu = NULL, tail_msdu = NULL;
@@ -1496,8 +1566,8 @@ ol_rx_in_order_indication_handler(ol_txrx_pdev_handle pdev,
 	uint32_t msdu_count;
 	uint8_t pktlog_bit;
 	uint32_t filled = 0;
-	struct htt_host_rx_desc_base *rx_desc;
-	qdf_nbuf_t loop_msdu;
+	uint8_t bssid[QDF_MAC_ADDR_SIZE] = {0};
+	bool offloaded_pkt;
 
 	if (tid >= OL_TXRX_NUM_EXT_TIDS) {
 		ol_txrx_err("%s:  invalid tid, %u\n", __FUNCTION__, tid);
@@ -1561,6 +1631,43 @@ ol_rx_in_order_indication_handler(ol_txrx_pdev_handle pdev,
 	/* rx_opt_proc takes a NULL-terminated list of msdu netbufs */
 	qdf_nbuf_set_next(tail_msdu, NULL);
 
+	/* Packet Capture Mode */
+
+	if ((ucfg_pkt_capture_get_pktcap_mode() &
+	      PKT_CAPTURE_MODE_DATA_ONLY)) {
+		offloaded_pkt = ucfg_pkt_capture_rx_offloaded_pkt(rx_ind_msg);
+		if (peer) {
+			vdev = peer->vdev;
+			if (peer->vdev) {
+				qdf_spin_lock_bh(&pdev->peer_ref_mutex);
+				peer_head = TAILQ_FIRST(&vdev->peer_list);
+				qdf_spin_unlock_bh(&pdev->peer_ref_mutex);
+				if (peer_head) {
+					qdf_spin_lock_bh(
+						&peer_head->peer_info_lock);
+					qdf_mem_copy(bssid,
+						     &peer_head->mac_addr.raw,
+						     QDF_MAC_ADDR_SIZE);
+					qdf_spin_unlock_bh(
+						&peer_head->peer_info_lock);
+
+					ucfg_pkt_capture_rx_msdu_process(
+							bssid, head_msdu,
+							peer->vdev->vdev_id,
+							htt_pdev);
+				}
+			}
+		} else if (offloaded_pkt) {
+			ucfg_pkt_capture_rx_msdu_process(
+						bssid, head_msdu,
+						HTT_INVALID_VDEV,
+						htt_pdev);
+
+			ucfg_pkt_capture_rx_drop_offload_pkt(head_msdu);
+			return;
+		}
+	}
+
 	/* Pktlog */
 	ol_rx_send_pktlog_event(pdev, peer, head_msdu, pktlog_bit);
 
@@ -1584,15 +1691,9 @@ ol_rx_in_order_indication_handler(ol_txrx_pdev_handle pdev,
 		}
 		return;
 	}
-	/*Loop msdu to fill tstamp with tsf64 time in ol_rx_timestamp*/
-	loop_msdu = head_msdu;
-	while (loop_msdu) {
-		qdf_nbuf_t msdu = head_msdu;
 
-		rx_desc = htt_rx_msdu_desc_retrieve(pdev->htt_pdev, loop_msdu);
-		ol_rx_timestamp(pdev->ctrl_pdev, rx_desc, msdu);
-		loop_msdu = qdf_nbuf_next(loop_msdu);
-	}
+	/*Loop msdu to fill tstamp with tsf64 time in ol_rx_timestamp*/
+	ol_rx_timestamp_update(pdev, head_msdu, tail_msdu);
 
 	peer->rx_opt_proc(vdev, peer, tid, head_msdu);
 }
