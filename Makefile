@@ -793,6 +793,7 @@ endif
 # Disable that part of the warning because it is very noisy across the kernel and does
 # not point out any real bugs.
 KBUILD_CFLAGS += $(call cc-disable-warning, pointer-to-enum-cast)
+KBUILD_CFLAGS += $(call cc-disable-warning, pointer-to-int-cast)
 else
 
 KBUILD_CFLAGS += $(call cc-option,-fno-delete-null-pointer-checks,)
