@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2337,11 +2337,34 @@ error:
 	return rc;
 }
 
-static int dsi_display_set_clk_src(struct dsi_display *display)
+static int dsi_display_set_clk_src(struct dsi_display *display, bool on)
 {
 	int rc = 0;
 	int i;
 	struct dsi_display_ctrl *m_ctrl, *ctrl;
+	struct dsi_clk_link_set *src;
+
+	/*
+	 * For CPHY mode, the parent of mux_clks need to be set
+	 * to Cphy_clks to have correct dividers for byte and
+	 * pixel clocks.
+	 */
+	if (display->panel->host_config.phy_type == DSI_PHY_TYPE_CPHY) {
+		rc = dsi_clk_update_parent(&display->clock_info.cphy_clks,
+			      &display->clock_info.mux_clks);
+		if (rc) {
+			pr_err("failed update mux parent to CPHY\n");
+			return rc;
+		}
+	}
+
+	/* if XO clk is defined, select XO clk src when DSI is disabled */
+	if (on)
+		src = &display->clock_info.mux_clks;
+	else if (display->clock_info.xo_clks.byte_clk)
+		src = &display->clock_info.xo_clks;
+	else
+		return 0;
 
 	/*
 	 * In case of split DSI usecases, the clock for master controller should
@@ -2350,8 +2373,7 @@ static int dsi_display_set_clk_src(struct dsi_display *display)
 	 */
 	m_ctrl = &display->ctrl[display->clk_master_idx];
 
-	rc = dsi_ctrl_set_clock_source(m_ctrl->ctrl,
-		   &display->clock_info.mux_clks);
+	rc = dsi_ctrl_set_clock_source(m_ctrl->ctrl, src);
 	if (rc) {
 		pr_err("[%s] failed to set source clocks for master, rc=%d\n",
 			   display->name, rc);
@@ -2364,8 +2386,7 @@ static int dsi_display_set_clk_src(struct dsi_display *display)
 		if (!ctrl->ctrl || (ctrl == m_ctrl))
 			continue;
 
-		rc = dsi_ctrl_set_clock_source(ctrl->ctrl,
-			   &display->clock_info.mux_clks);
+		rc = dsi_ctrl_set_clock_source(ctrl->ctrl, src);
 		if (rc) {
 			pr_err("[%s] failed to set source clocks, rc=%d\n",
 				   display->name, rc);
@@ -3050,16 +3071,23 @@ static int dsi_display_clocks_init(struct dsi_display *display)
 	const char *clk_name;
 	const char *src_byte = "src_byte", *src_pixel = "src_pixel";
 	const char *mux_byte = "mux_byte", *mux_pixel = "mux_pixel";
+	const char *cphy_byte = "cphy_byte", *cphy_pixel = "cphy_pixel";
 	const char *shadow_byte = "shadow_byte", *shadow_pixel = "shadow_pixel";
 	struct clk *dsi_clk;
 	struct dsi_clk_link_set *src = &display->clock_info.src_clks;
 	struct dsi_clk_link_set *mux = &display->clock_info.mux_clks;
+	struct dsi_clk_link_set *cphy = &display->clock_info.cphy_clks;
 	struct dsi_clk_link_set *shadow = &display->clock_info.shadow_clks;
+	struct dsi_clk_link_set *xo = &display->clock_info.xo_clks;
 	struct dsi_dyn_clk_caps *dyn_clk_caps = &(display->panel->dyn_clk_caps);
 
 	num_clk = dsi_display_get_clocks_count(display);
 
 	pr_debug("clk count=%d\n", num_clk);
+
+	dsi_clk = devm_clk_get(&display->pdev->dev, "xo_clk");
+	if (!IS_ERR_OR_NULL(dsi_clk))
+		xo->byte_clk = xo->pixel_clk = dsi_clk;
 
 	for (i = 0; i < num_clk; i++) {
 		dsi_display_get_clock_name(display, i, &clk_name);
@@ -3078,6 +3106,15 @@ static int dsi_display_clocks_init(struct dsi_display *display)
 			}
 			if (dsi_display_check_prefix(mux_pixel, clk_name)) {
 				mux->pixel_clk = NULL;
+				goto error;
+			}
+
+			if (dsi_display_check_prefix(cphy_byte, clk_name)) {
+				cphy->byte_clk = NULL;
+				goto error;
+			}
+			if (dsi_display_check_prefix(cphy_pixel, clk_name)) {
+				cphy->pixel_clk = NULL;
 				goto error;
 			}
 
@@ -3109,6 +3146,16 @@ static int dsi_display_clocks_init(struct dsi_display *display)
 
 		if (dsi_display_check_prefix(src_pixel, clk_name)) {
 			src->pixel_clk = dsi_clk;
+			continue;
+		}
+
+		if (dsi_display_check_prefix(cphy_byte, clk_name)) {
+			cphy->byte_clk = dsi_clk;
+			continue;
+		}
+
+		if (dsi_display_check_prefix(cphy_pixel, clk_name)) {
+			cphy->pixel_clk = dsi_clk;
 			continue;
 		}
 
@@ -3703,7 +3750,7 @@ static int dsi_display_res_init(struct dsi_display *display)
 	display->panel = dsi_panel_get(&display->pdev->dev,
 				display->panel_of,
 				display->parser_node,
-				display->display_type,
+				display->dsi_type,
 				display->cmdline_topology);
 	if (IS_ERR_OR_NULL(display->panel)) {
 		rc = PTR_ERR(display->panel);
@@ -3717,6 +3764,8 @@ static int dsi_display_res_init(struct dsi_display *display)
 
 		phy->cfg.force_clk_lane_hs =
 			display->panel->host_config.force_hs_clk_lane;
+		phy->cfg.phy_type =
+			display->panel->host_config.phy_type;
 	}
 
 	rc = dsi_display_parse_lane_map(display);
@@ -3912,7 +3961,9 @@ static int dsi_display_update_dsi_bitrate(struct dsi_display *display,
 		struct dsi_display_ctrl *dsi_disp_ctrl = &display->ctrl[i];
 		struct dsi_ctrl *ctrl = dsi_disp_ctrl->ctrl;
 		u32 num_of_lanes = 0, bpp;
-		u64 bit_rate, pclk_rate, bit_rate_per_lane, byte_clk_rate;
+		u64 bit_rate, pclk_rate, bit_rate_per_lane, byte_clk_rate,
+						byte_intf_clk_rate;
+		u32 bits_per_symbol = 16, num_of_symbols = 7; /* For Cphy */
 		struct dsi_host_common_cfg *host_cfg;
 
 		mutex_lock(&ctrl->ctrl_lock);
@@ -3936,18 +3987,35 @@ static int dsi_display_update_dsi_bitrate(struct dsi_display *display,
 		bpp = dsi_pixel_format_to_bpp(host_cfg->dst_format);
 
 		bit_rate = display->config.bit_clk_rate_hz * num_of_lanes;
-		bit_rate_per_lane = bit_rate;
-		do_div(bit_rate_per_lane, num_of_lanes);
+
 		pclk_rate = bit_rate;
 		do_div(pclk_rate, bpp);
-		byte_clk_rate = bit_rate_per_lane;
-		do_div(byte_clk_rate, 8);
+		if (host_cfg->phy_type == DSI_PHY_TYPE_DPHY) {
+			bit_rate_per_lane = bit_rate;
+			do_div(bit_rate_per_lane, num_of_lanes);
+			byte_clk_rate = bit_rate_per_lane;
+			do_div(byte_clk_rate, 8);
+			byte_intf_clk_rate = byte_clk_rate;
+			do_div(byte_intf_clk_rate, 2);
+		} else {
+			do_div(bit_rate, bits_per_symbol);
+			bit_rate *= num_of_symbols;
+			bit_rate_per_lane = bit_rate;
+			do_div(bit_rate_per_lane, num_of_lanes);
+			byte_clk_rate = bit_rate_per_lane;
+			do_div(byte_clk_rate, 7);
+			/* For CPHY, byte_intf_clk is same as byte_clk */
+			byte_intf_clk_rate = byte_clk_rate;
+		}
+
 		pr_debug("bit_clk_rate = %llu, bit_clk_rate_per_lane = %llu\n",
 			 bit_rate, bit_rate_per_lane);
-		pr_debug("byte_clk_rate = %llu, pclk_rate = %llu\n",
-			  byte_clk_rate, pclk_rate);
+		pr_debug("byte_clk_rate = %llu, byte_intf_clk_rate = %llu\n",
+			byte_clk_rate, byte_intf_clk_rate);
+		pr_debug("pclk_rate = %llu\n", pclk_rate);
 
 		ctrl->clk_freq.byte_clk_rate = byte_clk_rate;
+		ctrl->clk_freq.byte_intf_clk_rate = byte_intf_clk_rate;
 		ctrl->clk_freq.pix_clk_rate = pclk_rate;
 		rc = dsi_clk_set_link_frequencies(display->dsi_clk_handle,
 			ctrl->clk_freq, ctrl->cell_index);
@@ -4041,7 +4109,8 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 		if (!ctrl->ctrl)
 			continue;
 		rc = dsi_clk_set_byte_clk_rate(display->dsi_clk_handle,
-				   ctrl->ctrl->clk_freq.byte_clk_rate, i);
+				ctrl->ctrl->clk_freq.byte_clk_rate,
+				ctrl->ctrl->clk_freq.byte_intf_clk_rate, i);
 		if (rc) {
 			pr_err("failed to set byte rate for index:%d\n", i);
 			goto recover_byte_clk;
@@ -4104,7 +4173,8 @@ recover_byte_clk:
 		if (!ctrl->ctrl)
 			continue;
 		dsi_clk_set_byte_clk_rate(display->dsi_clk_handle,
-					  bkp_freq->byte_clk_rate, i);
+					  bkp_freq->byte_clk_rate,
+					  bkp_freq->byte_intf_clk_rate, i);
 	}
 
 exit:
@@ -4140,6 +4210,7 @@ static int dsi_display_dynamic_clk_switch_vid(struct dsi_display *display,
 
 	/* back up existing rates to handle failure case */
 	bkp_freq.byte_clk_rate = m_ctrl->ctrl->clk_freq.byte_clk_rate;
+	bkp_freq.byte_intf_clk_rate = m_ctrl->ctrl->clk_freq.byte_intf_clk_rate;
 	bkp_freq.pix_clk_rate = m_ctrl->ctrl->clk_freq.pix_clk_rate;
 	bkp_freq.esc_clk_rate = m_ctrl->ctrl->clk_freq.esc_clk_rate;
 
@@ -4514,6 +4585,11 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 			goto error;
 		}
 	}
+
+	if ((mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) &&
+			(display->panel->panel_mode == DSI_OP_CMD_MODE))
+		atomic_set(&display->clkrate_change_pending, 1);
+
 
 	if (priv_info->phy_timing_len) {
 		display_for_each_ctrl(i, display) {
@@ -5845,9 +5921,6 @@ static void dsi_display_firmware_display(const struct firmware *fw,
 		display->name = "dsi_firmware_display";
 	}
 
-	if (dsi_display_init(display))
-		return;
-
 	pr_debug("success\n");
 }
 
@@ -5890,7 +5963,6 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 
 	for (i = 0; i < count; i++) {
 		struct device_node *np;
-		const char *disp_type = NULL;
 
 		np = of_parse_phandle(node, disp_list, i);
 		name = of_get_property(np, "label", NULL);
@@ -5898,16 +5970,6 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 			pr_err("display name not defined\n");
 			continue;
 		}
-
-		disp_type = of_get_property(np, "qcom,display-type", NULL);
-		if (!disp_type) {
-			pr_err("display type not defined for %s\n", name);
-			continue;
-		}
-
-		/* primary/secondary display should match with current dsi */
-		if (strcmp(dsi_type, disp_type))
-			continue;
 
 		if (boot_disp->boot_disp_en) {
 			if (!strcmp(boot_disp->name, name)) {
@@ -5938,17 +6000,15 @@ int dsi_display_dev_probe(struct platform_device *pdev)
 	display->name = name;
 	display->pdev = pdev;
 	display->boot_disp = boot_disp;
+	display->dsi_type = dsi_type;
 
 	dsi_display_parse_cmdline_topology(display, index);
 
 	platform_set_drvdata(pdev, display);
 
-	/* initialize display in firmware callback */
-	if (!firm_req) {
-		rc = dsi_display_init(display);
-		if (rc)
-			goto end;
-	}
+	rc = dsi_display_init(display);
+	if (rc)
+		goto end;
 
 	return 0;
 end:
@@ -6164,7 +6224,7 @@ static int dsi_display_ext_get_info(struct drm_connector *connector,
 
 	info->is_connected = connector->status != connector_status_disconnected;
 
-	if (!strcmp(display->display_type, "primary"))
+	if (!strcmp(display->dsi_type, "primary"))
 		info->is_primary = true;
 	else
 		info->is_primary = false;
@@ -6523,7 +6583,7 @@ int dsi_display_get_info(struct drm_connector *connector,
 	info->is_connected = true;
 	info->is_primary = false;
 
-	if (!strcmp(display->display_type, "primary"))
+	if (!strcmp(display->dsi_type, "primary"))
 		info->is_primary = true;
 
 	info->width_mm = phy_props.panel_width_mm;
@@ -7154,7 +7214,7 @@ static int dsi_display_pre_switch(struct dsi_display *display)
 		goto error_ctrl_clk_off;
 	}
 
-	rc = dsi_display_set_clk_src(display);
+	rc = dsi_display_set_clk_src(display, true);
 	if (rc) {
 		pr_err("[%s] failed to set DSI link clock source, rc=%d\n",
 			display->name, rc);
@@ -7546,7 +7606,7 @@ int dsi_display_prepare(struct dsi_display *display)
 		}
 	}
 
-	rc = dsi_display_set_clk_src(display);
+	rc = dsi_display_set_clk_src(display, true);
 	if (rc) {
 		pr_err("[%s] failed to set DSI link clock source, rc=%d\n",
 			display->name, rc);
@@ -7774,20 +7834,10 @@ int dsi_display_pre_kickoff(struct drm_connector *connector,
 {
 	int rc = 0;
 	int i;
-	bool enable;
 
 	/* check and setup MISR */
 	if (display->misr_enable)
 		_dsi_display_setup_misr(display);
-
-	if (params->qsync_update) {
-		enable = (params->qsync_mode > 0) ? true : false;
-		rc = dsi_display_qsync(display, enable);
-		if (rc)
-			pr_err("%s failed to send qsync commands",
-				__func__);
-		SDE_EVT32(params->qsync_mode, rc);
-	}
 
 	rc = dsi_display_set_roi(display, params->rois);
 
@@ -7866,6 +7916,29 @@ int dsi_display_config_ctrl_for_cont_splash(struct dsi_display *display)
 	}
 
 error_out:
+	return rc;
+}
+
+int dsi_display_pre_commit(void *display,
+		struct msm_display_conn_params *params)
+{
+	bool enable = false;
+	int rc = 0;
+
+	if (!display || !params) {
+		pr_err("Invalid params\n");
+		return -EINVAL;
+	}
+
+	if (params->qsync_update) {
+		enable = (params->qsync_mode > 0) ? true : false;
+		rc = dsi_display_qsync(display, enable);
+		if (rc)
+			pr_err("%s failed to send qsync commands\n",
+				__func__);
+		SDE_EVT32(params->qsync_mode, rc);
+	}
+
 	return rc;
 }
 
@@ -8140,6 +8213,8 @@ int dsi_display_unprepare(struct dsi_display *display)
 	if (rc)
 		pr_err("[%s] panel post-unprepare failed, rc=%d\n",
 		       display->name, rc);
+
+	dsi_display_set_clk_src(display, false);
 
 	mutex_unlock(&display->display_lock);
 

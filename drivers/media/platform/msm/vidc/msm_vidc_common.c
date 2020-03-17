@@ -2693,8 +2693,8 @@ static void handle_fbd(enum hal_command_response cmd, void *data)
 			fill_buf_done->mark_data, fill_buf_done->mark_target);
 	}
 	if (inst->session_type == MSM_VIDC_ENCODER) {
-		msm_comm_store_filled_length(&inst->fbd_data, vb->index,
-			fill_buf_done->filled_len1);
+		if (inst->max_filled_length < fill_buf_done->filled_len1)
+			inst->max_filled_length = fill_buf_done->filled_len1;
 	}
 
 	tag_data.index = vb->index;
@@ -5655,6 +5655,65 @@ int msm_vidc_check_scaling_supported(struct msm_vidc_inst *inst)
 	return 0;
 }
 
+static bool is_image_session(struct msm_vidc_inst *inst)
+{
+	if (inst->session_type == MSM_VIDC_ENCODER &&
+		get_hal_codec(inst->fmts[CAPTURE_PORT].fourcc) ==
+			HAL_VIDEO_CODEC_HEVC)
+		return (inst->profile == HAL_HEVC_PROFILE_MAIN_STILL_PIC ||
+				inst->grid_enable);
+	else
+		return false;
+}
+
+static int msm_vidc_check_image_session_capabilities(struct msm_vidc_inst *inst)
+{
+	int rc = 0;
+	struct msm_vidc_image_capability *capability = NULL;
+
+	u32 output_height = ALIGN(inst->prop.height[CAPTURE_PORT], 512);
+	u32 output_width = ALIGN(inst->prop.width[CAPTURE_PORT], 512);
+
+	if (inst->grid_enable)
+		capability = inst->core->platform_data->heic_image_capability;
+	else
+		capability = inst->core->platform_data->hevc_image_capability;
+
+	if (!capability)
+		return -EINVAL;
+
+	if (output_width < capability->width.min ||
+		output_height < capability->height.min) {
+		dprintk(VIDC_ERR,
+			"HEIC Unsupported WxH = (%u)x(%u), min supported is - (%u)x(%u)\n",
+			output_width,
+			output_height,
+			capability->width.min,
+			capability->height.min);
+		rc = -ENOTSUPP;
+	}
+	if (!rc && (output_width > capability->width.max ||
+		output_height > capability->height.max)) {
+		dprintk(VIDC_ERR,
+			"HEIC Unsupported WxH = (%u)x(%u), max supported is - (%u)x(%u)\n",
+			output_width,
+			output_height,
+			capability->width.max,
+			capability->height.max);
+		rc = -ENOTSUPP;
+	}
+	if (!rc && output_height * output_width >
+		capability->width.max * capability->height.max) {
+		dprintk(VIDC_ERR,
+		"HEIC Unsupported WxH = (%u)x(%u), max supported is - (%u)x(%u)\n",
+		output_width, output_height,
+		capability->width.max, capability->height.max);
+		rc = -ENOTSUPP;
+	}
+
+	return rc;
+}
+
 int msm_vidc_check_session_supported(struct msm_vidc_inst *inst)
 {
 	struct msm_vidc_capability *capability;
@@ -5698,6 +5757,11 @@ int msm_vidc_check_session_supported(struct msm_vidc_inst *inst)
 			input_width, input_height,
 			output_width, output_height);
 		rc = -ENOTSUPP;
+	}
+
+	if (is_image_session(inst)) {
+		rc = msm_vidc_check_image_session_capabilities(inst);
+		return rc;
 	}
 
 	output_height = ALIGN(inst->prop.height[CAPTURE_PORT], 16);
@@ -5993,6 +6057,7 @@ exit:
 void msm_comm_print_inst_info(struct msm_vidc_inst *inst)
 {
 	struct msm_vidc_buffer *mbuf;
+	struct msm_vidc_cvp_buffer *cbuf;
 	struct internal_buf *buf;
 	bool is_decode = false;
 	enum vidc_ports port;
@@ -6048,6 +6113,14 @@ void msm_comm_print_inst_info(struct msm_vidc_inst *inst)
 				buf->buffer_type, buf->smem.device_addr,
 				buf->smem.size);
 	mutex_unlock(&inst->outputbufs.lock);
+
+	mutex_lock(&inst->cvpbufs.lock);
+	dprintk(VIDC_ERR, "cvp buffer list:\n");
+	list_for_each_entry(cbuf, &inst->cvpbufs.list, list)
+		dprintk(VIDC_ERR, "index: %u fd: %u offset: %u addr: %x\n",
+				cbuf->buf.index, cbuf->buf.fd,
+				cbuf->buf.offset, cbuf->smem.device_addr);
+	mutex_unlock(&inst->cvpbufs.lock);
 }
 
 int msm_comm_session_continue(void *instance)
@@ -6458,14 +6531,11 @@ int msm_comm_qbuf_cache_operations(struct msm_vidc_inst *inst,
 			} else if (vb->type ==
 					V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 				if (!i) { /* bitstream */
-					u32 size_u32;
 					skip = false;
 					offset = 0;
-					size_u32 = vb->planes[i].length;
-					msm_comm_fetch_filled_length(
-						&inst->fbd_data, vb->index,
-						&size_u32);
-					size = size_u32;
+					size = vb->planes[i].length;
+					if (inst->max_filled_length)
+						size = inst->max_filled_length;
 					cache_op = SMEM_CACHE_INVALIDATE;
 				}
 			}
@@ -7007,63 +7077,6 @@ void msm_comm_fetch_tags(struct msm_vidc_inst *inst,
 	mutex_unlock(&inst->buffer_tags.lock);
 }
 
-void msm_comm_store_filled_length(struct msm_vidc_list *data_list,
-		u32 index, u32 filled_length)
-{
-	struct msm_vidc_buf_data *pdata = NULL;
-	bool found = false;
-
-	if (!data_list) {
-		dprintk(VIDC_ERR, "%s: invalid params %pK\n",
-			__func__, data_list);
-		return;
-	}
-
-	mutex_lock(&data_list->lock);
-	list_for_each_entry(pdata, &data_list->list, list) {
-		if (pdata->index == index) {
-			pdata->filled_length = filled_length;
-			found = true;
-			break;
-		}
-	}
-
-	if (!found) {
-		pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
-		if (!pdata)  {
-			dprintk(VIDC_WARN, "%s: malloc failure.\n", __func__);
-			goto exit;
-		}
-		pdata->index = index;
-		pdata->filled_length = filled_length;
-		list_add_tail(&pdata->list, &data_list->list);
-	}
-
-exit:
-	mutex_unlock(&data_list->lock);
-}
-
-void msm_comm_fetch_filled_length(struct msm_vidc_list *data_list,
-		u32 index, u32 *filled_length)
-{
-	struct msm_vidc_buf_data *pdata = NULL;
-
-	if (!data_list || !filled_length) {
-		dprintk(VIDC_ERR, "%s: invalid params %pK %pK\n",
-			__func__, data_list, filled_length);
-		return;
-	}
-
-	mutex_lock(&data_list->lock);
-	list_for_each_entry(pdata, &data_list->list, list) {
-		if (pdata->index == index) {
-			*filled_length = pdata->filled_length;
-			break;
-		}
-	}
-	mutex_unlock(&data_list->lock);
-}
-
 void msm_comm_store_mark_data(struct msm_vidc_list *data_list,
 		u32 index, u32 mark_data, u32 mark_target)
 {
@@ -7220,7 +7233,7 @@ int msm_comm_set_color_format_constraints(struct msm_vidc_inst *inst,
 		dprintk(VIDC_DBG, "Set color format constraint success\n");
 
 exit:
-	if (!pconstraint)
+	if (pconstraint)
 		kfree(pconstraint);
 	return rc;
 }

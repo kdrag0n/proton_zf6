@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -78,6 +78,9 @@
 
 /* Maximum number of VSYNC wait attempts for RSC state transition */
 #define MAX_RSC_WAIT	5
+
+/* Primary panel worst case VSYNC expected to be no less than 30fps */
+#define PRIMARY_VBLANK_WORST_CASE_MS 34
 
 #define TOPOLOGY_DUALPIPE_MERGE_MODE(x) \
 		(((x) == SDE_RM_TOPOLOGY_DUALPIPE_DSCMERGE) || \
@@ -273,6 +276,7 @@ struct sde_encoder_virt {
 	struct kthread_work input_event_work;
 	struct kthread_work esd_trigger_work;
 	struct input_handler *input_handler;
+	bool input_handler_registered;
 	struct msm_display_topology topology;
 	bool vblank_enabled;
 	bool idle_pc_restore;
@@ -807,6 +811,7 @@ void sde_encoder_destroy(struct drm_encoder *drm_enc)
 	if (sde_enc->input_handler) {
 		kfree(sde_enc->input_handler);
 		sde_enc->input_handler = NULL;
+		sde_enc->input_handler_registered = false;
 	}
 
 	kfree(sde_enc);
@@ -1898,7 +1903,7 @@ static int _sde_encoder_update_rsc_client(
 {
 	struct sde_encoder_virt *sde_enc;
 	struct drm_crtc *crtc;
-	enum sde_rsc_state rsc_state;
+	enum sde_rsc_state rsc_state = SDE_RSC_IDLE_STATE;
 	struct sde_rsc_cmd_config *rsc_config;
 	int ret, prefill_lines;
 	struct msm_display_info *disp_info;
@@ -1908,8 +1913,10 @@ static int _sde_encoder_update_rsc_client(
 	struct drm_crtc *primary_crtc;
 	int pipe = -1;
 	int rc = 0;
-	int wait_refcount;
+	int wait_refcount = 0;
 	u32 qsync_mode = 0;
+	struct msm_drm_private *priv;
+	struct sde_kms *sde_kms;
 
 	if (!drm_enc || !drm_enc->dev) {
 		SDE_ERROR("invalid encoder arguments\n");
@@ -1937,6 +1944,13 @@ static int _sde_encoder_update_rsc_client(
 		return 0;
 	}
 
+	priv = drm_enc->dev->dev_private;
+	if (!priv || !priv->kms) {
+		SDE_ERROR("Invalid kms\n");
+		return -EINVAL;
+	}
+
+	sde_kms = to_sde_kms(priv->kms);
 	/**
 	 * only primary command mode panel without Qsync can request CMD state.
 	 * all other panels/displays can request for VID state including
@@ -1947,13 +1961,33 @@ static int _sde_encoder_update_rsc_client(
 		qsync_mode = sde_connector_get_qsync_mode(
 				sde_enc->cur_master->connector);
 
-	if (sde_encoder_in_clone_mode(drm_enc) || !disp_info->is_primary ||
-			  (disp_info->is_primary && qsync_mode))
-		rsc_state = enable ? SDE_RSC_CLK_STATE : SDE_RSC_IDLE_STATE;
-	else if (disp_info->capabilities & MSM_DISPLAY_CAP_CMD_MODE)
-		rsc_state = enable ? SDE_RSC_CMD_STATE : SDE_RSC_IDLE_STATE;
-	else if (disp_info->capabilities & MSM_DISPLAY_CAP_VID_MODE)
-		rsc_state = enable ? SDE_RSC_VID_STATE : SDE_RSC_IDLE_STATE;
+	if (IS_SDE_MAJOR_SAME(sde_kms->core_rev, SDE_HW_VER_620)) {
+		if (sde_encoder_in_clone_mode(drm_enc) ||
+			!disp_info->is_primary || (disp_info->is_primary &&
+				qsync_mode))
+			rsc_state = enable ? SDE_RSC_CLK_STATE :
+					SDE_RSC_IDLE_STATE;
+		else if (disp_info->capabilities & MSM_DISPLAY_CAP_CMD_MODE)
+			rsc_state = enable ? SDE_RSC_CMD_STATE :
+					SDE_RSC_IDLE_STATE;
+		else if (disp_info->capabilities & MSM_DISPLAY_CAP_VID_MODE)
+			rsc_state = enable ? SDE_RSC_VID_STATE :
+					SDE_RSC_IDLE_STATE;
+	} else {
+		if (sde_encoder_in_clone_mode(drm_enc))
+			rsc_state = enable ? SDE_RSC_CLK_STATE :
+					SDE_RSC_IDLE_STATE;
+		else
+			rsc_state = enable ? (((disp_info->capabilities &
+				MSM_DISPLAY_CAP_CMD_MODE) &&
+				disp_info->is_primary && !qsync_mode) ?
+				SDE_RSC_CMD_STATE : SDE_RSC_VID_STATE) :
+				SDE_RSC_IDLE_STATE;
+	}
+
+	if (IS_SDE_MAJOR_SAME(sde_kms->core_rev, SDE_HW_VER_620) &&
+			(rsc_state == SDE_RSC_VID_STATE))
+		rsc_state = SDE_RSC_CLK_STATE;
 
 	SDE_EVT32(rsc_state, qsync_mode);
 
@@ -2035,11 +2069,23 @@ static int _sde_encoder_update_rsc_client(
 				sde_enc->rsc_client))
 			break;
 
-		if (crtc->base.id == wait_vblank_crtc_id)
+		/*
+		 * if primary is inactive or modeset is needed, we'll wait
+		 * for worst case ms for best effort as we don't know when
+		 * primary display will be committed.
+		 */
+		if (crtc->base.id == wait_vblank_crtc_id) {
 			ret = sde_encoder_wait_for_event(drm_enc,
 					MSM_ENC_VBLANK);
-		else
+		} else if (primary_crtc->state->active &&
+				!drm_atomic_crtc_needs_modeset(
+						primary_crtc->state)) {
 			drm_wait_one_vblank(drm_enc->dev, pipe);
+		} else {
+			SDE_EVT32(DRMID(drm_enc),
+					wait_vblank_crtc_id, crtc->base.id);
+			msleep(PRIMARY_VBLANK_WORST_CASE_MS);
+		}
 
 		if (ret) {
 			SDE_ERROR_ENC(sde_enc,
@@ -3024,6 +3070,7 @@ static int _sde_encoder_input_handler(
 	input_handler->private = sde_enc;
 
 	sde_enc->input_handler = input_handler;
+	sde_enc->input_handler_registered = false;
 
 	return rc;
 }
@@ -3187,13 +3234,16 @@ static void sde_encoder_virt_enable(struct drm_encoder *drm_enc)
 	}
 
 	/* register input handler if not already registered */
-	if (sde_enc->input_handler && !msm_is_mode_seamless_dms(cur_mode) &&
+	if (sde_enc->input_handler && !sde_enc->input_handler_registered &&
+			!msm_is_mode_seamless_dms(cur_mode) &&
 			!msm_is_mode_seamless_dyn_clk(cur_mode)) {
 		ret = _sde_encoder_input_handler_register(
 				sde_enc->input_handler);
 		if (ret)
 			SDE_ERROR(
 			"input handler registration failed, rc = %d\n", ret);
+		else
+			sde_enc->input_handler_registered = true;
 	}
 
 	if (!(msm_is_mode_seamless_vrr(cur_mode)
@@ -3295,8 +3345,10 @@ static void sde_encoder_virt_disable(struct drm_encoder *drm_enc)
 	/* wait for idle */
 	sde_encoder_wait_for_event(drm_enc, MSM_ENC_TX_COMPLETE);
 
-	if (sde_enc->input_handler)
+	if (sde_enc->input_handler && sde_enc->input_handler_registered) {
 		input_unregister_handler(sde_enc->input_handler);
+		sde_enc->input_handler_registered = false;
+	}
 
 	/*
 	 * For primary command mode and video mode encoders, execute the
@@ -3373,11 +3425,10 @@ void sde_encoder_helper_phys_disable(struct sde_encoder_phys *phys_enc,
 {
 	struct sde_encoder_virt *sde_enc;
 
-	if (wb_enc) {
-		if (sde_encoder_helper_reset_mixers(phys_enc,
-				NULL))
-			return;
+	phys_enc->hw_ctl->ops.reset(phys_enc->hw_ctl);
+	sde_encoder_helper_reset_mixers(phys_enc, NULL);
 
+	if (wb_enc) {
 		if (wb_enc->hw_wb->ops.bind_pingpong_blk) {
 			wb_enc->hw_wb->ops.bind_pingpong_blk(wb_enc->hw_wb,
 					false, phys_enc->hw_pp->idx);
@@ -4133,21 +4184,10 @@ void sde_encoder_trigger_kickoff_pending(struct drm_encoder *drm_enc)
 	for (i = 0; i < sde_enc->num_phys_encs; i++) {
 		phys = sde_enc->phys_encs[i];
 
-		if (phys && phys->hw_ctl) {
+		if (phys && phys->hw_ctl && (phys == sde_enc->cur_master) &&
+			(disp_info->capabilities & MSM_DISPLAY_CAP_CMD_MODE)) {
 			ctl = phys->hw_ctl;
-			/*
-			 * avoid clearing the pending flush during the first
-			 * frame update after idle power collpase as the
-			 * restore path would have updated the pending flush
-			 */
-			if (!sde_enc->idle_pc_restore &&
-					ctl->ops.clear_pending_flush)
-				ctl->ops.clear_pending_flush(ctl);
-
-			/* update only for command mode primary ctl */
-			if ((phys == sde_enc->cur_master) &&
-			   (disp_info->capabilities & MSM_DISPLAY_CAP_CMD_MODE)
-			    && ctl->ops.trigger_pending)
+			if (ctl->ops.trigger_pending)
 				ctl->ops.trigger_pending(ctl);
 		}
 	}
@@ -4156,7 +4196,7 @@ void sde_encoder_trigger_kickoff_pending(struct drm_encoder *drm_enc)
 
 static void _sde_encoder_setup_dither(struct sde_encoder_phys *phys)
 {
-	void *dither_cfg;
+	void *dither_cfg = NULL;
 	int ret = 0, rc, i = 0;
 	size_t len = 0;
 	enum sde_rm_topology_name topology;
@@ -4191,7 +4231,8 @@ static void _sde_encoder_setup_dither(struct sde_encoder_phys *phys)
 	}
 
 	ret = sde_connector_get_dither_cfg(phys->connector,
-			phys->connector->state, &dither_cfg, &len);
+			phys->connector->state, &dither_cfg,
+			&len, sde_enc->idle_pc_restore);
 	if (ret)
 		return;
 
@@ -4583,11 +4624,6 @@ int sde_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc,
 	else
 		ln_cnt1 = -EINVAL;
 
-	/* update the qsync parameters for the current frame */
-	if (sde_enc->cur_master)
-		sde_connector_set_qsync_params(
-				sde_enc->cur_master->connector);
-
 	/* prepare for next kickoff, may include waiting on previous kickoff */
 	SDE_ATRACE_BEGIN("sde_encoder_prepare_for_kickoff");
 	for (i = 0; i < sde_enc->num_phys_encs; i++) {
@@ -4836,6 +4872,8 @@ void sde_encoder_prepare_commit(struct drm_encoder *drm_enc)
 	struct sde_encoder_virt *sde_enc;
 	struct sde_encoder_phys *phys;
 	int i;
+	struct sde_hw_ctl *ctl;
+	int rc = 0;
 
 	if (!drm_enc) {
 		SDE_ERROR("invalid encoder\n");
@@ -4843,10 +4881,36 @@ void sde_encoder_prepare_commit(struct drm_encoder *drm_enc)
 	}
 	sde_enc = to_sde_encoder_virt(drm_enc);
 
+	/* update the qsync parameters for the current frame */
+	if (sde_enc->cur_master)
+		sde_connector_set_qsync_params(
+				sde_enc->cur_master->connector);
+
 	for (i = 0; i < sde_enc->num_phys_encs; i++) {
 		phys = sde_enc->phys_encs[i];
 		if (phys && phys->ops.prepare_commit)
 			phys->ops.prepare_commit(phys);
+		if (phys && phys->hw_ctl) {
+			ctl = phys->hw_ctl;
+			/*
+			 * avoid clearing the pending flush during the first
+			 * frame update after idle power collpase as the
+			 * restore path would have updated the pending flush
+			 */
+			if (!sde_enc->idle_pc_restore &&
+					ctl->ops.clear_pending_flush)
+				ctl->ops.clear_pending_flush(ctl);
+		}
+	}
+
+	if (sde_enc->cur_master && sde_enc->cur_master->connector) {
+		rc = sde_connector_prepare_commit(
+				  sde_enc->cur_master->connector);
+		if (rc)
+			SDE_ERROR_ENC(sde_enc,
+				      "prepare commit failed conn %d rc %d\n",
+				      sde_enc->cur_master->connector->base.id,
+				      rc);
 	}
 }
 
@@ -5396,7 +5460,7 @@ struct drm_encoder *sde_encoder_init_with_ops(
 	snprintf(name, SDE_NAME_SIZE, "rsc_enc%u", drm_enc->base.id);
 	sde_enc->rsc_client = sde_rsc_client_create(SDE_RSC_INDEX, name,
 		disp_info->is_primary ? SDE_RSC_PRIMARY_DISP_CLIENT :
-		SDE_RSC_EXTERNAL_DISP_CLIENT, intf_index);
+		SDE_RSC_EXTERNAL_DISP_CLIENT, intf_index + 1);
 	if (IS_ERR_OR_NULL(sde_enc->rsc_client)) {
 		SDE_DEBUG("sde rsc client create failed :%ld\n",
 						PTR_ERR(sde_enc->rsc_client));

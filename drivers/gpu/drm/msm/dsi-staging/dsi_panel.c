@@ -1322,6 +1322,7 @@ static int dsi_panel_parse_misc_host_config(struct dsi_host_common_cfg *host,
 {
 	u32 val = 0;
 	int rc = 0;
+	bool panel_cphy_mode = false;
 
 	rc = utils->read_u32(utils->data, "qcom,mdss-dsi-t-clk-post", &val);
 	if (!rc) {
@@ -1344,6 +1345,11 @@ static int dsi_panel_parse_misc_host_config(struct dsi_host_common_cfg *host,
 
 	host->force_hs_clk_lane = utils->read_bool(utils->data,
 					"qcom,mdss-dsi-force-clock-lane-hs");
+	panel_cphy_mode = utils->read_bool(utils->data,
+					"qcom,panel-cphy-mode");
+	host->phy_type = panel_cphy_mode ? DSI_PHY_TYPE_CPHY
+						: DSI_PHY_TYPE_DPHY;
+
 	return 0;
 }
 
@@ -2642,8 +2648,9 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 	int rc = 0;
 	struct dsi_display_mode_priv_info *priv_info;
 	u64 h_period, v_period;
-	u32 refresh_rate = TICKS_IN_MICRO_SECOND;
+	u64 refresh_rate = TICKS_IN_MICRO_SECOND;
 	struct dsi_mode_info *timing = NULL;
+	u64 pixel_clk_khz;
 
 	if (!mode || !mode->priv_info)
 		return -EINVAL;
@@ -2678,7 +2685,9 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 		refresh_rate = timing->refresh_rate;
 	}
 
-	mode->pixel_clk_khz = (h_period * v_period * refresh_rate) / 1000;
+	pixel_clk_khz = h_period * v_period * refresh_rate;
+	do_div(pixel_clk_khz, 1000);
+	mode->pixel_clk_khz = pixel_clk_khz;
 
 	return rc;
 }
@@ -3377,12 +3386,14 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	if (rc)
 		pr_err("failed to parse dfps configuration, rc=%d\n", rc);
 
-	if (!(panel->dfps_caps.dfps_support)) {
-		/* qsync and dfps are mutually exclusive features */
-		rc = dsi_panel_parse_qsync_caps(panel, of_node);
-		if (rc)
-			pr_err("failed to parse qsync features, rc=%d\n", rc);
-	}
+	rc = dsi_panel_parse_qsync_caps(panel, of_node);
+	if (rc)
+		pr_err("failed to parse qsync features, rc=%d\n", rc);
+
+	/* allow qsync support only if DFPS is with VFP approach */
+	if ((panel->dfps_caps.dfps_support) &&
+	    !(panel->dfps_caps.type == DSI_DFPS_IMMEDIATE_VFP))
+		panel->qsync_min_fps = 0;
 
 	rc = dsi_panel_parse_dyn_clk_caps(panel);
 	if (rc)
@@ -3410,7 +3421,6 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		if (rc == -EPROBE_DEFER)
 			goto error;
 	}
-
 
 	rc = dsi_panel_parse_misc_features(panel);
 	if (rc)

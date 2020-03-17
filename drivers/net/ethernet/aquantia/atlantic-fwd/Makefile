@@ -39,8 +39,11 @@ atlantic-fwd-objs := atl_fw.o \
 		     atl_hwmon.o
 
 atlantic-fwd-$(CONFIG_ATLFWD_FWD) += atl_fwd.o
+atlantic-fwd-$(CONFIG_ATLFWD_FWD_NETLINK) += atl_fwdnl.o \
+					      atl_fwdnl_params.o
+atlantic-fwd-$(CONFIG_MACSEC) += atl_macsec.o macsec/macsec_api.o
 
 atlantic-fwd-$(CONFIG_AQFWD_QCOM) += atl_qcom.o
 atlantic-fwd-$(CONFIG_AQFWD_QCOM_IPA) += atl_qcom_ipa.o
 
-CFLAGS_atl_trace.o := -I$(src)
+ccflags-y += -I$(src)

@@ -1,7 +1,7 @@
 /*
  * SMC Invoke driver
  *
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,6 +26,7 @@
 #include <linux/uaccess.h>
 #include <linux/dma-buf.h>
 #include <linux/kref.h>
+#include <linux/signal.h>
 
 #include <soc/qcom/scm.h>
 #include <asm/cacheflush.h>
@@ -111,6 +112,9 @@
 #define MEM_RGN_SRVR_ID 1
 #define MEM_MAP_SRVR_ID 2
 #define CBOBJ_SERVER_ID_START 0x10
+#define CBOBJ_SERVER_ID_END ((1<<16) - 1)
+/* local obj id is represented by 15 bits */
+#define MAX_LOCAL_OBJ_ID ((1<<15) - 1)
 /* CBOBJs will be served by server id 0x10 onwards */
 #define TZHANDLE_GET_SERVER(h) ((uint16_t)((h) & 0xFFFF))
 #define TZHANDLE_GET_OBJID(h) (((h) >> 16) & 0x7FFF)
@@ -264,6 +268,9 @@ static struct smcinvoke_server_info *find_cb_server_locked(uint16_t server_id)
 
 static uint16_t next_cb_server_id_locked(void)
 {
+	if (g_last_cb_server_id == CBOBJ_SERVER_ID_END)
+		g_last_cb_server_id = CBOBJ_SERVER_ID_START;
+
 	while (find_cb_server_locked(++g_last_cb_server_id));
 
 	return g_last_cb_server_id;
@@ -301,6 +308,9 @@ static  struct smcinvoke_mem_obj *find_mem_obj_locked(uint16_t mem_obj_id,
 
 static uint32_t next_mem_region_obj_id_locked(void)
 {
+	if (g_last_mem_rgn_id == MAX_LOCAL_OBJ_ID)
+		g_last_mem_rgn_id = 0;
+
 	while (find_mem_obj_locked(++g_last_mem_rgn_id, SMCINVOKE_MEM_RGN_OBJ));
 
 	return g_last_mem_rgn_id;
@@ -308,6 +318,9 @@ static uint32_t next_mem_region_obj_id_locked(void)
 
 static uint32_t next_mem_map_obj_id_locked(void)
 {
+	if (g_last_mem_map_obj_id == MAX_LOCAL_OBJ_ID)
+		g_last_mem_map_obj_id = 0;
+
 	while (find_mem_obj_locked(++g_last_mem_map_obj_id,
 					SMCINVOKE_MEM_MAP_OBJ));
 
@@ -391,10 +404,10 @@ static void free_pending_cbobj_locked(struct kref *kref)
 
 static int get_pending_cbobj_locked(uint16_t srvr_id, int16_t obj_id)
 {
-	struct smcinvoke_server_info *server = find_cb_server_locked(srvr_id);
 	struct list_head *head = NULL;
 	struct smcinvoke_cbobj *cbobj = NULL;
 	struct smcinvoke_cbobj *obj = NULL;
+	struct smcinvoke_server_info *server = find_cb_server_locked(srvr_id);
 
 	if (!server)
 		return OBJECT_ERROR_BADOBJ;
@@ -462,7 +475,11 @@ static void delete_cb_txn(struct kref *kref)
 	struct smcinvoke_cb_txn *cb_txn = container_of(kref,
 					struct smcinvoke_cb_txn, ref_cnt);
 
+	if (OBJECT_OP_METHODID(cb_txn->cb_req->hdr.op) == OBJECT_OP_RELEASE)
+		release_tzhandle_locked(cb_txn->cb_req->hdr.tzhandle);
+
 	kfree(cb_txn->cb_req);
+	hash_del(&cb_txn->hash);
 	kfree(cb_txn);
 }
 
@@ -839,18 +856,13 @@ static void process_tzcb_req(void *buf, size_t buf_len, struct file **arr_filp)
 	/* ret is going to TZ. Provide values from OBJECT_ERROR_<> */
 	int ret = OBJECT_ERROR_DEFUNCT;
 	struct smcinvoke_cb_txn *cb_txn = NULL;
-	struct smcinvoke_tzcb_req *cb_req = NULL;
+	struct smcinvoke_tzcb_req *cb_req = NULL, *tmp_cb_req = NULL;
 	struct smcinvoke_server_info *srvr_info = NULL;
 
 	if (buf_len < sizeof(struct smcinvoke_tzcb_req))
 		return;
 
-	cb_req = kzalloc(buf_len, GFP_KERNEL);
-	if (!cb_req) {
-		ret =  OBJECT_ERROR_KMEM;
-		goto out;
-	}
-	memcpy(cb_req, buf, buf_len);
+	cb_req = buf;
 
 	/* check whether it is to be served by kernel or userspace */
 	if (TZHANDLE_IS_KERNEL_OBJ(cb_req->hdr.tzhandle)) {
@@ -862,11 +874,26 @@ static void process_tzcb_req(void *buf, size_t buf_len, struct file **arr_filp)
 		return;
 	}
 
+	/*
+	 * We need a copy of req that could be sent to server. Otherwise, if
+	 * someone kills invoke caller, buf would go away and server would be
+	 * working on already freed buffer, causing a device crash.
+	 */
+	tmp_cb_req = kmemdup(buf, buf_len, GFP_KERNEL);
+	if (!tmp_cb_req) {
+		/* we need to return error to caller so fill up result */
+		cb_req->result = OBJECT_ERROR_KMEM;
+		return;
+	}
+
 	cb_txn = kzalloc(sizeof(*cb_txn), GFP_KERNEL);
 	if (!cb_txn) {
-		ret = OBJECT_ERROR_KMEM;
-		goto out;
+		cb_req->result = OBJECT_ERROR_KMEM;
+		kfree(tmp_cb_req);
+		return;
 	}
+	/* no need for memcpy as we did kmemdup() above */
+	cb_req  = tmp_cb_req;
 
 	cb_txn->state = SMCINVOKE_REQ_PLACED;
 	cb_txn->cb_req = cb_req;
@@ -878,6 +905,7 @@ static void process_tzcb_req(void *buf, size_t buf_len, struct file **arr_filp)
 	srvr_info = find_cb_server_locked(
 				TZHANDLE_GET_SERVER(cb_req->hdr.tzhandle));
 	if (!srvr_info || srvr_info->state == SMCINVOKE_SERVER_STATE_DEFUNCT) {
+		/* ret equals Object_ERROR_DEFUNCT, at this point go to out */
 		mutex_unlock(&g_smcinvoke_lock);
 		goto out;
 	}
@@ -885,27 +913,34 @@ static void process_tzcb_req(void *buf, size_t buf_len, struct file **arr_filp)
 	cb_txn->txn_id = ++srvr_info->txn_id;
 	hash_add(srvr_info->reqs_table, &cb_txn->hash, cb_txn->txn_id);
 	mutex_unlock(&g_smcinvoke_lock);
+	/*
+	 * we need not worry that server_info will be deleted because as long
+	 * as this CBObj is served by this server, srvr_info will be valid.
+	 */
 	wake_up_interruptible(&srvr_info->req_wait_q);
 	ret = wait_event_interruptible(srvr_info->rsp_wait_q,
 			(cb_txn->state == SMCINVOKE_REQ_PROCESSED) ||
 			(srvr_info->state == SMCINVOKE_SERVER_STATE_DEFUNCT));
 out:
 	/*
-	 * If we are here, either req is processed or not
-	 * if processed, result would have been set by txn processor
-	 * if not processed, we should set result with ret which should have
-	 * correct value that TZ/TA can understand
+	 * we could be here because of either: a. Req is PROCESSED
+	 * b. Server was killed                c. Invoke thread is killed
+	 * sometime invoke thread and server are part of same process.
 	 */
 	mutex_lock(&g_smcinvoke_lock);
-	if (!cb_txn || (cb_txn->state != SMCINVOKE_REQ_PROCESSED)) {
-		cb_req->result = ret;
-		if (srvr_info &&
-		    srvr_info->state == SMCINVOKE_SERVER_STATE_DEFUNCT &&
-		    OBJECT_OP_METHODID(cb_req->hdr.op) == OBJECT_OP_RELEASE) {
-			release_tzhandle_locked(cb_req->hdr.tzhandle);
-		}
-	}
 	hash_del(&cb_txn->hash);
+	if (cb_txn->state == SMCINVOKE_REQ_PROCESSED) {
+		/*
+		 * it is possible that server was killed immediately
+		 * after CB Req was processed but who cares now!
+		 */
+	} else if (!srvr_info ||
+		srvr_info->state == SMCINVOKE_SERVER_STATE_DEFUNCT) {
+		cb_req->result = OBJECT_ERROR_DEFUNCT;
+	} else {
+		pr_debug("%s wait_event interrupted ret = %d\n", __func__, ret);
+		cb_req->result = OBJECT_ERROR_ABORT;
+	}
 	memcpy(buf, cb_req, buf_len);
 	kref_put(&cb_txn->ref_cnt, delete_cb_txn);
 	mutex_unlock(&g_smcinvoke_lock);
@@ -1049,6 +1084,19 @@ static int prepare_send_scm_msg(const uint8_t *in_buf, size_t in_buf_len,
 		 */
 		if (desc.ret[0] != SMCINVOKE_RESULT_INBOUND_REQ_NEEDED)
 			break;
+
+		/*
+		 * At this point we are convinced it is an inbnd req but it is
+		 * possible that it is a resp to inbnd req that has failed and
+		 * returned an err. Ideally scm_call should have returned err
+		 * but err comes in  ret[1]. So check that out otherwise it
+		 * could cause infinite loop.
+		 */
+		if (req->result &&
+			desc.ret[0] == SMCINVOKE_RESULT_INBOUND_REQ_NEEDED) {
+			ret = req->result;
+			break;
+		}
 
 		dmac_inv_range(out_buf, out_buf + out_buf_len);
 
@@ -1402,6 +1450,7 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 						unsigned long arg)
 {
 	int ret = -1;
+	sigset_t pending_sig;
 	struct smcinvoke_file_data *server_obj = filp->private_data;
 	struct smcinvoke_accept user_args = {0};
 	struct smcinvoke_cb_txn *cb_txn = NULL;
@@ -1433,23 +1482,25 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 		cb_txn = find_cbtxn_locked(server_info, user_args.txn_id,
 					SMCINVOKE_REQ_PROCESSING);
 		mutex_unlock(&g_smcinvoke_lock);
-		/* cb_txn can be null if userspace provides wrong txn id. */
+		/*
+		 * cb_txn can be null if userspace provides wrong txn id OR
+		 * invoke thread died while server was processing cb req.
+		 * if invoke thread dies, it would remove req from Q. So
+		 * no matching cb_txn would be on Q and hence NULL cb_txn.
+		 */
 		if (!cb_txn) {
-			pr_err("%s: Invalid txn received  = %d\n",
+			pr_err("%s txn %d either invalid or removed from Q\n",
 					__func__, user_args.txn_id);
 			goto out;
 		}
 		ret = marshal_out_tzcb_req(&user_args, cb_txn,
 						cb_txn->filp_to_release);
 		/*
-		 * if client did not set error and we get error locally
+		 * if client did not set error and we get error locally,
 		 * we return local error to TA
 		 */
 		if (ret && cb_txn->cb_req->result == 0)
 			cb_txn->cb_req->result = OBJECT_ERROR_UNAVAIL;
-
-		if (OBJECT_OP_METHODID(user_args.op) == OBJECT_OP_RELEASE)
-			release_tzhandles(&cb_txn->cb_req->hdr.tzhandle, 1);
 
 		cb_txn->state = SMCINVOKE_REQ_PROCESSED;
 		kref_put(&cb_txn->ref_cnt, delete_cb_txn);
@@ -1468,8 +1519,26 @@ static long process_accept_req(struct file *filp, unsigned int cmd,
 	do {
 		ret = wait_event_interruptible(server_info->req_wait_q,
 				!hash_empty(server_info->reqs_table));
-		if (ret)
+		if (ret) {
+			pr_debug("%s wait_event interrupted: ret = %d\n",
+							__func__, ret);
+			/*
+			 * Ideally, we should destroy server if accept threads
+			 * are returning due to client being killed or device
+			 * going down (Shutdown/Reboot) but that would make
+			 * server_info invalid. Other accept/invoke threads are
+			 * using server_info and would crash. So dont do that.
+			 */
+			pending_sig = (&current->pending)->signal;
+			if (sigismember(&pending_sig, SIGKILL)) {
+				mutex_lock(&g_smcinvoke_lock);
+				server_info->state =
+					SMCINVOKE_SERVER_STATE_DEFUNCT;
+				wake_up_interruptible(&server_info->rsp_wait_q);
+				mutex_unlock(&g_smcinvoke_lock);
+			}
 			goto out;
+		}
 
 		mutex_lock(&g_smcinvoke_lock);
 		cb_txn = find_cbtxn_locked(server_info,
@@ -1521,34 +1590,26 @@ static long process_invoke_req(struct file *filp, unsigned int cmd,
 	int32_t tzhandles_to_release[OBJECT_COUNTS_MAX_OO] = {0};
 	bool tz_acked = false;
 
-	if (_IOC_SIZE(cmd) != sizeof(req)) {
-		ret =  -EINVAL;
-		goto out;
-	}
-	if (tzobj->context_type != SMCINVOKE_OBJ_TYPE_TZ_OBJ) {
-		ret = -EPERM;
-		goto out;
-	}
+	if (_IOC_SIZE(cmd) != sizeof(req))
+		return -EINVAL;
+
+	if (tzobj->context_type != SMCINVOKE_OBJ_TYPE_TZ_OBJ)
+		return -EPERM;
+
 	ret = copy_from_user(&req, (void __user *)arg, sizeof(req));
-	if (ret) {
-		ret =  -EFAULT;
-		goto out;
-	}
+	if (ret)
+		return -EFAULT;
+
+	if (req.argsize != sizeof(union smcinvoke_arg))
+		return -EINVAL;
 
 	nr_args = OBJECT_COUNTS_NUM_buffers(req.counts) +
 			OBJECT_COUNTS_NUM_objects(req.counts);
 
-	if (req.argsize != sizeof(union smcinvoke_arg)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
 	if (nr_args) {
 		args_buf = kcalloc(nr_args, req.argsize, GFP_KERNEL);
-		if (!args_buf) {
-			ret = -ENOMEM;
-			goto out;
-		}
+		if (!args_buf)
+			return -ENOMEM;
 
 		ret = copy_from_user(args_buf, u64_to_user_ptr(req.args),
 					nr_args * req.argsize);

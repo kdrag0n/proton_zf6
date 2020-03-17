@@ -9,12 +9,18 @@
 
 #ifndef _ATL_HW_H_
 #define _ATL_HW_H_
-#include <linux/pci.h>
-#include <linux/if_ether.h>
-#include <linux/ethtool.h>
 
-#include "atl_regs.h"
+#include <linux/compiler.h>
+#include <linux/if_ether.h>
+#include <linux/mutex.h>
+#include <linux/types.h>
+
 #include "atl_fw.h"
+#include "atl_macsec.h"
+#include "atl_regs.h"
+
+union atl_desc;
+struct atl_nic;
 
 #define PCI_VENDOR_ID_AQUANTIA 0x1d6a
 
@@ -81,9 +87,13 @@ struct atl_hw {
 #define ATL_RSS_TBL_SIZE (1 << 6)
 	uint8_t rss_tbl[ATL_RSS_TBL_SIZE];
 	struct atl_thermal thermal;
+#define ATL_FW_CFG_DUMP_SIZE 2
+	uint32_t fw_cfg_dump[ATL_FW_CFG_DUMP_SIZE];
+#ifdef NETIF_F_HW_MACSEC
+	struct atl_macsec_cfg macsec_cfg;
+#endif
 };
 
-union atl_desc;
 struct atl_hw_ring {
 	union atl_desc *descs;
 	uint32_t size;
@@ -98,7 +108,8 @@ enum mcp_area {
 
 #define offset_ptr(ptr, ring, amount)					\
 	({								\
-		uint32_t size = ((struct atl_hw_ring *)(ring))->size;	\
+		struct atl_hw_ring *hw_ring = (ring);			\
+		uint32_t size = hw_ring->size;				\
 									\
 		uint32_t res = (ptr) + (amount);			\
 		if ((int32_t)res < 0)					\
@@ -132,6 +143,14 @@ static inline void atl_write(struct atl_hw *hw, uint32_t addr, uint32_t val)
 		return;
 
 	writel(val, base + addr);
+}
+
+
+static inline void atl_write_mask_bits(struct atl_hw *hw, uint32_t addr,
+			     uint32_t mask, uint32_t val)
+{
+	atl_write(hw, addr,
+		  (atl_read(hw, addr) & ~mask) | (val & mask));
 }
 
 static inline void atl_write_bits(struct atl_hw *hw, uint32_t addr,
@@ -226,6 +245,12 @@ static inline int atl_read_fwstat_word(struct atl_hw *hw, uint32_t offt,
 	uint32_t *val)
 {
 	return atl_read_mcp_word(hw, offt + hw->mcp.fw_stat_addr, val);
+}
+
+static inline int atl_read_rpc_mem(struct atl_hw *hw, uint32_t offt,
+				   uint32_t *val, size_t length)
+{
+	return atl_read_mcp_mem(hw, offt + hw->mcp.rpc_addr, val, length);
 }
 
 static inline int atl_read_fwsettings_word(struct atl_hw *hw, uint32_t offt,

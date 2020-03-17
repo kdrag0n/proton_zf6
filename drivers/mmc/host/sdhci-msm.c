@@ -1996,6 +1996,9 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	if (!pdata)
 		goto out;
 
+	device_property_read_u32(dev, "post-power-on-delay-ms",
+                                &msm_host->mmc->ios.power_delay_ms);
+
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
 	if (gpio_is_valid(pdata->status_gpio) && !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
@@ -5189,6 +5192,13 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Add host failed (%d)\n", ret);
 		goto vreg_deinit;
 	}
+
+	/*
+	 * To avoid polling and to avoid this R1b command conversion
+	 * to R1 command if the requested busy timeout > host's max
+	 * busy timeout in case of sanitize, erase or any R1b command
+	 */
+	host->mmc->max_busy_timeout = 0;
 
 	msm_host->pltfm_init_done = true;
 

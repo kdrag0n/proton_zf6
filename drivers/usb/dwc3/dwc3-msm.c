@@ -1160,7 +1160,7 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 	req->buf_base_addr = dma_alloc_attrs(dwc->sysdev, len, &req->dma,
 					GFP_KERNEL, dma_attr);
 	if (!req->buf_base_addr) {
-		dev_err(dwc->dev, "%s: buf_base_addr allocate failed %s\n",
+		dev_err(dwc->dev, "buf_base_addr allocate failed %s\n",
 				dep->name);
 		return -ENOMEM;
 	}
@@ -1519,6 +1519,11 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 
 	switch (op) {
 	case GSI_EP_OP_PREPARE_TRBS:
+		if (!dwc->pullups_connected) {
+			dbg_log_string("No Pullup\n");
+			return -ESHUTDOWN;
+		}
+
 		request = (struct usb_gsi_request *)op_data;
 		ret = gsi_prepare_trbs(ep, request);
 		break;
@@ -1527,12 +1532,22 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		gsi_free_trbs(ep, request);
 		break;
 	case GSI_EP_OP_CONFIG:
+		if (!dwc->pullups_connected) {
+			dbg_log_string("No Pullup\n");
+			return -ESHUTDOWN;
+		}
+
 		request = (struct usb_gsi_request *)op_data;
 		spin_lock_irqsave(&dwc->lock, flags);
 		gsi_configure_ep(ep, request);
 		spin_unlock_irqrestore(&dwc->lock, flags);
 		break;
 	case GSI_EP_OP_STARTXFER:
+		if (!dwc->pullups_connected) {
+			dbg_log_string("No Pullup\n");
+			return -ESHUTDOWN;
+		}
+
 		spin_lock_irqsave(&dwc->lock, flags);
 		ret = gsi_startxfer_for_ep(ep);
 		spin_unlock_irqrestore(&dwc->lock, flags);
@@ -1545,6 +1560,11 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		gsi_store_ringbase_dbl_info(ep, request);
 		break;
 	case GSI_EP_OP_ENABLE_GSI:
+		if (!dwc->pullups_connected) {
+			dbg_log_string("No Pullup\n");
+			return -ESHUTDOWN;
+		}
+
 		gsi_enable(ep);
 		break;
 	case GSI_EP_OP_GET_CH_INFO:
@@ -1552,6 +1572,11 @@ static int dwc3_msm_gsi_ep_op(struct usb_ep *ep,
 		gsi_get_channel_info(ep, ch_info);
 		break;
 	case GSI_EP_OP_RING_DB:
+		if (!dwc->pullups_connected) {
+			dbg_log_string("No Pullup\n");
+			return -ESHUTDOWN;
+		}
+
 		request = (struct usb_gsi_request *)op_data;
 		gsi_ring_db(ep, request);
 		break;
@@ -3041,6 +3066,7 @@ static irqreturn_t msm_dwc3_pwr_irq(int irq, void *data)
 }
 
 static void dwc3_otg_sm_work(struct work_struct *w);
+static int get_psy_type(struct dwc3_msm *mdwc);
 
 static int dwc3_msm_get_clk_gdsc(struct dwc3_msm *mdwc)
 {
@@ -3207,6 +3233,8 @@ static void check_for_sdp_connection(struct work_struct *w)
 	}
 }
 
+#define DP_PULSE_WIDTH_MSEC 200
+
 static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	unsigned long event, void *ptr)
 {
@@ -3230,6 +3258,13 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	dev_dbg(mdwc->dev, "vbus:%ld event received\n", event);
 
 	mdwc->vbus_active = event;
+
+	if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_CDP &&
+			mdwc->vbus_active) {
+		dev_dbg(mdwc->dev, "Connected to CDP, pull DP up\n");
+		usb_phy_drive_dp_pulse(mdwc->hs_phy, DP_PULSE_WIDTH_MSEC);
+	}
+
 	if ((dwc->dr_mode == USB_DR_MODE_OTG) && !mdwc->in_restart)
 		queue_work(mdwc->dwc3_wq, &mdwc->resume_work);
 
@@ -3588,12 +3623,13 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	}
 
 	/*
-	 * Create freezable workqueue for sm_work so that it gets scheduled only
-	 * after pm_resume has happened completely. This helps in avoiding race
-	 * conditions between xhci_plat_resume and xhci_runtime_resume; and also
-	 * between hcd disconnect and xhci_resume.
+	 * Create an ordered freezable workqueue for sm_work so that it gets
+	 * scheduled only after pm_resume has happened completely. This helps
+	 * in avoiding race conditions between xhci_plat_resume and
+	 * xhci_runtime_resume and also between hcd disconnect and xhci_resume.
 	 */
-	mdwc->sm_usb_wq = create_freezable_workqueue("k_sm_usb");
+	mdwc->sm_usb_wq = alloc_ordered_workqueue("k_sm_usb",
+						WQ_FREEZABLE | WQ_MEM_RECLAIM);
 	if (!mdwc->sm_usb_wq) {
 		destroy_workqueue(mdwc->dwc3_wq);
 		return -ENOMEM;

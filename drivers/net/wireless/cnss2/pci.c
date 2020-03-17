@@ -61,6 +61,7 @@
 #endif
 
 static DEFINE_SPINLOCK(pci_link_down_lock);
+static DEFINE_SPINLOCK(pci_reg_window_lock);
 
 #define MHI_TIMEOUT_OVERWRITE_MS	(plat_priv->ctrl_params.mhi_timeout)
 
@@ -227,10 +228,13 @@ static int cnss_pci_reg_read(struct cnss_pci_data *pci_priv,
 		return 0;
 	}
 
+	spin_lock_bh(&pci_reg_window_lock);
 	cnss_pci_select_window(pci_priv, offset);
 
 	*val = readl_relaxed(pci_priv->bar + WINDOW_START +
 			     (offset & WINDOW_RANGE_MASK));
+	spin_unlock_bh(&pci_reg_window_lock);
+
 	return 0;
 }
 
@@ -481,6 +485,18 @@ int cnss_pci_is_device_down(struct device *dev)
 		pci_priv->pci_link_down_ind;
 }
 EXPORT_SYMBOL(cnss_pci_is_device_down);
+
+void cnss_pci_lock_reg_window(struct device *dev, unsigned long *flags)
+{
+	spin_lock_bh(&pci_reg_window_lock);
+}
+EXPORT_SYMBOL(cnss_pci_lock_reg_window);
+
+void cnss_pci_unlock_reg_window(struct device *dev, unsigned long *flags)
+{
+	spin_unlock_bh(&pci_reg_window_lock);
+}
+EXPORT_SYMBOL(cnss_pci_unlock_reg_window);
 
 int cnss_pci_call_driver_probe(struct cnss_pci_data *pci_priv)
 {
@@ -849,6 +865,12 @@ static int cnss_qca6290_shutdown(struct cnss_pci_data *pci_priv)
 		cnss_pr_err("Failed to suspend PCI link, err = %d\n", ret);
 
 	cnss_power_off_device(plat_priv);
+
+	if (test_bit(CNSS_DRIVER_RECOVERY, &plat_priv->driver_state)) {
+		cnss_pr_dbg("recovery sleep start\n");
+		msleep(200);
+		cnss_pr_dbg("recovery sleep 200ms done\n");
+	}
 
 	pci_priv->remap_window = 0;
 
@@ -1951,36 +1973,6 @@ static void cnss_pci_free_m3_mem(struct cnss_pci_data *pci_priv)
 	m3_mem->size = 0;
 }
 
-int cnss_pci_force_fw_assert_hdlr(struct cnss_pci_data *pci_priv)
-{
-	int ret;
-	struct cnss_plat_data *plat_priv;
-
-	if (!pci_priv)
-		return -ENODEV;
-
-	plat_priv = pci_priv->plat_priv;
-	if (!plat_priv)
-		return -ENODEV;
-
-	cnss_pci_dump_shadow_reg(pci_priv);
-
-	ret = cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_TRIGGER_RDDM);
-	if (ret) {
-		cnss_fatal_err("Failed to trigger RDDM, err = %d\n", ret);
-		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
-				       CNSS_REASON_DEFAULT);
-		return ret;
-	}
-
-	if (!test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state)) {
-		mod_timer(&plat_priv->fw_boot_timer,
-			  jiffies + msecs_to_jiffies(FW_ASSERT_TIMEOUT));
-	}
-
-	return 0;
-}
-
 void cnss_pci_fw_boot_timeout_hdlr(struct cnss_pci_data *pci_priv)
 {
 	if (!pci_priv)
@@ -2435,6 +2427,37 @@ static void cnss_pci_dump_registers(struct cnss_pci_data *pci_priv)
 	cnss_pci_dump_ce_reg(pci_priv, CNSS_CE_COMMON);
 	cnss_pci_dump_ce_reg(pci_priv, CNSS_CE_09);
 	cnss_pci_dump_ce_reg(pci_priv, CNSS_CE_10);
+}
+
+int cnss_pci_force_fw_assert_hdlr(struct cnss_pci_data *pci_priv)
+{
+	int ret;
+	struct cnss_plat_data *plat_priv;
+
+	if (!pci_priv)
+		return -ENODEV;
+
+	plat_priv = pci_priv->plat_priv;
+	if (!plat_priv)
+		return -ENODEV;
+
+	cnss_pci_dump_shadow_reg(pci_priv);
+
+	ret = cnss_pci_set_mhi_state(pci_priv, CNSS_MHI_TRIGGER_RDDM);
+	if (ret) {
+		cnss_fatal_err("Failed to trigger RDDM, err = %d\n", ret);
+		cnss_pci_dump_registers(pci_priv);
+		cnss_schedule_recovery(&pci_priv->pci_dev->dev,
+				       CNSS_REASON_DEFAULT);
+		return ret;
+	}
+
+	if (!test_bit(CNSS_DEV_ERR_NOTIFY, &plat_priv->driver_state)) {
+		mod_timer(&plat_priv->fw_boot_timer,
+			  jiffies + msecs_to_jiffies(FW_ASSERT_TIMEOUT));
+	}
+
+	return 0;
 }
 
 void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)

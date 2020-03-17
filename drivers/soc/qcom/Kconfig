@@ -490,6 +490,16 @@ config MSM_GLADIATOR_ERP
 
 	  If unsure, say N.
 
+config SDX_EXT_IPC
+	tristate "QCOM external ipc driver"
+	help
+	  This enables the module to help modem communicate with external
+	  Application processor connected to Qualcomm Technologies, Inc
+	  modem chipset. The modem and APQ can understand each other's
+	  state by reading ipc gpios.
+
+	  If unsure, say N.
+
 config PANIC_ON_GLADIATOR_ERROR
 	depends on MSM_GLADIATOR_ERP
 	bool "Panic on GLADIATOR error report"
@@ -544,6 +554,15 @@ config ICNSS_QMI
 	handshake messages to WLAN FW, which includes hardware capabilities
 	and configurations. It also send WLAN on/off control message to FW
 	over QMI channel.
+
+config CNSS_TIMESYNC
+	bool "cnss TIME SYNC support"
+	depends on ICNSS
+	---help---
+	  Say 'Y' here to enable cnss TIME SYNC support. TIME SYNC support
+	  primarily consists of reading the AUDIO TIMESYNC register for
+	  deriving WLAN mac time stamp relation when FTM based clock sync is
+	  used.
 
 config QCOM_EUD
 	tristate "QTI Embedded USB Debugger (EUD)"
@@ -830,6 +849,7 @@ endif # MSM_PM
 
 source "drivers/soc/qcom/memshare/Kconfig"
 source "drivers/soc/qcom/hab/Kconfig"
+source "drivers/soc/qcom/rmnet_ctl/Kconfig"
 
 config MSM_PERFORMANCE
 	tristate "msm performance driver to support userspace fmin/fmax request"

@@ -33,6 +33,7 @@ struct firmware_info {
 };
 
 static const struct firmware_info firmware_table[] = {
+	{.dev_id = 0x307, .fw_image = "sdx60m/sbl1.mbn"},
 	{.dev_id = 0x306, .fw_image = "sdx55m/sbl1.mbn"},
 	{.dev_id = 0x305, .fw_image = "sdx50m/sbl1.mbn"},
 	{.dev_id = 0x304, .fw_image = "sbl.mbn", .edl_image = "edl.mbn"},
@@ -236,7 +237,7 @@ exit_runtime_suspend:
 	mutex_unlock(&mhi_cntrl->pm_mutex);
 	MHI_LOG("Exited with ret:%d\n", ret);
 
-	return ret;
+	return (ret < 0) ? -EBUSY : 0;
 }
 
 static int mhi_runtime_idle(struct device *dev)
@@ -294,7 +295,7 @@ rpm_resume_exit:
 	mutex_unlock(&mhi_cntrl->pm_mutex);
 	MHI_LOG("Exited with :%d\n", ret);
 
-	return ret;
+	return (ret < 0) ? -EBUSY : 0;
 }
 
 static int mhi_system_resume(struct device *dev)
@@ -544,8 +545,9 @@ static int mhi_qcom_power_up(struct mhi_controller *mhi_cntrl)
 			return -EIO;
 	}
 
-	/* when coming out of SSR, initial ee state is not valid */
+	/* when coming out of SSR, initial states are not valid */
 	mhi_cntrl->ee = 0;
+	mhi_cntrl->power_down = false;
 
 	ret = mhi_arch_power_up(mhi_cntrl);
 	if (ret)
@@ -593,10 +595,6 @@ static void mhi_status_cb(struct mhi_controller *mhi_cntrl,
 		MHI_LOG("Schedule runtime suspend\n");
 		pm_runtime_mark_last_busy(dev);
 		pm_request_autosuspend(dev);
-		break;
-	case MHI_CB_BW_REQ:
-		if (mhi_dev->bw_scale)
-			mhi_dev->bw_scale(mhi_cntrl, mhi_dev);
 		break;
 	case MHI_CB_EE_MISSION_MODE:
 		/*
@@ -706,6 +704,7 @@ static struct mhi_controller *mhi_register_controller(struct pci_dev *pci_dev)
 		goto error_register;
 
 	use_bb = of_property_read_bool(of_node, "mhi,use-bb");
+	mhi_dev->allow_m1 = of_property_read_bool(of_node, "mhi,allow-m1");
 
 	/*
 	 * if s1 translation enabled or using bounce buffer pull iova addr
@@ -757,6 +756,10 @@ static struct mhi_controller *mhi_register_controller(struct pci_dev *pci_dev)
 	mhi_cntrl->remote_timer_freq = 19200000;
 	mhi_cntrl->local_timer_freq = 19200000;
 
+	/* setup host support for SFR retreival */
+	if (of_property_read_bool(of_node, "mhi,sfr-support"))
+		mhi_cntrl->sfr_len = MHI_MAX_SFR_LEN;
+
 	ret = of_register_mhi_controller(mhi_cntrl);
 	if (ret)
 		goto error_register;
@@ -777,8 +780,29 @@ static struct mhi_controller *mhi_register_controller(struct pci_dev *pci_dev)
 	if (ret)
 		goto error_register;
 
+	if (mhi_dev->allow_m1)
+		goto skip_offload;
+
+	mhi_cntrl->offload_wq = alloc_ordered_workqueue("offload_wq",
+			WQ_MEM_RECLAIM | WQ_HIGHPRI);
+	if (!mhi_cntrl->offload_wq)
+		goto error_register;
+
+	INIT_WORK(&mhi_cntrl->reg_write_work, mhi_reg_write_work);
+
+	mhi_cntrl->reg_write_q = kcalloc(REG_WRITE_QUEUE_LEN,
+					sizeof(*mhi_cntrl->reg_write_q),
+					GFP_KERNEL);
+	if (!mhi_cntrl->reg_write_q)
+		goto error_free_wq;
+
+	atomic_set(&mhi_cntrl->write_idx, -1);
+
+skip_offload:
 	return mhi_cntrl;
 
+error_free_wq:
+	destroy_workqueue(mhi_cntrl->offload_wq);
 error_register:
 	mhi_free_controller(mhi_cntrl);
 
@@ -859,6 +883,7 @@ static struct pci_device_id mhi_pcie_device_id[] = {
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0304)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0305)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0306)},
+	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0307)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, MHI_PCIE_DEBUG_ID)},
 	{0},
 };

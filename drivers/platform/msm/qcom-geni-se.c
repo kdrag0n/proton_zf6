@@ -45,6 +45,8 @@
 #define MAX_CLK_PERF_LEVEL 32
 static unsigned long default_bus_bw_set[] = {0, 19200000, 50000000,
 				100000000, 150000000, 200000000, 236000000};
+/* SCM Call Id */
+#define SSR_SCM_CMD	0x1
 
 struct bus_vectors {
 	int src;
@@ -58,6 +60,7 @@ struct bus_vectors {
  * @iommu_lock:		Lock to protect IOMMU Mapping & attachment.
  * @iommu_map:		IOMMU map of the memory space supported by this core.
  * @iommu_s1_bypass:	Bypass IOMMU stage 1 translation.
+ * @iommu_atomic_ctx:	Enable IOMMU in atomic context.
  * @base:		Base address of this instance of QUPv3 core.
  * @bus_bw:		Client handle to the bus bandwidth request.
  * @bus_bw_noc:		Client handle to the QUP clock and DDR path bus
@@ -89,6 +92,7 @@ struct bus_vectors {
  * @update:		Usecase index for icb voting.
  * @vote_for_bw:	To check if we have to vote for BW or BCM threashold
 			in ab/ib ICB voting.
+ * @struct ssc_qup_ssr: Structure to represent SSC Qupv3 SSR Structure.
  */
 struct geni_se_device {
 	struct device *dev;
@@ -96,6 +100,7 @@ struct geni_se_device {
 	struct mutex iommu_lock;
 	struct dma_iommu_mapping *iommu_map;
 	bool iommu_s1_bypass;
+	bool iommu_atomic_ctx;
 	void __iomem *base;
 	struct msm_bus_client_handle *bus_bw;
 	uint32_t bus_bw_noc;
@@ -125,6 +130,7 @@ struct geni_se_device {
 	struct msm_bus_scale_pdata *pdata;
 	int update;
 	bool vote_for_bw;
+	struct ssc_qup_ssr ssr;
 };
 
 #define HW_VER_MAJOR_MASK GENMASK(31, 28)
@@ -348,6 +354,101 @@ static int geni_se_select_fifo_mode(void __iomem *base)
 	geni_write_reg(common_geni_m_irq_en, base, SE_GENI_M_IRQ_EN);
 	geni_write_reg(common_geni_s_irq_en, base, SE_GENI_S_IRQ_EN);
 	geni_write_reg(geni_dma_mode, base, SE_GENI_DMA_MODE_EN);
+	return 0;
+}
+
+static ssize_t ssc_qup_state_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct geni_se_device *geni_se_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, sizeof(int), "%d\n",
+				!geni_se_dev->ssr.is_ssr_down);
+}
+
+static DEVICE_ATTR_RO(ssc_qup_state);
+
+static void geni_se_ssc_qup_down(struct geni_se_device *dev)
+{
+	struct se_geni_rsc *rsc = NULL;
+
+	dev->ssr.is_ssr_down = true;
+	list_for_each_entry(rsc, &dev->ssr.active_list_head,
+					rsc_ssr.active_list) {
+		rsc->rsc_ssr.force_suspend(rsc->ctrl_dev);
+	}
+}
+
+static void geni_se_ssc_qup_up(struct geni_se_device *dev)
+{
+	int ret = 0;
+	struct scm_desc desc;
+	struct se_geni_rsc *rsc = NULL;
+
+	/* Passing dummy argument as it is scm call requirement */
+	desc.args[0] = 0x0;
+	desc.arginfo = SCM_ARGS(1, SCM_VAL);
+
+	ret = scm_call2(SCM_SIP_FNID(TZ_SVC_QUP_FW_LOAD, SSR_SCM_CMD), &desc);
+	if (ret) {
+		dev_err(dev->dev, "Unable to load firmware after SSR\n");
+		return;
+	}
+
+	list_for_each_entry(rsc, &dev->ssr.active_list_head,
+					rsc_ssr.active_list) {
+		rsc->rsc_ssr.force_resume(rsc->ctrl_dev);
+	}
+
+	dev->ssr.is_ssr_down = false;
+}
+
+static int geni_se_ssr_notify_block(struct notifier_block *n,
+						unsigned long code, void *_cmd)
+{
+	struct ssc_qup_nb *ssc_qup_nb = container_of(n, struct ssc_qup_nb, nb);
+	struct ssc_qup_ssr *ssr = container_of(ssc_qup_nb, struct ssc_qup_ssr,
+					ssc_qup_nb);
+	struct geni_se_device *dev = container_of(ssr, struct geni_se_device,
+						ssr);
+
+	switch (code) {
+	case SUBSYS_BEFORE_SHUTDOWN:
+		geni_se_ssc_qup_down(dev);
+		GENI_SE_DBG(dev->log_ctx, false, NULL,
+				"SSR notification before power down\n");
+		break;
+	case SUBSYS_AFTER_POWERUP:
+		if (dev->ssr.probe_completed)
+			geni_se_ssc_qup_up(dev);
+		else
+			dev->ssr.probe_completed = true;
+
+		GENI_SE_DBG(dev->log_ctx, false, NULL,
+				"SSR notification after power up\n");
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int geni_se_ssc_qup_ssr_reg(struct geni_se_device *dev)
+{
+	dev->ssr.ssc_qup_nb.nb.notifier_call = geni_se_ssr_notify_block;
+	dev->ssr.ssc_qup_nb.next = subsys_notif_register_notifier(
+				dev->ssr.subsys_name, &dev->ssr.ssc_qup_nb.nb);
+
+	if (IS_ERR_OR_NULL(dev->ssr.ssc_qup_nb.next)) {
+		dev_err(dev->dev,
+			"subsys_notif_register_notifier failed %ld\n",
+			PTR_ERR(dev->ssr.ssc_qup_nb.next));
+		return PTR_ERR(dev->ssr.ssc_qup_nb.next);
+	}
+
+	GENI_SE_DBG(dev->log_ctx, false, NULL, "SSR registration done\n");
+
 	return 0;
 }
 
@@ -812,8 +913,7 @@ int se_geni_clks_off(struct se_geni_rsc *rsc)
 		return -EINVAL;
 
 	geni_se_dev = dev_get_drvdata(rsc->wrapper_dev);
-	if (unlikely(!geni_se_dev || !(geni_se_dev->bus_bw ||
-					geni_se_dev->bus_bw_noc)))
+	if (unlikely(!geni_se_dev))
 		return -ENODEV;
 
 	clk_disable_unprepare(rsc->se_clk);
@@ -845,9 +945,7 @@ int se_geni_resources_off(struct se_geni_rsc *rsc)
 		return -EINVAL;
 
 	geni_se_dev = dev_get_drvdata(rsc->wrapper_dev);
-	if (unlikely(!geni_se_dev ||
-			!(geni_se_dev->bus_bw ||
-					geni_se_dev->bus_bw_noc)))
+	if (unlikely(!geni_se_dev))
 		return -ENODEV;
 
 	ret = se_geni_clks_off(rsc);
@@ -1096,6 +1194,12 @@ int geni_se_resources_init(struct se_geni_rsc *rsc,
 
 	INIT_LIST_HEAD(&rsc->ab_list);
 	INIT_LIST_HEAD(&rsc->ib_list);
+	if (geni_se_dev->ssr.subsys_name && rsc->rsc_ssr.ssr_enable) {
+		INIT_LIST_HEAD(&rsc->rsc_ssr.active_list);
+		list_add(&rsc->rsc_ssr.active_list,
+				&geni_se_dev->ssr.active_list_head);
+	}
+
 	ret = geni_se_iommu_map_and_attach(geni_se_dev);
 	if (ret)
 		GENI_SE_ERR(geni_se_dev->log_ctx, false, NULL,
@@ -1259,6 +1363,35 @@ int geni_se_tx_dma_prep(struct device *wrapper_dev, void __iomem *base,
 EXPORT_SYMBOL(geni_se_tx_dma_prep);
 
 /**
+ * geni_se_rx_dma_start() - Prepare the Serial Engine registers for RX DMA
+				transfers.
+ * @base:		Base address of the SE register block.
+ * @rx_len:		Length of the RX buffer.
+ * @rx_dma:		Pointer to store the mapped DMA address.
+ *
+ * This function is used to prepare the Serial Engine registers for DMA RX.
+ *
+ * Return:	None.
+ */
+void geni_se_rx_dma_start(void __iomem *base, int rx_len, dma_addr_t *rx_dma)
+{
+
+	if (!*rx_dma || !base || !rx_len)
+		return;
+
+	geni_write_reg(7, base, SE_DMA_RX_IRQ_EN_SET);
+	geni_write_reg(GENI_SE_DMA_PTR_L(*rx_dma), base, SE_DMA_RX_PTR_L);
+	geni_write_reg(GENI_SE_DMA_PTR_H(*rx_dma), base, SE_DMA_RX_PTR_H);
+	/* RX does not have EOT bit */
+	geni_write_reg(0, base, SE_DMA_RX_ATTR);
+
+	/* Ensure that above register writes went through */
+	mb();
+	geni_write_reg(rx_len, base, SE_DMA_RX_LEN);
+}
+EXPORT_SYMBOL(geni_se_rx_dma_start);
+
+/**
  * geni_se_rx_dma_prep() - Prepare the Serial Engine for RX DMA transfer
  * @wrapper_dev:	QUPv3 Wrapper Device to which the RX buffer is mapped.
  * @base:		Base address of the SE register block.
@@ -1283,12 +1416,8 @@ int geni_se_rx_dma_prep(struct device *wrapper_dev, void __iomem *base,
 	if (ret)
 		return ret;
 
-	geni_write_reg(7, base, SE_DMA_RX_IRQ_EN_SET);
-	geni_write_reg(GENI_SE_DMA_PTR_L(*rx_dma), base, SE_DMA_RX_PTR_L);
-	geni_write_reg(GENI_SE_DMA_PTR_H(*rx_dma), base, SE_DMA_RX_PTR_H);
-	/* RX does not have EOT bit */
-	geni_write_reg(0, base, SE_DMA_RX_ATTR);
-	geni_write_reg(rx_len, base, SE_DMA_RX_LEN);
+	geni_se_rx_dma_start(base, rx_len, rx_dma);
+
 	return 0;
 }
 EXPORT_SYMBOL(geni_se_rx_dma_prep);
@@ -1361,7 +1490,7 @@ static int geni_se_iommu_map_and_attach(struct geni_se_device *geni_se_dev)
 {
 	dma_addr_t va_start = GENI_SE_IOMMU_VA_START;
 	size_t va_size = GENI_SE_IOMMU_VA_SIZE;
-	int bypass = 1;
+	int bypass = 1, atomic_ctx = 1;
 	struct device *cb_dev = geni_se_dev->cb_dev;
 
 	/*Don't proceed if IOMMU node is disabled*/
@@ -1384,17 +1513,20 @@ static int geni_se_iommu_map_and_attach(struct geni_se_device *geni_se_dev)
 		return PTR_ERR(geni_se_dev->iommu_map);
 	}
 
-	if (geni_se_dev->iommu_s1_bypass) {
-		if (iommu_domain_set_attr(geni_se_dev->iommu_map->domain,
-					  DOMAIN_ATTR_S1_BYPASS, &bypass)) {
-			GENI_SE_ERR(geni_se_dev->log_ctx, false, NULL,
-				"%s:%s Couldn't bypass s1 translation\n",
-				__func__, dev_name(cb_dev));
-			arm_iommu_release_mapping(geni_se_dev->iommu_map);
-			geni_se_dev->iommu_map = NULL;
-			mutex_unlock(&geni_se_dev->iommu_lock);
-			return -EIO;
-		}
+	/* Set either s1_bypass or atomic context as defined in DT */
+	if ((geni_se_dev->iommu_s1_bypass &&
+			iommu_domain_set_attr(geni_se_dev->iommu_map->domain,
+				DOMAIN_ATTR_S1_BYPASS, &bypass)) ||
+		(geni_se_dev->iommu_atomic_ctx &&
+			iommu_domain_set_attr(geni_se_dev->iommu_map->domain,
+				DOMAIN_ATTR_ATOMIC, &atomic_ctx))) {
+		GENI_SE_ERR(geni_se_dev->log_ctx, false, NULL,
+			"%s:%s Couldn't set iommu attribute\n",
+			__func__, dev_name(cb_dev));
+		arm_iommu_release_mapping(geni_se_dev->iommu_map);
+		geni_se_dev->iommu_map = NULL;
+		mutex_unlock(&geni_se_dev->iommu_lock);
+		return -EIO;
 	}
 
 	if (arm_iommu_attach_device(cb_dev, geni_se_dev->iommu_map)) {
@@ -1550,6 +1682,16 @@ int geni_se_iommu_free_buf(struct device *wrapper_dev, dma_addr_t *iova,
 	return 0;
 }
 EXPORT_SYMBOL(geni_se_iommu_free_buf);
+
+struct device *geni_get_iommu_dev(struct device *wrapper_dev)
+{
+	struct geni_se_device *geni_se_dev;
+
+	geni_se_dev = dev_get_drvdata(wrapper_dev);
+
+	return geni_se_dev->cb_dev;
+}
+EXPORT_SYMBOL(geni_get_iommu_dev);
 
 /**
  * geni_se_dump_dbg_regs() - Print relevant registers that capture most
@@ -1811,6 +1953,8 @@ static int geni_se_probe(struct platform_device *pdev)
 							"qcom,vote-for-bw");
 	geni_se_dev->iommu_s1_bypass = of_property_read_bool(dev->of_node,
 							"qcom,iommu-s1-bypass");
+	geni_se_dev->iommu_atomic_ctx = of_property_read_bool(dev->of_node,
+							"qcom,iommu-atomic-ctx");
 	geni_se_dev->bus_bw_set = default_bus_bw_set;
 	geni_se_dev->bus_bw_set_size =
 				ARRAY_SIZE(default_bus_bw_set);
@@ -1836,13 +1980,27 @@ static int geni_se_probe(struct platform_device *pdev)
 	ret = of_platform_populate(dev->of_node, geni_se_dt_match, NULL, dev);
 	if (ret) {
 		dev_err(dev, "%s: Error populating children\n", __func__);
-		devm_iounmap(dev, geni_se_dev->base);
-		devm_kfree(dev, geni_se_dev);
+		return ret;
+	}
+
+	ret = of_property_read_string(geni_se_dev->dev->of_node,
+			"qcom,subsys-name", &geni_se_dev->ssr.subsys_name);
+	if (!ret) {
+		INIT_LIST_HEAD(&geni_se_dev->ssr.active_list_head);
+		geni_se_dev->ssr.probe_completed = false;
+		ret = geni_se_ssc_qup_ssr_reg(geni_se_dev);
+		if (ret) {
+			dev_err(dev, "Unable to register SSR notification\n");
+			return ret;
+		}
+
+		sysfs_create_file(&geni_se_dev->dev->kobj,
+			 &dev_attr_ssc_qup_state.attr);
 	}
 
 	GENI_SE_DBG(geni_se_dev->log_ctx, false, NULL,
 		    "%s: Probe successful\n", __func__);
-	return ret;
+	return 0;
 }
 
 static int geni_se_remove(struct platform_device *pdev)
@@ -1853,6 +2011,13 @@ static int geni_se_remove(struct platform_device *pdev)
 	if (likely(!IS_ERR_OR_NULL(geni_se_dev->iommu_map))) {
 		arm_iommu_detach_device(geni_se_dev->cb_dev);
 		arm_iommu_release_mapping(geni_se_dev->iommu_map);
+	}
+	if (geni_se_dev->ssr.subsys_name) {
+		subsys_notif_unregister_notifier(
+				geni_se_dev->ssr.ssc_qup_nb.next,
+				&geni_se_dev->ssr.ssc_qup_nb.nb);
+		sysfs_remove_file(&geni_se_dev->dev->kobj,
+				&dev_attr_ssc_qup_state.attr);
 	}
 	ipc_log_context_destroy(geni_se_dev->log_ctx);
 	devm_iounmap(dev, geni_se_dev->base);

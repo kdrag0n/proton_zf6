@@ -8,6 +8,7 @@
  */
 
 #include <linux/interrupt.h>
+#include <linux/pm_runtime.h>
 
 #include "atl_common.h"
 #include "atl_hw.h"
@@ -100,6 +101,16 @@ static inline void atl_glb_soft_reset_full(struct atl_hw *hw)
 	atl_glb_soft_reset(hw);
 }
 
+static inline void atl_enable_dma_net_lpb_mode(struct atl_nic *nic)
+{
+	struct atl_hw *hw = &nic->hw;
+
+	atl_set_vlan_promisc(hw, 1);
+	atl_write_bit(hw, ATL_RX_FLT_CTRL1, 3, 1);
+	atl_write_bit(hw, ATL_TX_PBUF_CTRL1, 4, 0);
+	atl_write_bit(hw, ATL_TX_CTRL1, 4, 1);
+	atl_write_bit(hw, ATL_RX_CTRL1, 4, 1);
+}
 /* entered with fw lock held */
 static int atl_hw_reset_nonrbl(struct atl_hw *hw)
 {
@@ -138,11 +149,17 @@ static int atl_hw_reset_nonrbl(struct atl_hw *hw)
 	}
 	atl_dev_dbg("FLB kickstart took %d ms\n", tries);
 
-	atl_write(hw, 0x404, 0x80e0);
+	atl_write(hw, 0x404, 0x40e1);
 	mdelay(50);
 	atl_write(hw, 0x3a0, 1);
 
 	atl_glb_soft_reset_full(hw);
+
+	if (hw->mcp.ops)
+		hw->mcp.ops->restore_cfg(hw);
+
+	/* unstall FW*/
+	atl_write(hw, 0x404, 0x40e0);
 
 	ret = atl_fw_init(hw);
 
@@ -197,27 +214,17 @@ int atl_hw_reset(struct atl_hw *hw)
 
 	atl_glb_soft_reset_full(hw);
 
+	if (hw->mcp.ops)
+		hw->mcp.ops->restore_cfg(hw);
+
 	atl_write(hw, ATL_GLOBAL_CTRL2, 0x40e0);
 
 	for (tries = 0; tries < 10000; mdelay(1)) {
 		tries++;
 		reg = atl_read(hw, ATL_MCP_SCRATCH(RBL_STS)) & 0xffff;
 
-		if (!reg || reg == 0xdead)
-			continue;
-
-		/* if (reg != 0xf1a7) */
+		if (reg && reg != 0xdead)
 			break;
-
-		/* if (host_load_done) */
-		/* 	continue; */
-
-		/* ret = atl_load_mac_fw(hw); */
-		/* if (ret) { */
-		/* 	atl_dev_err("MAC FW host load failed\n"); */
-		/* 	return ret; */
-		/* } */
-		/* host_load_done = true; */
 	}
 
 	if (reg == 0xf1a7) {
@@ -320,13 +327,20 @@ void atl_refresh_link(struct atl_nic *nic)
 	link = hw->mcp.ops->check_link(hw);
 
 	if (link) {
-		if (link != prev_link)
+		if (link != prev_link) {
 			atl_nic_info("Link up: %s\n", link->name);
-		netif_carrier_on(nic->ndev);
+			netif_carrier_on(nic->ndev);
+			pm_runtime_get_sync(&nic->hw.pdev->dev);
+#ifdef NETIF_F_HW_MACSEC
+			atl_init_macsec(hw);
+#endif
+		}
 	} else {
-		if (link != prev_link)
+		if (link != prev_link) {
 			atl_nic_info("Link down\n");
-		netif_carrier_off(nic->ndev);
+			netif_carrier_off(nic->ndev);
+			pm_runtime_put_sync(&nic->hw.pdev->dev);
+		}
 	}
 	atl_rx_xoff_set(hw, !!(hw->link_state.fc.cur & atl_fc_rx));
 
@@ -346,9 +360,13 @@ static irqreturn_t atl_legacy_irq(int irq, void *priv)
 {
 	struct atl_nic *nic = priv;
 	struct atl_hw *hw = &nic->hw;
-	uint32_t mask = hw->non_ring_intr_mask | BIT(atl_qvec_intr(nic->qvecs));
+	uint32_t mask = hw->non_ring_intr_mask;
 	uint32_t stat;
+	int cpu;
+	int i;
 
+	for (i = 0; i != nic->nvecs; i++)
+		mask |= BIT(atl_qvec_intr(&nic->qvecs[i]));
 
 	stat = atl_read(hw, ATL_INTR_STS);
 
@@ -361,11 +379,22 @@ static irqreturn_t atl_legacy_irq(int irq, void *priv)
 		 * masked above, so no need to unmask anything. */
 		return IRQ_NONE;
 
-	if (likely(stat & BIT(ATL_NUM_NON_RING_IRQS)))
-		/* Only one qvec when using legacy interrupts */
-		atl_ring_irq(irq, &nic->qvecs[0].napi);
+	for (i = 0; i != nic->nvecs; i++) {
+		if (likely(stat & BIT(atl_qvec_intr(&nic->qvecs[i])))) {
+			if (nic->nvecs == 1 || !atl_wq_non_msi) {
+				atl_ring_irq(irq, &nic->qvecs[i].napi);
+				continue;
+			}
 
-	if (unlikely(stat & BIT(0)))
+			cpu = cpumask_any(&nic->qvecs[i].affinity_hint);
+			WARN_ON_ONCE(cpu >= nr_cpu_ids);
+			if (cpu >= nr_cpu_ids)
+				cpu = 0;
+			schedule_work_on(cpu, nic->qvecs[i].work);
+		}
+	}
+
+	if (unlikely(stat & hw->non_ring_intr_mask))
 		atl_link_irq(irq, nic);
 	return IRQ_HANDLED;
 }
@@ -489,6 +518,9 @@ void atl_start_hw_global(struct atl_nic *nic)
 	if (!test_and_clear_bit(ATL_ST_GLOBAL_CONF_NEEDED, &hw->state))
 		return;
 
+	if (nic->priv_flags & ATL_PF_BIT(LPB_NET_DMA))
+		atl_enable_dma_net_lpb_mode(nic);
+
 	/* Enable TPO2 */
 	atl_write(hw, 0x7040, 0x10000);
 	/* Enable RPF2, filter logic 3 */
@@ -571,9 +603,15 @@ void atl_start_hw_global(struct atl_nic *nic)
 		atl_set_bits(hw, ATL_INTR_AUTO_MASK, BIT(0));
 		/* Enable status auto-clear on link intr generation */
 		atl_set_bits(hw, ATL_INTR_AUTO_CLEAR, BIT(0));
-	} else
+	} else {
 		/* Enable legacy INTx mode and status clear-on-read */
 		atl_write(hw, ATL_INTR_CTRL, BIT(7));
+		/* Clear the registers, which might have been set on previous
+		 * driver load and might interfere with legacy IRQ handling
+		 */
+		atl_write(hw, ATL_INTR_AUTO_MASK, 0);
+		atl_write(hw, ATL_INTR_AUTO_CLEAR, 0);
+	}
 
 	/* Map link interrupt to cause 0 */
 	atl_write(hw, ATL_INTR_GEN_INTR_MAP4, BIT(7) | (0 << 0));
@@ -591,18 +629,26 @@ void atl_start_hw_global(struct atl_nic *nic)
 static void atl_set_all_multi(struct atl_hw *hw, bool all_multi)
 {
 	atl_write_bit(hw, ATL_RX_MC_FLT_MSK, 14, all_multi);
-	atl_write(hw, ATL_RX_MC_FLT(0), all_multi ? 0x80010000 : 0);
+	atl_write(hw, ATL_RX_MC_FLT(0), all_multi ? 0x80010FFF : 0x00010FFF);
 }
 
 void atl_set_rx_mode(struct net_device *ndev)
 {
 	struct atl_nic *nic = netdev_priv(ndev);
 	struct atl_hw *hw = &nic->hw;
-	int uc_count = netdev_uc_count(ndev), mc_count = netdev_mc_count(ndev);
-	int promisc_needed = !!(ndev->flags & IFF_PROMISC);
+	bool is_multicast_enabled = !!(ndev->flags & IFF_MULTICAST);
 	int all_multi_needed = !!(ndev->flags & IFF_ALLMULTI);
+	int promisc_needed = !!(ndev->flags & IFF_PROMISC);
+	int uc_count = netdev_uc_count(ndev);
+	int mc_count = 0;
 	int i = 1; /* UC filter 0 reserved for MAC address */
 	struct netdev_hw_addr *hwaddr;
+
+	if (!pm_runtime_active(&nic->hw.pdev->dev))
+		return;
+
+	if (is_multicast_enabled)
+		mc_count = netdev_mc_count(ndev);
 
 	if (uc_count > ATL_UC_FLT_NUM - 1)
 		promisc_needed |= 1;
@@ -610,11 +656,12 @@ void atl_set_rx_mode(struct net_device *ndev)
 		all_multi_needed |= 1;
 
 
-	/* Enable promisc VLAN mode iff IFF_PROMISC explicitly
+	/* Enable promisc VLAN mode if IFF_PROMISC explicitly
 	 * requested or too many VIDs registered
 	 */
 	atl_set_vlan_promisc(hw,
-		ndev->flags & IFF_PROMISC || nic->rxf_vlan.promisc_count);
+		ndev->flags & IFF_PROMISC || nic->rxf_vlan.promisc_count ||
+		!nic->rxf_vlan.vlans_active);
 
 	atl_write_bit(hw, ATL_RX_FLT_CTRL1, 3, promisc_needed);
 	if (promisc_needed)
@@ -623,9 +670,9 @@ void atl_set_rx_mode(struct net_device *ndev)
 	netdev_for_each_uc_addr(hwaddr, ndev)
 		atl_set_uc_flt(hw, i++, hwaddr->addr);
 
-	atl_set_all_multi(hw, all_multi_needed);
+	atl_set_all_multi(hw, is_multicast_enabled && all_multi_needed);
 
-	if (!all_multi_needed)
+	if (is_multicast_enabled && !all_multi_needed)
 		netdev_for_each_mc_addr(hwaddr, ndev)
 			atl_set_uc_flt(hw, i++, hwaddr->addr);
 
@@ -695,10 +742,17 @@ void atl_set_loopback(struct atl_nic *nic, int idx, bool on)
 		atl_write_bit(hw, ATL_TX_CTRL1, 7, on);
 		atl_write_bit(hw, ATL_RX_CTRL1, 8, on);
 		break;
-	/* case ATL_PF_LPB_NET_DMA: */
-	/* 	atl_write_bit(hw, ATL_TX_CTRL1, 4, on); */
-	/* 	atl_write_bit(hw, ATL_RX_CTRL1, 4, on); */
-	/* 	break; */
+	case ATL_PF_LPB_INT_PHY:
+	case ATL_PF_LPB_EXT_PHY:
+		hw->mcp.ops->set_phy_loopback(nic, idx);
+		break;
+	case ATL_PF_LPB_NET_DMA:
+		/* To switch DMANetworkLoopback mode
+		 * you need a reset datapath
+		 */
+		set_bit(ATL_ST_GLOBAL_CONF_NEEDED, &hw->state);
+		atl_reconfigure(nic);
+		break;
 	}
 }
 
@@ -979,6 +1033,10 @@ int atl_update_eth_stats(struct atl_nic *nic)
 	uint32_t reg = 0, reg2 = 0;
 	int ret;
 
+	if (!test_bit(ATL_ST_ENABLED, &nic->hw.state) ||
+	    test_bit(ATL_ST_RESETTING, &nic->hw.state))
+		return 0;
+
 	atl_lock_fw(hw);
 
 	ret = atl_hwsem_get(hw, ATL_MCP_SEM_MSM);
@@ -1054,13 +1112,13 @@ int atl_get_lpi_timer(struct atl_nic *nic, uint32_t *lpi_delay)
 	return ret;
 }
 
-static uint32_t atl_mcp_mbox_wait(struct atl_hw *hw, int loops)
+static uint32_t atl_mcp_mbox_wait(struct atl_hw *hw, enum mcp_area area, int loops)
 {
 	uint32_t stat;
 
 	busy_wait(loops, cpu_relax(), stat,
-		(atl_read(hw, ATL_MCP_SCRATCH(FW2_MBOX_CMD)) >> 28) & 0xf,
-		stat == 8);
+		(atl_read(hw, ATL_MCP_SCRATCH(FW2_MBOX_CMD)) & (0xf << 28)),
+		stat == area);
 
 	return stat;
 }
@@ -1079,21 +1137,21 @@ int atl_write_mcp_mem(struct atl_hw *hw, uint32_t offt, void *host_addr,
 		atl_write(hw, ATL_MCP_SCRATCH(FW2_MBOX_DATA), *addr++);
 		atl_write(hw, ATL_MCP_SCRATCH(FW2_MBOX_CMD), area | offt);
 		ndelay(750);
-		stat = atl_mcp_mbox_wait(hw, 5);
+		stat = atl_mcp_mbox_wait(hw, area, 5);
 
-		if (stat == 8) {
+		if (stat == area) {
 			/* Send MCP mbox interrupt */
 			atl_set_bits(hw, ATL_GLOBAL_CTRL2, BIT(1));
 			ndelay(1200);
-			stat = atl_mcp_mbox_wait(hw, 10000);
+			stat = atl_mcp_mbox_wait(hw, area, 10000);
 		}
 
-		if (stat == 8) {
+		if (stat == area) {
 			atl_dev_err("FW mbox timeout offt %x, remaining %zx\n",
 				offt, size);
 			return -ETIME;
-		} else if (stat != 4) {
-			atl_dev_err("FW mbox error status %x, offt %x, remaining %zx\n",
+		} else if (stat != BIT(0x1E)) {
+			atl_dev_err("FW mbox error status 0x%x, offt 0x%x, remaining %zx\n",
 				stat, offt, size);
 			return -EIO;
 		}

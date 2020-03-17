@@ -3583,6 +3583,43 @@ static int _sde_plane_validate_scaler_v2(struct sde_plane *psde,
 	return 0;
 }
 
+static int _sde_plane_validate_shared_crtc(struct sde_plane *psde,
+				struct drm_plane_state *state)
+{
+	struct sde_kms *sde_kms;
+	struct sde_splash_display *splash_display;
+	int i, j;
+
+	sde_kms = _sde_plane_get_kms(&psde->base);
+
+	if (!sde_kms || !state->crtc)
+		return 0;
+
+	for (i = 0; i < MAX_DSI_DISPLAYS; i++) {
+		splash_display = &sde_kms->splash_data.splash_display[i];
+
+		if (splash_display && splash_display->cont_splash_enabled &&
+			splash_display->encoder &&
+			state->crtc != splash_display->encoder->crtc) {
+
+			for (j = 0; j < MAX_DATA_PATH_PER_DSIPLAY; j++) {
+
+				if (splash_display->pipes[j].sspp ==
+						psde->pipe) {
+					SDE_ERROR_PLANE(psde,
+					"pipe:%d used in cont-splash on crtc:%d\n",
+					psde->pipe,
+					splash_display->encoder->crtc->base.id);
+					return -EINVAL;
+				}
+			}
+		}
+	}
+
+	return 0;
+
+}
+
 static int sde_plane_sspp_atomic_check(struct drm_plane *plane,
 		struct drm_plane_state *state)
 {
@@ -3721,6 +3758,8 @@ static int sde_plane_sspp_atomic_check(struct drm_plane *plane,
 				rstate->out_fb_width,
 				rstate->out_fb_height,
 				src.w, src.h, deci_w, deci_h)) {
+		ret = -EINVAL;
+	} else if (_sde_plane_validate_shared_crtc(psde, state)) {
 		ret = -EINVAL;
 	}
 
@@ -4364,7 +4403,11 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 		if (catalog->mixer_count &&
 				catalog->mixer[0].sblk->maxblendstages) {
 			zpos_max = catalog->mixer[0].sblk->maxblendstages - 1;
-			if (zpos_max > SDE_STAGE_MAX - SDE_STAGE_0 - 1)
+
+			if (catalog->has_base_layer &&
+					(zpos_max > SDE_STAGE_MAX - 1))
+				zpos_max = SDE_STAGE_MAX - 1;
+			else if (zpos_max > SDE_STAGE_MAX - SDE_STAGE_0 - 1)
 				zpos_max = SDE_STAGE_MAX - SDE_STAGE_0 - 1;
 		}
 	} else if (plane->type != DRM_PLANE_TYPE_PRIMARY) {
@@ -5247,7 +5290,7 @@ static int _sde_plane_init_debugfs(struct drm_plane *plane)
 		return -ENOMEM;
 
 	/* don't error check these */
-	debugfs_create_ulong("features", 0600,
+	debugfs_create_ulong("features", 0400,
 			psde->debugfs_root, &psde->features);
 
 	/* add register dump support */

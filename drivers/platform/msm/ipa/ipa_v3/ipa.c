@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -41,6 +41,7 @@
 #include <asm/cacheflush.h>
 #include <linux/soc/qcom/smem_state.h>
 #include <linux/of_irq.h>
+#include <linux/ctype.h>
 
 #ifdef CONFIG_ARM64
 
@@ -714,6 +715,7 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	struct ipa_ioc_nat_dma_cmd *table_dma_cmd;
 	struct ipa_ioc_get_vlan_mode vlan_mode;
 	struct ipa_ioc_wigig_fst_switch fst_switch;
+	struct ipa_nat_in_sram_info nat_in_sram_info;
 	size_t sz;
 	int pre_entry;
 	int hdl;
@@ -794,6 +796,7 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			retval = -EFAULT;
 			break;
 		}
+
 		if (ipa3_nat_init_cmd(&nat_init)) {
 			retval = -EFAULT;
 			break;
@@ -865,6 +868,7 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			retval = -EFAULT;
 			break;
 		}
+
 		if (ipa3_del_nat_table(&table_del)) {
 			retval = -EFAULT;
 			break;
@@ -877,6 +881,7 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			retval = -EFAULT;
 			break;
 		}
+
 		if (ipa3_del_ipv6ct_table(&table_del)) {
 			retval = -EFAULT;
 			break;
@@ -2459,7 +2464,7 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				((struct ipa_ioc_mdfy_flt_rule_v2 *)
 				header)->rule_mdfy_size);
 		/* modify the rule pointer to the kernel pointer */
-		((struct ipa_ioc_add_flt_rule_after_v2 *)header)->rules =
+		((struct ipa_ioc_mdfy_flt_rule_v2 *)header)->rules =
 			(uintptr_t)kptr;
 		if (ipa3_mdfy_flt_rule_v2
 			((struct ipa_ioc_mdfy_flt_rule_v2 *)header)) {
@@ -2482,6 +2487,12 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case IPA_IOC_FNR_COUNTER_ALLOC:
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_5) {
+			IPAERR("FNR stats not supported on IPA ver %d",
+				ipa3_ctx->ipa_hw_type);
+			retval = -EFAULT;
+			break;
+		}
 		if (copy_from_user(header, (const void __user *)arg,
 			sizeof(struct ipa_ioc_flt_rt_counter_alloc))) {
 			IPAERR("copy_from_user fails\n");
@@ -2525,6 +2536,12 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case IPA_IOC_FNR_COUNTER_DEALLOC:
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_5) {
+			IPAERR("FNR stats not supported on IPA ver %d",
+				ipa3_ctx->ipa_hw_type);
+			retval = -EFAULT;
+			break;
+		}
 		hdl = (int)arg;
 		if (hdl < 0) {
 			IPAERR("IPA_FNR_COUNTER_DEALLOC failed: hdl %d\n",
@@ -2536,6 +2553,12 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case IPA_IOC_FNR_COUNTER_QUERY:
+		if (ipa3_ctx->ipa_hw_type < IPA_HW_v4_5) {
+			IPAERR("FNR stats not supported on IPA ver %d",
+				ipa3_ctx->ipa_hw_type);
+			retval = -EFAULT;
+			break;
+		}
 		if (copy_from_user(header, (const void __user *)arg,
 			sizeof(struct ipa_ioc_flt_rt_query))) {
 			IPAERR_RL("copy_from_user fails\n");
@@ -2630,12 +2653,35 @@ static long ipa3_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			retval = -EFAULT;
 			break;
 		}
+
+		/* null terminate the string */
+		fst_switch.netdev_name[IPA_RESOURCE_NAME_MAX - 1] = '\0';
+
 		retval = ipa_wigig_send_msg(WIGIG_FST_SWITCH,
 			fst_switch.netdev_name,
 			fst_switch.client_mac_addr,
 			IPA_CLIENT_MAX,
 			fst_switch.to_wigig);
 		break;
+
+	case IPA_IOC_GET_NAT_IN_SRAM_INFO:
+		if (ipa3_nat_get_sram_info(&nat_in_sram_info)) {
+			retval = -EFAULT;
+			break;
+		}
+		if (copy_to_user((void __user *)arg,
+			&nat_in_sram_info,
+			sizeof(struct ipa_nat_in_sram_info))) {
+			retval = -EFAULT;
+			break;
+		}
+		break;
+
+	case IPA_IOC_APP_CLOCK_VOTE:
+		retval = ipa3_app_clk_vote(
+			(enum ipa_app_clock_vote_type) arg);
+		break;
+
 	default:
 		IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 		return -ENOTTY;
@@ -3332,7 +3378,7 @@ static int ipa3_q6_set_ex_path_to_apps(void)
 	/* Set the exception path to AP */
 	for (client_idx = 0; client_idx < IPA_CLIENT_MAX; client_idx++) {
 		ep_idx = ipa3_get_ep_mapping(client_idx);
-		if (ep_idx == -1)
+		if (ep_idx == -1 || (ep_idx >= IPA3_MAX_NUM_PIPES))
 			continue;
 
 		/* disable statuses for all modem controlled prod pipes */
@@ -3615,22 +3661,23 @@ int _ipa_init_sram_v3(void)
 	if (ipa_get_hw_type() >= IPA_HW_v4_5) {
 		ipa3_sram_set_canary(ipa_sram_mmio,
 			IPA_MEM_PART(nat_tbl_ofst) - 12);
-		ipa3_sram_set_canary(ipa_sram_mmio,
-			IPA_MEM_PART(nat_tbl_ofst) - 8);
-		ipa3_sram_set_canary(ipa_sram_mmio,
-			IPA_MEM_PART(nat_tbl_ofst) - 4);
-		ipa3_sram_set_canary(ipa_sram_mmio, IPA_MEM_PART(nat_tbl_ofst));
 	}
 	if (ipa_get_hw_type() >= IPA_HW_v4_0) {
-		ipa3_sram_set_canary(ipa_sram_mmio,
-			IPA_MEM_PART(pdn_config_ofst) - 4);
-		ipa3_sram_set_canary(ipa_sram_mmio,
-			IPA_MEM_PART(pdn_config_ofst));
-		ipa3_sram_set_canary(ipa_sram_mmio,
-			IPA_MEM_PART(stats_quota_ofst) - 4);
-		ipa3_sram_set_canary(ipa_sram_mmio,
-			IPA_MEM_PART(stats_quota_ofst));
+		if (ipa_get_hw_type() < IPA_HW_v4_5) {
+			ipa3_sram_set_canary(ipa_sram_mmio,
+				IPA_MEM_PART(pdn_config_ofst) - 4);
+			ipa3_sram_set_canary(ipa_sram_mmio,
+				IPA_MEM_PART(pdn_config_ofst));
+			ipa3_sram_set_canary(ipa_sram_mmio,
+				IPA_MEM_PART(stats_quota_q6_ofst) - 4);
+			ipa3_sram_set_canary(ipa_sram_mmio,
+				IPA_MEM_PART(stats_quota_q6_ofst));
+		} else {
+			ipa3_sram_set_canary(ipa_sram_mmio,
+				IPA_MEM_PART(stats_quota_q6_ofst) - 12);
+		}
 	}
+
 	if (ipa_get_hw_type() <= IPA_HW_v3_5 ||
 		ipa_get_hw_type() >= IPA_HW_v4_5) {
 		ipa3_sram_set_canary(ipa_sram_mmio,
@@ -4396,6 +4443,12 @@ long compat_ipa3_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	case IPA_IOC_MDFY_RT_RULE32:
 		cmd = IPA_IOC_MDFY_RT_RULE;
+		break;
+	case IPA_IOC_GET_NAT_IN_SRAM_INFO32:
+		cmd = IPA_IOC_GET_NAT_IN_SRAM_INFO;
+		break;
+	case IPA_IOC_APP_CLOCK_VOTE32:
+		cmd = IPA_IOC_APP_CLOCK_VOTE;
 		break;
 	case IPA_IOC_COMMIT_HDR:
 	case IPA_IOC_RESET_HDR:
@@ -5927,6 +5980,8 @@ static ssize_t ipa3_write(struct file *file, const char __user *buf,
 
 	char dbg_buff[32] = { 0 };
 
+	int i = 0;
+
 	if (sizeof(dbg_buff) < count)
 		return -EFAULT;
 
@@ -5945,6 +6000,17 @@ static ssize_t ipa3_write(struct file *file, const char __user *buf,
 	/* Prevent consequent calls from trying to load the FW again. */
 	if (ipa3_is_ready())
 		return count;
+
+	/*Ignore empty ipa_config file*/
+	for (i = 0 ; i < count ; ++i) {
+		if (!isspace(dbg_buff[i]))
+			break;
+	}
+
+	if (i == count) {
+		IPADBG("Empty ipa_config file\n");
+		return count;
+	}
 
 	/* Check MHI configuration on MDM devices */
 	if (!ipa3_is_msm_device()) {
@@ -6196,7 +6262,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	for (i = 0; i < IPA_HW_PROTOCOL_MAX; i++) {
 		ipa3_ctx->gsi_info[i].protocol = i;
 		/* initialize all to be not started */
-		for (j = 0; j < MAX_CH_STATS_SUPPORTED; j++)
+		for (j = 0; j < IPA_MAX_CH_STATS_SUPPORTED; j++)
 			ipa3_ctx->gsi_info[i].ch_id_info[j].ch_id =
 				0xFF;
 	}
@@ -6215,6 +6281,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	ipa3_ctx->use_64_bit_dma_mask = resource_p->use_64_bit_dma_mask;
 	ipa3_ctx->wan_rx_ring_size = resource_p->wan_rx_ring_size;
 	ipa3_ctx->lan_rx_ring_size = resource_p->lan_rx_ring_size;
+	ipa3_ctx->ipa_wan_skb_page = resource_p->ipa_wan_skb_page;
 	ipa3_ctx->skip_uc_pipe_reset = resource_p->skip_uc_pipe_reset;
 	ipa3_ctx->tethered_flow_control = resource_p->tethered_flow_control;
 	ipa3_ctx->ee = resource_p->ee;
@@ -6687,7 +6754,11 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	/* proxy vote for modem is added in ipa3_post_init() phase */
 	if (ipa3_ctx->ipa_hw_type != IPA_HW_v4_0)
 		ipa3_proxy_clk_unvote();
+
+	mutex_init(&ipa3_ctx->app_clock_vote.mutex);
+
 	return 0;
+
 fail_cdev_add:
 fail_gsi_pre_fw_load_init:
 	ipa_eth_exit();
@@ -6879,6 +6950,7 @@ static int get_ipa_dts_configuration(struct platform_device *pdev,
 	ipa_drv_res->platform_type = 0;
 	ipa_drv_res->modem_cfg_emb_pipe_flt = false;
 	ipa_drv_res->ipa_wdi2 = false;
+	ipa_drv_res->ipa_wan_skb_page = false;
 	ipa_drv_res->ipa_wdi2_over_gsi = false;
 	ipa_drv_res->ipa_wdi3_over_gsi = false;
 	ipa_drv_res->ipa_mhi_dynamic_config = false;
@@ -6998,6 +7070,13 @@ static int get_ipa_dts_configuration(struct platform_device *pdev,
 			"qcom,ipa-wdi2");
 	IPADBG(": WDI-2.0 = %s\n",
 			ipa_drv_res->ipa_wdi2
+			? "True" : "False");
+
+	ipa_drv_res->ipa_wan_skb_page =
+			of_property_read_bool(pdev->dev.of_node,
+			"qcom,wan-use-skb-page");
+	IPADBG(": Use skb page = %s\n",
+			ipa_drv_res->ipa_wan_skb_page
 			? "True" : "False");
 
 	ipa_drv_res->ipa_fltrt_not_hashable =
@@ -7992,6 +8071,11 @@ int ipa3_ap_resume(struct device *dev)
 struct ipa3_context *ipa3_get_ctx(void)
 {
 	return ipa3_ctx;
+}
+
+bool ipa3_get_lan_rx_napi(void)
+{
+	return false;
 }
 
 static void ipa_gsi_notify_cb(struct gsi_per_notify *notify)

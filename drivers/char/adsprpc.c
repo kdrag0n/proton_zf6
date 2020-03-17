@@ -221,9 +221,9 @@ struct smq_invoke_ctx {
 	unsigned int *attrs;
 	struct fastrpc_mmap **maps;
 	struct fastrpc_buf *buf;
-	struct fastrpc_buf *lbuf;
 	size_t used;
 	struct fastrpc_file *fl;
+	uint32_t handle;
 	uint32_t sc;
 	struct overlap *overs;
 	struct overlap **overps;
@@ -231,6 +231,7 @@ struct smq_invoke_ctx {
 	uint32_t *crc;
 	unsigned int magic;
 	uint64_t ctxid;
+	bool pm_awake_voted;
 };
 
 struct fastrpc_ctx_lst {
@@ -260,8 +261,8 @@ struct fastrpc_static_pd {
 	struct notifier_block pdrnb;
 	struct notifier_block get_service_nb;
 	void *pdrhandle;
-	int pdrcount;
-	int prevpdrcount;
+	uint64_t pdrcount;
+	uint64_t prevpdrcount;
 	int ispdup;
 	int cid;
 };
@@ -278,10 +279,10 @@ struct fastrpc_channel_ctx {
 	struct notifier_block nb;
 	struct mutex smd_mutex;
 	struct mutex rpmsg_mutex;
-	int sesscount;
-	int ssrcount;
+	uint64_t sesscount;
+	uint64_t ssrcount;
 	void *handle;
-	int prevssrcount;
+	uint64_t prevssrcount;
 	int issubsystemup;
 	int vmid;
 	struct secure_vm rhvm;
@@ -308,6 +309,7 @@ struct fastrpc_apps {
 	spinlock_t ctxlock;
 	struct smq_invoke_ctx *ctxtable[FASTRPC_CTX_MAX];
 	bool legacy_remote_heap;
+	struct wakeup_source *wake_source;
 };
 
 struct fastrpc_mmap {
@@ -373,7 +375,7 @@ struct fastrpc_file {
 	int sessionid;
 	int tgid;
 	int cid;
-	int ssrcount;
+	uint64_t ssrcount;
 	int pd;
 	char *spdname;
 	int file_close;
@@ -389,6 +391,8 @@ struct fastrpc_file {
 	/* Identifies the device (MINOR_NUM_DEV / MINOR_NUM_SECURE_DEV) */
 	int dev_minor;
 	char *debug_buf;
+	/* Flag to enable PM wake/relax voting for every remote invoke */
+	int wake_enable;
 };
 
 static struct fastrpc_apps gfa;
@@ -445,6 +449,9 @@ static struct fastrpc_channel_ctx gcinfo[NUM_CHANNELS] = {
 
 static int hlosvm[1] = {VMID_HLOS};
 static int hlosvmperm[1] = {PERM_READ | PERM_WRITE | PERM_EXEC};
+
+static void fastrpc_pm_awake(int fl_wake_enable, bool *pm_awake_voted);
+static void fastrpc_pm_relax(bool *pm_awake_voted);
 
 static inline int64_t getnstimediff(struct timespec *start)
 {
@@ -1199,6 +1206,7 @@ static int context_alloc(struct fastrpc_file *fl, uint32_t kernel,
 			goto bail;
 	}
 	ctx->crc = (uint32_t *)invokefd->crc;
+	ctx->handle = invoke->handle;
 	ctx->sc = invoke->sc;
 	if (bufs) {
 		VERIFY(err, 0 == context_build_overlap(ctx));
@@ -1210,6 +1218,7 @@ static int context_alloc(struct fastrpc_file *fl, uint32_t kernel,
 	ctx->tgid = fl->tgid;
 	init_completion(&ctx->work);
 	ctx->magic = FASTRPC_CTX_MAGIC;
+	ctx->pm_awake_voted = false;
 
 	spin_lock(&fl->hlock);
 	hlist_add_head(&ctx->hn, &clst->pending);
@@ -1261,7 +1270,8 @@ static void context_free(struct smq_invoke_ctx *ctx)
 		fastrpc_mmap_free(ctx->maps[i], 0);
 	mutex_unlock(&ctx->fl->map_mutex);
 	fastrpc_buf_free(ctx->buf, 1);
-	fastrpc_buf_free(ctx->lbuf, 1);
+	kfree(ctx->lrpra);
+	ctx->lrpra = NULL;
 	ctx->magic = 0;
 	ctx->ctxid = 0;
 
@@ -1280,6 +1290,7 @@ static void context_free(struct smq_invoke_ctx *ctx)
 static void context_notify_user(struct smq_invoke_ctx *ctx, int retval)
 {
 	ctx->retval = retval;
+	fastrpc_pm_awake(ctx->fl->wake_enable, &ctx->pm_awake_voted);
 	complete(&ctx->work);
 }
 
@@ -1426,6 +1437,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 
 	/* calculate size of the metadata */
 	rpra = NULL;
+	lrpra = NULL;
 	list = smq_invoke_buf_start(rpra, sc);
 	pages = smq_phy_page_start(sc, list);
 	ipage = pages;
@@ -1470,14 +1482,14 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 	/* allocate new local rpra buffer */
 	lrpralen = (size_t)&list[0];
 	if (lrpralen) {
-		err = fastrpc_buf_alloc(ctx->fl, lrpralen, 0, 0, 0, &ctx->lbuf);
+		lrpra = kzalloc(lrpralen, GFP_KERNEL);
+		VERIFY(err, !IS_ERR_OR_NULL(lrpra));
 		if (err)
 			goto bail;
 	}
-	if (ctx->lbuf->virt)
-		memset(ctx->lbuf->virt, 0, lrpralen);
+	if (lrpra)
+		memset(lrpra, 0, lrpralen);
 
-	lrpra = ctx->lbuf->virt;
 	ctx->lrpra = lrpra;
 
 	/* calculate len required for copying */
@@ -1748,10 +1760,11 @@ static void inv_args_pre(struct smq_invoke_ctx *ctx)
 					DMA_BIDIRECTIONAL);
 				dma_buf_end_cpu_access(map->buf,
 					DMA_BIDIRECTIONAL);
-			} else
+			} else {
 				dmac_flush_range(
 					uint64_to_ptr(rpra[i].buf.pv), (char *)
 					uint64_to_ptr(rpra[i].buf.pv + 1));
+			}
 		}
 
 		end = (uintptr_t)uint64_to_ptr(rpra[i].buf.pv +
@@ -1762,9 +1775,10 @@ static void inv_args_pre(struct smq_invoke_ctx *ctx)
 					DMA_BIDIRECTIONAL);
 				dma_buf_end_cpu_access(map->buf,
 					DMA_BIDIRECTIONAL);
-			} else
+			} else {
 				dmac_flush_range((char *)end,
 					(char *)end + 1);
+			}
 		}
 	}
 }
@@ -1870,7 +1884,25 @@ static void fastrpc_init(struct fastrpc_apps *me)
 	me->channel[CDSP_DOMAIN_ID].secure = NON_SECURE_CHANNEL;
 }
 
-static int fastrpc_release_current_dsp_process(struct fastrpc_file *fl);
+static inline void fastrpc_pm_awake(int fl_wake_enable, bool *pm_awake_voted)
+{
+	struct fastrpc_apps *me = &gfa;
+
+	if (!fl_wake_enable || *pm_awake_voted)
+		return;
+	__pm_stay_awake(me->wake_source);
+	*pm_awake_voted = true;
+}
+
+static inline void fastrpc_pm_relax(bool *pm_awake_voted)
+{
+	struct fastrpc_apps *me = &gfa;
+
+	if (!(*pm_awake_voted))
+		return;
+	__pm_relax(me->wake_source);
+	*pm_awake_voted = false;
+}
 
 static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 				   uint32_t kernel,
@@ -1878,12 +1910,12 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 {
 	struct smq_invoke_ctx *ctx = NULL;
 	struct fastrpc_ioctl_invoke *invoke = &inv->inv;
-	int cid = fl->cid;
-	int interrupted = 0;
-	int err = 0;
+	int err = 0, interrupted = 0, cid = fl->cid;
 	struct timespec invoket = {0};
 	int64_t *perf_counter = getperfcounter(fl, PERF_COUNT);
+	bool pm_awake_voted = false;
 
+	fastrpc_pm_awake(fl->wake_enable, &pm_awake_voted);
 	if (fl->profile)
 		getnstimeofday(&invoket);
 
@@ -1898,7 +1930,7 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 
 	VERIFY(err, fl->cid >= 0 && fl->cid < NUM_CHANNELS && fl->sctx != NULL);
 	if (err) {
-		pr_err("adsprpc: ERROR: %s: user application %s domain is not set\n",
+		pr_err("adsprpc: ERROR: %s: kernel session not initialized yet for %s\n",
 			__func__, current->comm);
 		err = -EBADR;
 		goto bail;
@@ -1929,11 +1961,13 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 			goto bail;
 	}
 
-	if (!fl->sctx->smmu.coherent) {
-		PERF(fl->profile, GET_COUNTER(perf_counter, PERF_INVARGS),
-		inv_args_pre(ctx);
-		PERF_END);
-	}
+	PERF(fl->profile, GET_COUNTER(perf_counter, PERF_INVARGS),
+	inv_args_pre(ctx);
+	PERF_END);
+
+	PERF(fl->profile, GET_COUNTER(perf_counter, PERF_INVARGS),
+	inv_args(ctx);
+	PERF_END);
 
 	PERF(fl->profile, GET_COUNTER(perf_counter, PERF_LINK),
 	VERIFY(err, 0 == fastrpc_invoke_send(ctx, kernel, invoke->handle));
@@ -1942,18 +1976,19 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 	if (err)
 		goto bail;
  wait:
+	fastrpc_pm_relax(&pm_awake_voted);
 	if (kernel)
 		wait_for_completion(&ctx->work);
-	else {
+	else
 		interrupted = wait_for_completion_interruptible(&ctx->work);
-		VERIFY(err, 0 == (err = interrupted));
-		if (err)
-			goto bail;
-	}
+
+	pm_awake_voted = ctx->pm_awake_voted;
+	VERIFY(err, 0 == (err = interrupted));
+	if (err)
+		goto bail;
 
 	PERF(fl->profile, GET_COUNTER(perf_counter, PERF_INVARGS),
-	if (!fl->sctx->smmu.coherent)
-		inv_args(ctx);
+	inv_args(ctx);
 	PERF_END);
 
 	VERIFY(err, 0 == (err = ctx->retval));
@@ -1987,6 +2022,7 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 				*count = *count+1;
 		}
 	}
+	fastrpc_pm_relax(&pm_awake_voted);
 	return err;
 }
 
@@ -2101,8 +2137,10 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 		err = fastrpc_buf_alloc(fl, memlen, imem_dma_attr, 0, 0, &imem);
 		if (err)
 			goto bail;
-		fl->init_mem = imem;
+		if (fl->init_mem)
+			fastrpc_buf_free(fl->init_mem, 0);
 
+		fl->init_mem = imem;
 		inbuf.pageslen = 1;
 		ra[0].buf.pv = (void *)&inbuf;
 		ra[0].buf.len = sizeof(inbuf);
@@ -2251,6 +2289,12 @@ bail:
 		mutex_lock(&fl->map_mutex);
 		fastrpc_mmap_free(mem, 0);
 		mutex_unlock(&fl->map_mutex);
+	}
+	if (err) {
+		if (!IS_ERR_OR_NULL(fl->init_mem)) {
+			fastrpc_buf_free(fl->init_mem, 0);
+			fl->init_mem = NULL;
+		}
 	}
 	if (file) {
 		mutex_lock(&fl->map_mutex);
@@ -2525,19 +2569,19 @@ static int fastrpc_mmap_remove_pdr(struct fastrpc_file *fl)
 			AUDIO_PDR_SERVICE_LOCATION_CLIENT_NAME, &session));
 	if (err)
 		goto bail;
-	if (me->channel[fl->cid].spd[session].pdrcount !=
-		me->channel[fl->cid].spd[session].prevpdrcount) {
-		if (fastrpc_mmap_remove_ssr(fl))
-			pr_err("ADSPRPC: SSR: Failed to unmap remote heap\n");
-		me->channel[fl->cid].spd[session].prevpdrcount =
-				me->channel[fl->cid].spd[session].pdrcount;
-	}
 	if (!me->channel[fl->cid].spd[session].ispdup) {
 		VERIFY(err, 0);
 		if (err) {
 			err = -ENOTCONN;
 			goto bail;
 		}
+	}
+	if (me->channel[fl->cid].spd[session].pdrcount !=
+		me->channel[fl->cid].spd[session].prevpdrcount) {
+		if (fastrpc_mmap_remove_ssr(fl))
+			pr_err("ADSPRPC: SSR: Failed to unmap remote heap\n");
+		me->channel[fl->cid].spd[session].prevpdrcount =
+				me->channel[fl->cid].spd[session].pdrcount;
 	}
 bail:
 	return err;
@@ -2747,7 +2791,8 @@ static int fastrpc_session_alloc_locked(struct fastrpc_channel_ctx *chan,
 			int secure, struct fastrpc_session_ctx **session)
 {
 	struct fastrpc_apps *me = &gfa;
-	int idx = 0, err = 0;
+	uint64_t idx = 0;
+	int err = 0;
 
 	if (chan->sesscount) {
 		for (idx = 0; idx < chan->sesscount; ++idx) {
@@ -2757,9 +2802,12 @@ static int fastrpc_session_alloc_locked(struct fastrpc_channel_ctx *chan,
 				break;
 			}
 		}
-		VERIFY(err, idx < chan->sesscount);
-		if (err)
+		if (idx >= chan->sesscount) {
+			err = -EUSERS;
+			pr_err("adsprpc: ERROR %d: %s: max concurrent sessions limit (%d) already reached on %s\n",
+				err, __func__, chan->sesscount, chan->subsys);
 			goto bail;
+		}
 		chan->session[idx].smmu.faults = 0;
 	} else {
 		VERIFY(err, me->dev != NULL);
@@ -3018,13 +3066,13 @@ static ssize_t fastrpc_debugfs_read(struct file *filp, char __user *buffer,
 			len += scnprintf(fileinfo + len,
 				DEBUGFS_SIZE - len, "%-7s", chan->subsys);
 			len += scnprintf(fileinfo + len,
-				DEBUGFS_SIZE - len, "|%-10d",
+				DEBUGFS_SIZE - len, "|%-10u",
 				chan->sesscount);
 			len += scnprintf(fileinfo + len,
 				DEBUGFS_SIZE - len, "|%-14d",
 				chan->issubsystemup);
 			len += scnprintf(fileinfo + len,
-				DEBUGFS_SIZE - len, "|%-9d",
+				DEBUGFS_SIZE - len, "|%-9u",
 				chan->ssrcount);
 			for (j = 0; j < chan->sesscount; j++) {
 				sess_used += chan->session[j].used;
@@ -3080,7 +3128,7 @@ static ssize_t fastrpc_debugfs_read(struct file *filp, char __user *buffer,
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
 			"%s %7s %d\n", "sessionid", ":", fl->sessionid);
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
-			"%s %8s %d\n", "ssrcount", ":", fl->ssrcount);
+			"%s %8s %u\n", "ssrcount", ":", fl->ssrcount);
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
 			"%s %14s %d\n", "pd", ":", fl->pd);
 		len += scnprintf(fileinfo + len, DEBUGFS_SIZE - len,
@@ -3215,7 +3263,7 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 
 	VERIFY(err, fl && fl->sctx && fl->cid >= 0 && fl->cid < NUM_CHANNELS);
 	if (err) {
-		pr_err("adsprpc: ERROR: %s: user application %s domain is not set\n",
+		pr_err("adsprpc: ERROR: %s: kernel session not initialized yet for %s\n",
 			__func__, current->comm);
 		err = -EBADR;
 		return err;
@@ -3358,8 +3406,8 @@ static int fastrpc_get_info(struct fastrpc_file *fl, uint32_t *info)
 		fl->cid = cid;
 		fl->ssrcount = fl->apps->channel[cid].ssrcount;
 		mutex_lock(&fl->apps->channel[cid].smd_mutex);
-		VERIFY(err, !fastrpc_session_alloc_locked(
-				&fl->apps->channel[cid], 0, &fl->sctx));
+		err = fastrpc_session_alloc_locked(&fl->apps->channel[cid],
+				0, &fl->sctx);
 		mutex_unlock(&fl->apps->channel[cid].smd_mutex);
 		if (err)
 			goto bail;
@@ -3402,8 +3450,11 @@ static int fastrpc_internal_control(struct fastrpc_file *fl,
 	case FASTRPC_CONTROL_KALLOC:
 		cp->kalloc.kalloc_support = 1;
 		break;
+	case FASTRPC_CONTROL_WAKELOCK:
+		fl->wake_enable = cp->wp.enable;
+		break;
 	default:
-		err = -ENOTTY;
+		err = -EBADRQC;
 		break;
 	}
 bail:
@@ -3584,8 +3635,10 @@ static long fastrpc_device_ioctl(struct file *file, unsigned int ioctl_num,
 			mutex_unlock(&fl->perf_mutex);
 
 			if (fperf) {
-				K_COPY_TO_USER(err, 0, (void *)p.perf.data,
-					fperf, sizeof(*fperf));
+				K_COPY_TO_USER(err, 0,
+					(void *)p.perf.data, fperf,
+					sizeof(*fperf) -
+					sizeof(struct hlist_node));
 			}
 		}
 		K_COPY_TO_USER(err, 0, param, &p.perf, sizeof(p.perf));
@@ -3782,8 +3835,8 @@ static int fastrpc_cb_probe(struct device *dev)
 	struct of_phandle_args iommuspec;
 	const char *name;
 	dma_addr_t start = 0x80000000;
-	int err = 0;
-	unsigned int sharedcb_count = 0, cid, i, j;
+	int err = 0, cid = -1, i = 0;
+	u32 sharedcb_count = 0, j = 0;
 	unsigned int index, num_indices = 0;
 	int secure_vmid = VMID_CP_PIXEL, cache_flush = 1;
 
@@ -4300,11 +4353,19 @@ static int __init fastrpc_device_init(void)
 
 	err = register_rpmsg_driver(&fastrpc_rpmsg_client);
 	if (err) {
-		pr_err("adsprpc: register_rpmsg_driver: failed with err %d\n",
-			err);
+		pr_err("adsprpc: %s: register_rpmsg_driver failed with err %d\n",
+			__func__, err);
 		goto device_create_bail;
 	}
 	me->rpmsg_register = 1;
+
+	me->wake_source = wakeup_source_register("adsprpc");
+	VERIFY(err, !IS_ERR_OR_NULL(me->wake_source));
+	if (err) {
+		pr_err("adsprpc: Error: %s: wakeup_source_register failed with err %d\n",
+					__func__, PTR_ERR(me->wake_source));
+		goto device_create_bail;
+	}
 	return 0;
 device_create_bail:
 	for (i = 0; i < NUM_CHANNELS; i++) {
@@ -4353,6 +4414,8 @@ static void __exit fastrpc_device_exit(void)
 	unregister_chrdev_region(me->dev_no, NUM_CHANNELS);
 	if (me->rpmsg_register == 1)
 		unregister_rpmsg_driver(&fastrpc_rpmsg_client);
+	if (me->wake_source)
+		wakeup_source_unregister(me->wake_source);
 	debugfs_remove_recursive(debugfs_root);
 }
 
