@@ -1930,7 +1930,7 @@ static int fastrpc_internal_invoke(struct fastrpc_file *fl, uint32_t mode,
 
 	VERIFY(err, fl->cid >= 0 && fl->cid < NUM_CHANNELS && fl->sctx != NULL);
 	if (err) {
-		pr_err("adsprpc: ERROR: %s: kernel session not initialized yet for %s\n",
+		pr_err("adsprpc: ERROR: %s: user application %s domain is not set\n",
 			__func__, current->comm);
 		err = -EBADR;
 		goto bail;
@@ -3263,7 +3263,7 @@ static int fastrpc_channel_open(struct fastrpc_file *fl)
 
 	VERIFY(err, fl && fl->sctx && fl->cid >= 0 && fl->cid < NUM_CHANNELS);
 	if (err) {
-		pr_err("adsprpc: ERROR: %s: kernel session not initialized yet for %s\n",
+		pr_err("adsprpc: ERROR: %s: user application %s domain is not set\n",
 			__func__, current->comm);
 		err = -EBADR;
 		return err;

@@ -2414,6 +2414,12 @@ static ssize_t qg_device_read(struct file *file, char __user *buf, size_t count,
 	struct qpnp_qg *chip = file->private_data;
 	unsigned long data_size = sizeof(chip->kdata);
 
+	if (count < data_size) {
+		pr_err("Invalid datasize %lu, expected lesser then %zu\n",
+							data_size, count);
+		return -EINVAL;
+	}
+
 	/* non-blocking access, return */
 	if (!chip->data_ready && (file->f_flags & O_NONBLOCK))
 		return 0;
@@ -3001,6 +3007,39 @@ static int qg_set_wa_flags(struct qpnp_qg *chip)
 	qg_dbg(chip, QG_DEBUG_PON, "wa_flags = %x\n", chip->wa_flags);
 
 	return 0;
+}
+
+#define SDAM_MAGIC_NUMBER		0x12345678
+static int qg_sanitize_sdam(struct qpnp_qg *chip)
+{
+	int rc = 0;
+	u32 data = 0;
+
+	rc = qg_sdam_read(SDAM_MAGIC, &data);
+	if (rc < 0) {
+		pr_err("Failed to read SDAM rc=%d\n", rc);
+		return rc;
+	}
+
+	if (data == SDAM_MAGIC_NUMBER) {
+		qg_dbg(chip, QG_DEBUG_PON, "SDAM valid\n");
+	} else if (data == 0) {
+		rc = qg_sdam_write(SDAM_MAGIC, SDAM_MAGIC_NUMBER);
+		if (!rc)
+			qg_dbg(chip, QG_DEBUG_PON, "First boot. SDAM initilized\n");
+	} else {
+		/* SDAM has invalid value */
+		rc = qg_sdam_clear();
+		if (!rc) {
+			pr_err("SDAM uninitialized, SDAM reset\n");
+			rc = qg_sdam_write(SDAM_MAGIC, SDAM_MAGIC_NUMBER);
+		}
+	}
+
+	if (rc < 0)
+		pr_err("Failed in SDAM operation, rc=%d\n", rc);
+
+	return rc;
 }
 
 #define ADC_CONV_DLY_512MS		0xA
@@ -4048,6 +4087,12 @@ static int qpnp_qg_probe(struct platform_device *pdev)
 	rc = qg_sdam_init(chip->dev);
 	if (rc < 0) {
 		pr_err("Failed to initialize QG SDAM, rc=%d\n", rc);
+		return rc;
+	}
+
+	rc = qg_sanitize_sdam(chip);
+	if (rc < 0) {
+		pr_err("Failed to sanitize SDAM, rc=%d\n", rc);
 		return rc;
 	}
 

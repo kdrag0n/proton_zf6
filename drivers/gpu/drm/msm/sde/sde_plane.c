@@ -5290,7 +5290,7 @@ static int _sde_plane_init_debugfs(struct drm_plane *plane)
 		return -ENOMEM;
 
 	/* don't error check these */
-	debugfs_create_ulong("features", 0400,
+	debugfs_create_x32("features", 0400,
 			psde->debugfs_root, &psde->features);
 
 	/* add register dump support */

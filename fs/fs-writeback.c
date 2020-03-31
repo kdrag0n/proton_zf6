@@ -582,10 +582,13 @@ void wbc_attach_and_unlock_inode(struct writeback_control *wbc,
 	spin_unlock(&inode->i_lock);
 
 	/*
-	 * A dying wb indicates that the memcg-blkcg mapping has changed
-	 * and a new wb is already serving the memcg.  Switch immediately.
+	 * A dying wb indicates that either the blkcg associated with the
+	 * memcg changed or the associated memcg is dying.  In the first
+	 * case, a replacement wb should already be available and we should
+	 * refresh the wb immediately.  In the second case, trying to
+	 * refresh will keep failing.
 	 */
-	if (unlikely(wb_dying(wbc->wb)))
+	if (unlikely(wb_dying(wbc->wb) && !css_is_dying(wbc->wb->memcg_css)))
 		inode_switch_wbs(inode, wbc->wb_id);
 }
 
@@ -2187,7 +2190,7 @@ void __mark_inode_dirty(struct inode *inode, int flags)
 			if (inode_unhashed(inode))
 				goto out_unlock_inode;
 		}
-		if (inode->i_state & I_FREEING)
+		if (inode->i_state & (I_WILL_FREE | I_FREEING))
 			goto out_unlock_inode;
 
 		/*
@@ -2216,6 +2219,12 @@ void __mark_inode_dirty(struct inode *inode, int flags)
 
 			wakeup_bdi = inode_io_list_move_locked(inode, wb,
 							       dirty_list);
+
+			if (inode->i_state & (I_WILL_FREE | I_FREEING)) {
+				inode_io_list_del_locked(inode, wb);
+				spin_unlock(&wb->list_lock);
+				return;
+			}
 
 			spin_unlock(&wb->list_lock);
 			trace_writeback_dirty_inode_enqueue(inode);
