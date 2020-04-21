@@ -680,9 +680,9 @@ static int asusSetCalibrationData(struct stmvl53l1_data *data){
 				readCalibrationDataDone = 1;
 			}else{
 				rc = -1;
+				vl53l1_errmsg("calibration data size(%d) is abnormal, normal(%d)\n",get_size,sizeof(uint8_t) *sizeof(VL53L1_CalibrationData_t));
 				kfree(pBuffer);
 				goto END;
-				vl53l1_errmsg("calibration data size(%d) is abnormal, normal(%d)\n",get_size,sizeof(uint8_t) *sizeof(VL53L1_CalibrationData_t));
 			}
 		}else{
 			rc = -1;

@@ -1360,7 +1360,7 @@ static const struct wled_config wled4_config_defaults = {
 };
 
 static const struct wled_config wled5_config_defaults = {
-	.boost_i_limit = 5,
+	.boost_i_limit = 2,
 	.fs_current = 10,	/* 25 mA */
 	.ovp = 4,
 	.switch_freq = -EINVAL,
