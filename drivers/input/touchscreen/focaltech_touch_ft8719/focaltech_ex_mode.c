@@ -39,7 +39,6 @@
 * 2.Private constant and macro definitions using #define
 *****************************************************************************/
 #define CHARGER_PROC_FILE          "driver/touch_charger_mode"
-#define GLOVE_PROC_FILE            "driver/glove"
 
 /*****************************************************************************
 * 3.Private enumerations, structures and unions using typedef
@@ -103,59 +102,50 @@ static struct file_operations touch_charger_mode_proc_ops = {
 };
 
 #if FTS_GLOVE_EN
-static ssize_t touch_glove_mode_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+static ssize_t fts_touch_glove_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    int count;
+    u8 val;
+    struct input_dev *input_dev = fts_data->input_dev;
+    struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+
+    mutex_lock(&input_dev->mutex);
+    fts_i2c_read_reg(client, FTS_REG_GLOVE_MODE_EN, &val);
+    count = snprintf(buf, PAGE_SIZE, "Glove Mode: %s\n", g_fts_mode_flag.fts_glove_mode_flag ? "On" : "Off");
+    count += snprintf(buf + count, PAGE_SIZE, "Glove Reg(0xC0) = %d\n", val);
+    mutex_unlock(&input_dev->mutex);
+
+    return count;
+}
+
+static ssize_t fts_touch_glove_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
     int ret;
     struct fts_ts_data *ts_data = fts_data;
     struct i2c_client *client;
-    char messages[256];
+
 
     client = ts_data->client;
-    memset(messages, 0, sizeof(messages));
-
-    if (len > 256)
-        len = 256;
-    if (copy_from_user(messages, buff, len))
-        return -EFAULT;
-
-    if (strncmp(messages, "0", 1) == 0) {
-        ret = fts_enter_glove_mode(client, false);
-        if (ret >= 0) {
-            g_fts_mode_flag.fts_glove_mode_flag = false;
+    if (FTS_SYSFS_ECHO_ON(buf)) {
+        if (!g_fts_mode_flag.fts_glove_mode_flag) {
+            FTS_INFO("[Mode]enter glove mode");
+            ret = fts_enter_glove_mode(client, true);
+            if (ret >= 0) {
+                g_fts_mode_flag.fts_glove_mode_flag = true;
+            }
         }
-    } else if (strncmp(messages, "1", 1) == 0) {
-        ret = fts_enter_glove_mode(client, true);
-        if (ret >= 0) {
-            g_fts_mode_flag.fts_glove_mode_flag = true;
+    } else if (FTS_SYSFS_ECHO_OFF(buf)) {
+        if (g_fts_mode_flag.fts_glove_mode_flag) {
+            FTS_INFO("[Mode]exit glove mode");
+            ret = fts_enter_glove_mode(client, false);
+            if (ret >= 0) {
+                g_fts_mode_flag.fts_glove_mode_flag = false;
+            }
         }
     }
-
-    FTS_INFO("[Mode]glove mode status: %d", g_fts_mode_flag.fts_glove_mode_flag);
-    return len;
+    FTS_INFO("[Mode]glove mode status:  %d", g_fts_mode_flag.fts_glove_mode_flag);
+    return count;
 }
-
-static ssize_t touch_glove_mode_proc_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
-{
-    int len = 0;
-    ssize_t ret = 0;
-    char *buff;
-
-    buff = kmalloc(100, GFP_KERNEL);
-    if (!buff)
-        return -ENOMEM;
-
-    len += sprintf(buff, "%d\n", g_fts_mode_flag.fts_glove_mode_flag);
-
-    ret = simple_read_from_buffer(buf, count, ppos, buff, len);
-    kfree(buff);
-
-    return ret;
-}
-
-static struct file_operations touch_glove_mode_proc_ops = {
-    .write = touch_glove_mode_proc_write,
-    .read = touch_glove_mode_proc_read,
-};
 
 /************************************************************************
 * Name: fts_enter_glove_mode
@@ -190,6 +180,7 @@ int fts_enter_glove_mode( struct i2c_client *client, int mode)
 *   write example:echo 01 > fts_touch_glove_mode ---write glove mode to 01
 *
 */
+static DEVICE_ATTR (fts_glove_mode,  S_IRUGO | S_IWUSR, fts_touch_glove_show, fts_touch_glove_store);
 
 #endif
 
@@ -359,6 +350,10 @@ static DEVICE_ATTR (fts_charger_mode,  S_IRUGO | S_IWUSR, fts_touch_charger_show
 #endif
 
 static struct attribute *fts_touch_mode_attrs[] = {
+#if FTS_GLOVE_EN
+    &dev_attr_fts_glove_mode.attr,
+#endif
+
 #if FTS_COVER_EN
     &dev_attr_fts_cover_mode.attr,
 #endif
@@ -392,7 +387,6 @@ int fts_ex_mode_init(struct i2c_client *client)
     }
 
     proc_create(CHARGER_PROC_FILE, 0777, NULL, &touch_charger_mode_proc_ops);
-    proc_create(GLOVE_PROC_FILE, 0666, NULL, &touch_glove_mode_proc_ops);
 
     return err;
 

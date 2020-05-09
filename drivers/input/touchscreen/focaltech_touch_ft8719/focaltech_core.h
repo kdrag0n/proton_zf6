@@ -144,10 +144,6 @@ struct fts_ts_data {
 	struct work_struct resume_work;
 	struct work_struct suspend_work;
     struct work_struct fwupg_work;
-    //jacob add for read gesture
-    struct work_struct gesturework;
-    struct workqueue_struct *read_gesture_wq;
-    //jacob add for read gesture
     struct delayed_work esdcheck_work;
     struct delayed_work prc_work;
     //struct regulator *vdd;

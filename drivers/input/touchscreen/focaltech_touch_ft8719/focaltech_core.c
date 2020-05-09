@@ -70,7 +70,6 @@ int fts_ts_resume(void);
 bool fts_gesture_check(void);
 static void focal_suspend_work(struct work_struct *work);
 static void focal_resume_work(struct work_struct *work);
-static void focal_ReadGesture_work(struct work_struct *work);
 
 u8 FTS_gesture_register_d1;
 u8 FTS_gesture_register_d2;
@@ -79,7 +78,7 @@ u8 FTS_gesture_register_d6;
 u8 FTS_gesture_register_d7;
 
 int focal_init_success = 0;
-int gesture_flag = 0;
+
 bool disable_tp_flag;
 EXPORT_SYMBOL(disable_tp_flag);
 
@@ -867,11 +866,10 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 #if FTS_GESTURE_EN
     if (data->suspended) {
 	if ((fts_data->dclick_mode_eable == 1) | (fts_data->swipeup_mode_eable == 1) | (fts_data->gesture_mode_eable == 1)) {
-		gesture_flag = 1;
-		msleep(10);
+		msleep(20);
 		i2c_smbus_read_i2c_block_data(fts_data->client, 0xd0, 1, &state);
 		if (state == 1) {
-			gesture_flag = 0;
+			printk("[fts][touch] read gesture id ! \n ");
 			fts_gesture_readdata(data);
 		}
 		return 1;
@@ -988,14 +986,12 @@ static irqreturn_t fts_ts_interrupt(int irq, void *data)
     fts_esdcheck_set_intr(1);
 #endif
 
-    mutex_lock(&ts_data->report_mutex);
     ret = fts_read_touchdata(ts_data);
     if (ret == 0 && (!disable_tp_flag)) {
-
+        mutex_lock(&ts_data->report_mutex);
         fts_report_event(ts_data);
-
+        mutex_unlock(&ts_data->report_mutex);
     }
-    mutex_unlock(&ts_data->report_mutex);
 
 #if FTS_ESDCHECK_EN
     fts_esdcheck_set_intr(0);
@@ -1588,17 +1584,8 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	goto err_create_wq_failed;
     }
 
-    //jacob add for read gesture work
-    ts_data->read_gesture_wq = create_singlethread_workqueue("focal_read_gesture_wq");
-    if (NULL == ts_data->read_gesture_wq) {
-        printk("[Focal][TOUCH_ERR] %s: create readgesture workqueue failed\n", __func__);
-        goto err_create_wq_failed;
-    }
-    //jacob add for read gesture work
-
     INIT_WORK(&ts_data->resume_work, focal_resume_work);
     INIT_WORK(&ts_data->suspend_work, focal_suspend_work);
-    INIT_WORK(&ts_data->gesturework, focal_ReadGesture_work);
 
     ts_data->write_buffer = (u8 *)kzalloc((256), GFP_KERNEL);
     if (!ts_data->write_buffer) {
@@ -1626,9 +1613,6 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 err_create_wq_failed:
     if (ts_data->suspend_resume_wq) {
 	destroy_workqueue(ts_data->suspend_resume_wq);
-    }
-    if (ts_data->read_gesture_wq) {
-        destroy_workqueue(ts_data->read_gesture_wq);
     }
 exit_err_edev_register_fail:
 err_irq_req:
@@ -1661,41 +1645,6 @@ err_input_init:
     FTS_FUNC_EXIT();
     return ret;
 }
-
-//from AO-mr1-845-dev jacob add for read gesture+++
-static int fts_i2c_suspend(struct device *dev)
-{
-    return 0;
-}
-
-static void focal_ReadGesture_work(struct work_struct *work) {
-    u8 state;
-
-    mutex_lock(&fts_data->resume_mutex);
-    if(gesture_flag) {
-        if ((fts_data->dclick_mode_eable == 1) | (fts_data->swipeup_mode_eable == 1) | (fts_data->gesture_mode_eable == 1)) {
-            i2c_smbus_read_i2c_block_data(fts_data->client, 0xd0, 1, &state);
-            if (state == 1)
-                fts_gesture_readdata(fts_data);
-        }
-        gesture_flag=0;
-    }
-    mutex_unlock(&fts_data->resume_mutex);
-}
-
-static int fts_resume(struct device *dev)
-{
-    printk("[touch][fts]fts_resume: gesture resume\n");
-    if (focal_init_success == 1) {
-	if (fts_data->suspended) {
-		queue_work(fts_data->read_gesture_wq, &fts_data->gesturework);
-	}
-    }
-    else
-	printk("[FTS][touch]%s: focal touch not work skip resume \n", __func__);
-    return 0;
-}
-//from AO-mr1-845-dev jacob add for read gesture---
 
 /*****************************************************************************
 *  Name: fts_ts_remove
@@ -2082,11 +2031,6 @@ static struct of_device_id fts_match_table[] = {
     { },
 };
 
-static const struct dev_pm_ops fts_i2c_pm_ops = {
-    .suspend = fts_i2c_suspend,
-    .resume = fts_resume,
-};
-
 static struct i2c_driver fts_ts_driver = {
     .probe = fts_ts_probe,
     .remove = fts_ts_remove,
@@ -2094,7 +2038,6 @@ static struct i2c_driver fts_ts_driver = {
     .driver = {
         .name = FTS_DRIVER_NAME,
         .owner = THIS_MODULE,
-        .pm = &fts_i2c_pm_ops,
         .of_match_table = fts_match_table,
     },
     .id_table = fts_ts_id,
