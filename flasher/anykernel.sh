@@ -95,29 +95,6 @@ if mountpoint -q /data; then
   done
 fi
 
-decomp_image=$home/Image
-comp_image=$decomp_image.gz
-
-# Hex-patch the kernel if Magisk is NOT installed ('want_initramfs' -> 'skip_initramfs')
-# This negates the need to reflash Magisk and makes flashing quicker for Magisk users
-if [ -f $comp_image ]; then
-  comp_rd=$split_img/ramdisk.cpio
-  decomp_rd=$home/_ramdisk.cpio
-  $bin/magiskboot decompress $comp_rd $decomp_rd || cp $comp_rd $decomp_rd
-
-  if ! $bin/magiskboot cpio $decomp_rd "exists .backup"; then
-    $bin/magiskboot decompress $comp_image $decomp_image;
-    $bin/magiskboot hexpatch $decomp_image 77616E745F696E697472616D667300 736B69705F696E697472616D667300;
-    $bin/magiskboot compress=gzip $decomp_image $comp_image;
-  else
-    ui_print "  • Preserving Magisk";
-  fi;
-
-  # Concatenate all DTBs to the kernel
-  cat $comp_image $home/dtbs/*.dtb > $comp_image-dtb;
-  rm -f $decomp_image $comp_image
-fi;
-
 # end ramdisk changes
 
 write_boot;
