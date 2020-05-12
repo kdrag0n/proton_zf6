@@ -7,10 +7,10 @@
 #
 
 # 64-bit GCC toolchain prefix
-gcc_prefix64="$HOME/toolchains/arter97/bin/aarch64-elf-"
+gcc_prefix64="arch64-linux-gnu-gcc-"
 
 # 32-bit GCC toolchain prefix
-gcc_prefix32="$HOME/toolchains/arter97-32/bin/arm-eabi-"
+gcc_prefix32="arm-none-eabi-"
 
 # Number of parallel jobs to run
 # Do not remove; set to 1 for no parallelism.
