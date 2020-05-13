@@ -1077,6 +1077,7 @@ static void compareCameraSN()
 
 static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_id)
 {
+	int i;
 	int num;
 	char* load_file_name;
 	int wrong_data = 0;
@@ -1109,7 +1110,7 @@ static int cover_dit_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,uint32_t camera_i
 
 	//check data: AWB 0x02~0x07 can't be Null or 0
 	if (num >= 8) {
-		for(int i = 2; i < 8; i=i+2)
+		for(i = 2; i < 8; i=i+2)
 		{
 			int32_t check_data = 0;
 			if (e_ctrl->cal_data.mapdata+i != NULL && e_ctrl->cal_data.mapdata+(i+1) != NULL)

@@ -7,7 +7,7 @@
 #
 
 # 64-bit GCC toolchain prefix
-gcc_prefix64="arch64-linux-gnu-gcc-"
+gcc_prefix64="aarch64-linux-gnu-"
 
 # 32-bit GCC toolchain prefix
 gcc_prefix32="arm-none-eabi-"
