@@ -31,8 +31,9 @@ ramdisk_compression=auto;
 
 
 ## AnyKernel install
-dump_boot;
+split_boot;
 
-write_boot;
+flash_boot;
+flash_dtbo;
 ## end install
 
