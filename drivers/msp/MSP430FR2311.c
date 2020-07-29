@@ -763,6 +763,8 @@ void mcu_do_later_power_down(void) {
 
 static void mcu_do_work_later(struct work_struct *work)
 {
+	return;
+
 	loopCounter++;
 	if (MCUState!=MCU_READY) {
 		if (MCUState==MCU_EMPTY) { 

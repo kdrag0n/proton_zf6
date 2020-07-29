@@ -3046,6 +3046,8 @@ static void update_battery_safe(struct fg_dev *fg)
 	int capacity;
 	unsigned long now_time;
 
+	return;
+
 	BAT_DBG("+++");
 
 	if(rtc_probe_done != true){
@@ -3310,6 +3312,8 @@ static void update_battery_health(struct fg_dev *fg){
 	int bat_capacity, bat_current, delta_p;
 	unsigned long T;
 	int health_t;
+
+	return;
 
 	if(g_health_upgrade_enable != true){
 		return;
