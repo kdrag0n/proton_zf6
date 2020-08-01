@@ -39,7 +39,6 @@
 #include <linux/earlysuspend.h>
 #define FTS_SUSPEND_LEVEL 1     /* Early-suspend level */
 #endif
-#include <linux/touchpaint.h>
 
 /*****************************************************************************
 * Private constant and macro definitions using #define
@@ -733,9 +732,6 @@ static int fts_input_report_b(struct fts_ts_data *data)
         input_mt_slot(data->input_dev, events[i].id);
 
         if (EVENT_DOWN(events[i].flag)) {
-            touchpaint_finger_down(events[i].id);
-            touchpaint_finger_point(events[i].id, events[i].x, events[i].y);
-
             input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, true);
 
 #if FTS_REPORT_PRESSURE_EN
@@ -756,8 +752,6 @@ static int fts_input_report_b(struct fts_ts_data *data)
             FTS_DEBUG("[B]P%d(%d, %d)[p:%d,tm:%d] DOWN!", events[i].id, events[i].x,
                       events[i].y, events[i].p, events[i].area);
         } else {
-            touchpaint_finger_up(events[i].id);
-
             uppoint++;
             input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, false);
             data->touchs &= ~BIT(events[i].id);
@@ -768,8 +762,6 @@ static int fts_input_report_b(struct fts_ts_data *data)
     if (unlikely(data->touchs ^ touchs)) {
         for (i = 0; i < max_touch_num; i++)  {
             if (BIT(i) & (data->touchs ^ touchs)) {
-                touchpaint_finger_up(i);
-
                 FTS_DEBUG("[B]P%d UP!", i);
                 va_reported = true;
                 input_mt_slot(data->input_dev, i);
