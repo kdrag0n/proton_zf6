@@ -881,10 +881,12 @@ static int msm_nand_flash_onfi_probe(struct msm_nand_info *info)
 	struct version nandc_version = {0};
 
 	ret = msm_nand_version_check(info, &nandc_version);
-	if (!ret && !(nandc_version.nand_major == 1 &&
+	if (!ret && !((nandc_version.nand_major == 1 &&
 			nandc_version.nand_minor >= 5 &&
 			nandc_version.qpic_major == 1 &&
-			nandc_version.qpic_minor >= 5)) {
+			nandc_version.qpic_minor >= 5) ||
+			(nandc_version.nand_major >= 2 &&
+			nandc_version.qpic_major >= 2))) {
 		ret = -EPERM;
 		goto out;
 	}
@@ -1808,7 +1810,7 @@ static int msm_nand_is_erased_page_ps(struct mtd_info *mtd, loff_t from,
 			/* This extra +1 is for oobbuf case */
 		} result[MAX_CW_PER_PAGE + 1];
 	} *dma_buffer;
-	uint8_t *ecc;
+	uint8_t *ecc, *ecc_temp;
 
 	total_ecc_byte_cnt = (chip->ecc_parity_bytes * cwperpage);
 	memcpy(&raw_ops, ops, sizeof(struct mtd_oob_ops));
@@ -1981,8 +1983,8 @@ free_dma:
 	dma_unmap_single(chip->dev, rw_params->ecc_dma_addr,
 			total_ecc_byte_cnt, DMA_FROM_DEVICE);
 	/* check for bit flips in ecc data */
+	ecc_temp = ecc;
 	for (n = rw_params->start_sector; n < cwperpage; n++) {
-		uint8_t *ecc_temp = ecc;
 		int last_pos = 0, next_pos = 0;
 		int ecc_bytes_percw_in_bits = (chip->ecc_parity_bytes * 8);
 
@@ -2475,7 +2477,7 @@ static int msm_nand_is_erased_page(struct mtd_info *mtd, loff_t from,
 			uint32_t erased_cw_status;
 		} result[MAX_CW_PER_PAGE];
 	} *dma_buffer;
-	uint8_t *ecc;
+	uint8_t *ecc, *ecc_temp;
 
 	pr_debug("========================================================\n");
 	total_ecc_byte_cnt = (chip->ecc_parity_bytes * cwperpage);
@@ -2621,8 +2623,8 @@ free_dma:
 	dma_unmap_single(chip->dev, rw_params->ecc_dma_addr,
 			total_ecc_byte_cnt, DMA_FROM_DEVICE);
 	/* check for bit flips in ecc data */
+	ecc_temp = ecc;
 	for (n = rw_params->start_sector; n < cwperpage; n++) {
-		uint8_t *ecc_temp = ecc;
 		int last_pos = 0, next_pos = 0;
 		int ecc_bytes_percw_in_bits = (chip->ecc_parity_bytes * 8);
 
@@ -3590,7 +3592,12 @@ static int msm_nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 	data.cfg.cmd = MSM_NAND_CMD_BLOCK_ERASE;
 	data.cfg.addr0 = page;
 	data.cfg.addr1 = 0;
-	data.cfg.cfg0 = chip->cfg0 & (~(7 << CW_PER_PAGE));
+	data.cfg.cfg0 = chip->cfg0 & (~((7 << CW_PER_PAGE)
+					| (7 << NUM_ADDR_CYCLES)));
+	if (mtd->size >= SZ_256M)
+		data.cfg.cfg0 = data.cfg.cfg0 | (3 << NUM_ADDR_CYCLES);
+	else
+		data.cfg.cfg0 = data.cfg.cfg0 | (2 << NUM_ADDR_CYCLES);
 	data.cfg.cfg1 = chip->cfg1;
 	data.exec = 1;
 	dma_buffer->flash_status = 0xeeeeeeee;

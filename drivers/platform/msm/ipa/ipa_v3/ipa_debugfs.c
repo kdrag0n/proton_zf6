@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -82,6 +82,10 @@ const char *ipa3_event_name[] = {
 	__stringify(IPA_GSB_DISCONNECT),
 	__stringify(IPA_COALESCE_ENABLE),
 	__stringify(IPA_COALESCE_DISABLE),
+	__stringify(IPA_PDN_DEFAULT_MODE_CONFIG),
+	__stringify(IPA_PDN_IP_COLLISION_MODE_CONFIG),
+	__stringify(IPA_PDN_IP_PASSTHROUGH_MODE_CONFIG),
+	__stringify(IPA_MAC_FLT_EVENT),
 };
 
 const char *ipa3_hdr_l2_type_name[] = {
@@ -1375,9 +1379,9 @@ static ssize_t ipa3_read_ntn(struct file *file, char __user *ubuf,
 		size_t count, loff_t *ppos)
 {
 #define TX_STATS(y) \
-	ipa3_ctx->uc_ntn_ctx.ntn_uc_stats_mmio->tx_ch_stats[0].y
+	stats.tx_ch_stats[0].y
 #define RX_STATS(y) \
-	ipa3_ctx->uc_ntn_ctx.ntn_uc_stats_mmio->rx_ch_stats[0].y
+	stats.rx_ch_stats[0].y
 
 	struct Ipa3HwStatsNTNInfoData_t stats;
 	int nbytes;
@@ -1895,7 +1899,7 @@ static void ipa3_read_pdn_table(void)
 		}
 
 		for (i = 0, pdn_entry = ipa3_ctx->nat_mem.pdn_mem.base;
-			 i < IPA_MAX_PDN_NUM;
+			 i < ipa3_get_max_pdn();
 			 ++i, pdn_entry += pdn_entry_size) {
 
 			result = ipahal_nat_is_entry_zeroed(

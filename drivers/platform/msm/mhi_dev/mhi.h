@@ -263,6 +263,7 @@ struct mhi_config {
 	uint32_t	mhi_reg_len;
 	uint32_t	version;
 	uint32_t	event_rings;
+	uint32_t	hw_event_rings;
 	uint32_t	channels;
 	uint32_t	chdb_offset;
 	uint32_t	erdb_offset;
@@ -270,7 +271,8 @@ struct mhi_config {
 
 #define NUM_CHANNELS			128
 #define HW_CHANNEL_BASE			100
-#define HW_CHANNEL_END			107
+#define NUM_HW_CHANNELS			15
+#define HW_CHANNEL_END			110
 #define MHI_ENV_VALUE			2
 #define MHI_MASK_ROWS_CH_EV_DB		4
 #define TRB_MAX_DATA_SIZE		8192
@@ -361,6 +363,7 @@ enum mhi_dev_ch_operation {
 enum mhi_dev_tr_compl_evt_type {
 	SEND_EVENT_BUFFER,
 	SEND_EVENT_RD_OFFSET,
+	SEND_MSI
 };
 
 enum mhi_dev_transfer_type {
@@ -390,6 +393,14 @@ struct mhi_dev_ring {
 	union mhi_dev_ring_element_type		*ring_cache;
 	/* Physical address of the cached ring copy on the device side */
 	dma_addr_t				ring_cache_dma_handle;
+	/* Device VA of read pointer array (used only for event rings) */
+	uint64_t			*evt_rp_cache;
+	/* PA of the read pointer array (used only for event rings) */
+	dma_addr_t				evt_rp_cache_dma_handle;
+	/* Device VA of msi buffer (used only for event rings)  */
+	uint32_t			*msi_buf;
+	/* PA of msi buf (used only for event rings) */
+	dma_addr_t				msi_buf_dma_handle;
 	/* Physical address of the host where we will write/read to/from */
 	struct mhi_addr				ring_shadow;
 	/* Ring type - cmd, event, transfer ring and its rp/wp... */
@@ -435,7 +446,10 @@ struct event_req {
 	enum mhi_dev_tr_compl_evt_type event_type;
 	u32			event_ring;
 	void			(*client_cb)(void *req);
+	void			(*rd_offset_cb)(void *req);
+	void			(*msi_cb)(void *req);
 	struct list_head	list;
+	u32			flush_num;
 };
 
 struct mhi_dev_channel {
@@ -479,6 +493,8 @@ struct mhi_dev_channel {
 	/* td size being read/written from/to so far */
 	uint32_t			td_size;
 	uint32_t			pend_wr_count;
+	uint32_t			msi_cnt;
+	uint32_t			flush_req_cnt;
 	bool				skip_td;
 };
 
@@ -539,7 +555,7 @@ struct mhi_dev {
 	size_t			ch_ring_start;
 
 	/* IPA Handles */
-	u32				ipa_clnt_hndl[4];
+	u32				ipa_clnt_hndl[NUM_HW_CHANNELS];
 	struct workqueue_struct		*ring_init_wq;
 	struct work_struct		ring_init_cb_work;
 	struct work_struct		re_init;
@@ -593,6 +609,13 @@ struct mhi_dev {
 	/*Register for interrupt*/
 	bool				mhi_int;
 	bool				mhi_int_en;
+
+	/* Enable M2 autonomous mode from MHI */
+	bool				enable_m2;
+
+	/* Dont timeout waiting for M0 */
+	bool				no_m0_timeout;
+
 	/* Registered client callback list */
 	struct list_head		client_cb_list;
 	/* Tx, Rx DMA channels */
@@ -962,6 +985,12 @@ int mhi_dev_mmio_get_cmd_db(struct mhi_dev_ring *ring, uint64_t *wr_offset);
 int mhi_dev_mmio_set_env(struct mhi_dev *dev, uint32_t value);
 
 /**
+ * mhi_dev_mmio_clear_reset() - Clear the reset bit
+ * @dev:	MHI device structure.
+ */
+int mhi_dev_mmio_clear_reset(struct mhi_dev *dev);
+
+/**
  * mhi_dev_mmio_reset() - Reset the MMIO done as part of initialization.
  * @dev:	MHI device structure.
  */
@@ -1103,4 +1132,5 @@ void mhi_uci_chan_state_notify_all(struct mhi_dev *mhi,
 void mhi_uci_chan_state_notify(struct mhi_dev *mhi,
 		enum mhi_client_channel ch_id, enum mhi_ctrl_info ch_state);
 
+void mhi_dev_pm_relax(void);
 #endif /* _MHI_H */
