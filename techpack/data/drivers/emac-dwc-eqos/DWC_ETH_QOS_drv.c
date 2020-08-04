@@ -1945,6 +1945,12 @@ static int DWC_ETH_QOS_open(struct net_device *dev)
 	if (pdata->phydev)
 		phy_start(pdata->phydev);
 
+	EMACDBG("enabling irq = %d\n", pdata->phy_irq_enabled );
+	if(!pdata->phy_irq_enabled && pdata->phy_irq){
+		enable_irq(pdata->phy_irq);
+		pdata->phy_irq_enabled= true;
+	}
+
 	pdata->eee_enabled = DWC_ETH_QOS_eee_init(pdata);
 
 #ifndef DWC_ETH_QOS_CONFIG_PGTEST
@@ -1969,7 +1975,7 @@ static int DWC_ETH_QOS_open(struct net_device *dev)
 
  err_irq_0:
 	pdata->irq_number = 0;
- DBGPR("<--DWC_ETH_QOS_open\n");
+	DBGPR("<--DWC_ETH_QOS_open\n");
 	return ret;
 }
 
@@ -1998,6 +2004,11 @@ static int DWC_ETH_QOS_close(struct net_device *dev)
 	if (pdata->eee_enabled) {
 		del_timer_sync(&pdata->eee_ctrl_timer);
 		pdata->eee_active = 0;
+	}
+	EMACDBG("diabling irq = %d\n", pdata->phy_irq_enabled );
+	if( pdata->phy_irq_enabled){
+		disable_irq(pdata->phy_irq);
+		pdata->phy_irq_enabled = false;
 	}
 
 	if (pdata->phydev)
@@ -3906,6 +3917,15 @@ static int DWC_ETH_QOS_clean_rx_irq(struct DWC_ETH_QOS_prv_data *pdata,
 									  "failed to do the RX dma map\n");
 
 							goto rx_tstmp_failed;
+						} else {
+						   /* HW timestamp consumes one full DMA descriptor.
+						   * We need to unmap the DMA buffer here otherwise when IOMMU
+						   * is enabled we leak the mappings and eventually run out of them.
+						   * The skb will be safely reused and doesn't need to be freed.
+						   */
+						   buffer = GET_RX_BUF_PTR(qinx, desc_data->cur_rx);
+						   dma_unmap_single(GET_MEM_PDEV_DEV, buffer->dma, pdata->rx_buffer_len, DMA_FROM_DEVICE);
+						   buffer->dma = 0;
 						}
 					}
 				}
@@ -4036,6 +4056,7 @@ int DWC_ETH_QOS_poll_mq(struct napi_struct *napi, int budget)
 	struct DWC_ETH_QOS_prv_data *pdata = rx_queue->pdata;
 	/* divide the budget evenly among all the queues */
 	int per_q_budget = budget / DWC_ETH_QOS_RX_QUEUE_CNT;
+	int q_budget_used = 0;
 	int qinx = 0;
 	int received = 0, per_q_received = 0;
 	unsigned long flags;
@@ -4066,6 +4087,10 @@ int DWC_ETH_QOS_poll_mq(struct napi_struct *napi, int budget)
 		received += per_q_received;
 		pdata->xstats.rx_pkt_n += per_q_received;
 		pdata->xstats.q_rx_pkt_n[qinx] += per_q_received;
+
+		if (per_q_received > 0)
+			q_budget_used += per_q_budget;
+
 #ifdef DWC_INET_LRO
 		if (rx_queue->lro_flush_needed)
 			lro_flush_all(&rx_queue->lro_mgr);
@@ -4075,7 +4100,7 @@ int DWC_ETH_QOS_poll_mq(struct napi_struct *napi, int budget)
 	/* If we processed all pkts, we are done;
 	 * tell the kernel & re-enable interrupt
 	 */
-	if (received < budget) {
+	if ((received < q_budget_used) || (received == 0)) {
 		if (pdata->dev->features & NETIF_F_GRO) {
 			/* to turn off polling */
 			napi_complete(napi);
@@ -4095,11 +4120,12 @@ int DWC_ETH_QOS_poll_mq(struct napi_struct *napi, int budget)
 			DWC_ETH_QOS_enable_all_ch_rx_interrpt(pdata);
 			spin_unlock_irqrestore(&pdata->lock, flags);
 		}
+		return received;
 	}
 
 	DBGPR("<--DWC_ETH_QOS_poll_mq\n");
 
-	return received;
+	return budget;
 }
 
 /*!
@@ -5098,9 +5124,8 @@ static int DWC_ETH_QOS_config_pfc(struct net_device *dev,
  *
  * \retval 0: Success, -1 : Failure
  * */
-static int ETH_PTPCLK_Config(struct DWC_ETH_QOS_prv_data *pdata, struct ifr_data_struct *req)
+static int ETH_PTPCLK_Config(struct DWC_ETH_QOS_prv_data *pdata, struct ETH_PPS_Config *eth_pps_cfg)
 {
-	struct ETH_PPS_Config *eth_pps_cfg = (struct ETH_PPS_Config *)req->ptr;
 	struct hw_if_struct *hw_if = &pdata->hw_if;
 	int ret = 0;
 
@@ -5119,7 +5144,7 @@ static int ETH_PTPCLK_Config(struct DWC_ETH_QOS_prv_data *pdata, struct ifr_data
 
 	pdata->ptpclk_freq = eth_pps_cfg->ptpclk_freq;
 	ret = hw_if->config_default_addend(pdata, (ULONG)eth_pps_cfg->ptpclk_freq);
-	ret |= hw_if->config_sub_second_increment( (ULONG)eth_pps_cfg->ptpclk_freq);
+	ret |= hw_if->config_sub_second_increment(eth_pps_cfg->ptpclk_freq);
 
 	return ret;
 }
@@ -5211,6 +5236,8 @@ void DWC_ETH_QOS_pps_timer_init(struct ifr_data_struct *req)
 	/* Initialize MAC System Time Update register */
 	MAC_STSUR_TSS_UDFWR(0x0); // MAC system time in seconds
 
+	MAC_TCR_TSCTRLSSR_UDFWR(0x1);  //MAC TSCTRLSSR enable
+
 	MAC_STNSUR_TSSS_UDFWR(0x0); // The time value is added in sub seconds with the contents of the update register.
 	MAC_STNSUR_ADDSUB_UDFWR(0x0); // The time value is added in seconds with the contents of the update register.
 
@@ -5260,9 +5287,8 @@ void stop_pps(int ch)
  *
  * \retval 0: Success, -1 : Failure
  * */
-int ETH_PPSOUT_Config(struct DWC_ETH_QOS_prv_data *pdata, struct ifr_data_struct *req)
+int ETH_PPSOUT_Config(struct DWC_ETH_QOS_prv_data *pdata, struct ETH_PPS_Config *eth_pps_cfg)
 {
-	struct ETH_PPS_Config *eth_pps_cfg = (struct ETH_PPS_Config *)req->ptr;
 	unsigned int val;
 	int interval, width;
 	struct hw_if_struct *hw_if = &pdata->hw_if;
@@ -5717,11 +5743,11 @@ static int DWC_ETH_QOS_handle_prv_ioctl(struct DWC_ETH_QOS_prv_data *pdata,
 		break;
 
 	case DWC_ETH_QOS_DCB_ALGORITHM:
-		DWC_ETH_QOS_program_dcb_algorithm(pdata, req);
+		ret = DWC_ETH_QOS_program_dcb_algorithm(pdata, req);
 		break;
 
 	case DWC_ETH_QOS_AVB_ALGORITHM:
-		DWC_ETH_QOS_program_avb_algorithm(pdata, req);
+		ret = DWC_ETH_QOS_program_avb_algorithm(pdata, req);
 		break;
 
 	case DWC_ETH_QOS_RX_SPLIT_HDR_CMD:
@@ -5810,12 +5836,11 @@ static int DWC_ETH_QOS_handle_prv_ioctl(struct DWC_ETH_QOS_prv_data *pdata,
 			sizeof(struct ETH_PPS_Config))) {
 			return -EFAULT;
 		}
-		req->ptr = &eth_pps_cfg;
 
 		if(pdata->hw_feat.pps_out_num == 0)
 			ret = -EOPNOTSUPP;
 		else
-			ret = ETH_PTPCLK_Config(pdata, req);
+			ret = ETH_PTPCLK_Config(pdata, &eth_pps_cfg);
 		break;
 
 	case DWC_ETH_QOS_CONFIG_PPSOUT_CMD:
@@ -5824,12 +5849,11 @@ static int DWC_ETH_QOS_handle_prv_ioctl(struct DWC_ETH_QOS_prv_data *pdata,
 			sizeof(struct ETH_PPS_Config))) {
 			return -EFAULT;
 		}
-		req->ptr = &eth_pps_cfg;
 
 		if(pdata->hw_feat.pps_out_num == 0)
 			ret = -EOPNOTSUPP;
 		else
-			ret = ETH_PPSOUT_Config(pdata, req);
+			ret = ETH_PPSOUT_Config(pdata, &eth_pps_cfg);
 		break;
 #endif
 
@@ -6053,6 +6077,7 @@ static int DWC_ETH_QOS_handle_hwtstamp_ioctl(struct DWC_ETH_QOS_prv_data *pdata,
 		getnstimeofday(&now);
 		hw_if->init_systime(now.tv_sec, now.tv_nsec);
 	}
+	pdata->is_hw_restore_needed = 1;
 
 	DBGPR_PTP("config.flags = %#x, tx_type = %#x, rx_filter = %#x\n",
 		  config.flags, config.tx_type, config.rx_filter);
@@ -6795,19 +6820,22 @@ static void DWC_ETH_QOS_config_tx_pbl(struct DWC_ETH_QOS_prv_data *pdata,
  * \retval none
  */
 
-static void DWC_ETH_QOS_program_dcb_algorithm(
+static int DWC_ETH_QOS_program_dcb_algorithm(
 	struct DWC_ETH_QOS_prv_data *pdata,
 	struct ifr_data_struct *req)
 {
 	struct DWC_ETH_QOS_dcb_algorithm l_dcb_struct, *u_dcb_struct =
 		(struct DWC_ETH_QOS_dcb_algorithm *)req->ptr;
 	struct hw_if_struct *hw_if = &pdata->hw_if;
+	int ret = 0;
 
 	DBGPR("-->DWC_ETH_QOS_program_dcb_algorithm\n");
 
 	if (copy_from_user(&l_dcb_struct, u_dcb_struct,
-			   sizeof(struct DWC_ETH_QOS_dcb_algorithm)))
+			   sizeof(struct DWC_ETH_QOS_dcb_algorithm))) {
 		dev_alert(&pdata->pdev->dev, "Failed to fetch DCB Struct info from user\n");
+		return -EFAULT;
+	}
 
 	hw_if->set_tx_queue_operating_mode(l_dcb_struct.qinx,
 		(UINT)l_dcb_struct.op_mode);
@@ -6815,6 +6843,43 @@ static void DWC_ETH_QOS_program_dcb_algorithm(
 	hw_if->set_dcb_queue_weight(l_dcb_struct.qinx, l_dcb_struct.weight);
 
 	DBGPR("<--DWC_ETH_QOS_program_dcb_algorithm\n");
+	return ret;
+}
+/*!
+ * \details This function configure
+ * parameters like send and idle slope, high and low credit.
+ *
+ * \param[in] pdata – pointer to private data structure.
+ * \param[in] l_avb_struct – avb algorithm structure.
+ *
+ * \return void
+ *
+ * \retval none
+ */
+void DWC_ETH_QOS_program_avb_algorithm_hw_register(
+	struct DWC_ETH_QOS_prv_data *pdata,
+	struct DWC_ETH_QOS_avb_algorithm l_avb_struct)
+{
+	struct hw_if_struct *hw_if = &pdata->hw_if;
+	struct DWC_ETH_QOS_avb_algorithm_params *avb_params;
+
+	DBGPR("-->DWC_ETH_QOS_program_avb_algorithm\n");
+	if ((pdata->speed == SPEED_1000) || (pdata->avb_algorithm_speed_backup == SPEED_1000) )
+		avb_params = &l_avb_struct.speed1000params;
+	else
+		avb_params = &l_avb_struct.speed100params;
+
+	hw_if->set_tx_queue_operating_mode(l_avb_struct.qinx,
+		(UINT)l_avb_struct.op_mode);
+	hw_if->set_avb_algorithm(l_avb_struct.qinx, l_avb_struct.algorithm);
+	hw_if->config_credit_control(l_avb_struct.qinx, l_avb_struct.cc);
+	hw_if->config_send_slope(l_avb_struct.qinx, avb_params->send_slope);
+	hw_if->config_idle_slope(l_avb_struct.qinx, avb_params->idle_slope);
+	hw_if->config_high_credit(l_avb_struct.qinx, avb_params->hi_credit);
+	hw_if->config_low_credit(l_avb_struct.qinx, avb_params->low_credit);
+
+	DBGPR("<--DWC_ETH_QOS_program_avb_algorithm_hw_register\n");
+
 }
 
 /*!
@@ -6831,43 +6896,43 @@ static void DWC_ETH_QOS_program_dcb_algorithm(
  * \retval none
  */
 
-static void DWC_ETH_QOS_program_avb_algorithm(
+static int DWC_ETH_QOS_program_avb_algorithm(
 	struct DWC_ETH_QOS_prv_data *pdata,
 	struct ifr_data_struct *req)
 {
 	struct DWC_ETH_QOS_avb_algorithm l_avb_struct, *u_avb_struct =
 		(struct DWC_ETH_QOS_avb_algorithm *)req->ptr;
-	struct hw_if_struct *hw_if = &pdata->hw_if;
-	struct DWC_ETH_QOS_avb_algorithm_params *avb_params;
+	int ret = 0;
 
 	DBGPR("-->DWC_ETH_QOS_program_avb_algorithm\n");
 
 	if (copy_from_user(&l_avb_struct, u_avb_struct,
-			   sizeof(struct DWC_ETH_QOS_avb_algorithm)))
+			   sizeof(struct DWC_ETH_QOS_avb_algorithm))) {
 		dev_alert(&pdata->pdev->dev, "Failed to fetch AVB Struct info from user\n");
+		return -EFAULT;
+	}
 
-	if (pdata->speed == SPEED_1000)
-		avb_params = &l_avb_struct.speed1000params;
-	else
-		avb_params = &l_avb_struct.speed100params;
 
 	/*Application uses 1 for CLASS A traffic and 2 for CLASS B traffic
 	  Configure right channel accordingly*/
-	if (l_avb_struct.qinx == 1)
+	if (l_avb_struct.qinx == 1) {
 		l_avb_struct.qinx = CLASS_A_TRAFFIC_TX_CHANNEL;
-	else if (l_avb_struct.qinx == 2)
+		pdata->l_avb_struct_class_a = l_avb_struct;
+		pdata->is_class_a_avb_algo_stored = 1;
+		EMACINFO("DWC_ETH_QOS_program_avb_algorithm class a stored \n");
+	} else if (l_avb_struct.qinx == 2) {
 		l_avb_struct.qinx = CLASS_B_TRAFFIC_TX_CHANNEL;
+		pdata->l_avb_struct_class_b = l_avb_struct;
+		pdata->is_class_b_avb_algo_stored = 1;
+		EMACINFO("DWC_ETH_QOS_program_avb_algorithm class b stored \n");
+	}
 
-	hw_if->set_tx_queue_operating_mode(l_avb_struct.qinx,
-		(UINT)l_avb_struct.op_mode);
-	hw_if->set_avb_algorithm(l_avb_struct.qinx, l_avb_struct.algorithm);
-	hw_if->config_credit_control(l_avb_struct.qinx, l_avb_struct.cc);
-	hw_if->config_send_slope(l_avb_struct.qinx, avb_params->send_slope);
-	hw_if->config_idle_slope(l_avb_struct.qinx, avb_params->idle_slope);
-	hw_if->config_high_credit(l_avb_struct.qinx, avb_params->hi_credit);
-	hw_if->config_low_credit(l_avb_struct.qinx, avb_params->low_credit);
+	DWC_ETH_QOS_program_avb_algorithm_hw_register(pdata, l_avb_struct);
 
+	/*Backup speed*/
+	pdata->avb_algorithm_speed_backup = pdata->speed;
 	DBGPR("<--DWC_ETH_QOS_program_avb_algorithm\n");
+	return ret;
 }
 
 /*!
@@ -8121,7 +8186,7 @@ void DWC_ETH_QOS_dma_desc_stats_read(struct DWC_ETH_QOS_prv_data *pdata)
 void DWC_ETH_QOS_dma_desc_stats_init(struct DWC_ETH_QOS_prv_data *pdata)
 {
 	int qinx;
-	EMACDBG("Enter\n");
+	IPC_LOW("Enter\n");
 
 	pdata->xstats.dma_ch_intr_status = 0;
 	pdata->xstats.dma_debug_status0 = 0;
@@ -8147,5 +8212,5 @@ void DWC_ETH_QOS_dma_desc_stats_init(struct DWC_ETH_QOS_prv_data *pdata)
 		pdata->xstats.dma_ch_curr_app_rxbuf[qinx] = 0;
 		pdata->xstats.dma_ch_miss_frame_count[qinx] = 0;
 	}
-	EMACDBG("Exit\n");
+	IPC_LOW("Exit\n");
 }
