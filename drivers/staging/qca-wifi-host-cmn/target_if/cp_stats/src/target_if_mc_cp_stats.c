@@ -222,6 +222,10 @@ static QDF_STATUS target_if_cp_stats_extract_vdev_summary_stats(
 		dat_snr = vdev_stats.vdev_snr.dat_snr;
 		ev->vdev_summary_stats[i].vdev_id = vdev_stats.vdev_id;
 
+		cp_stats_debug("vdev %d SNR bcn: %d data: %d",
+			       ev->vdev_summary_stats[i].vdev_id, bcn_snr,
+			       dat_snr);
+
 		for (j = 0; j < 4; j++) {
 			ev->vdev_summary_stats[i].stats.tx_frm_cnt[j]
 					= vdev_stats.tx_frm_cnt[j];
@@ -292,8 +296,8 @@ static QDF_STATUS target_if_cp_stats_extract_vdev_chain_rssi_stats(
 		for (j = 0; j < MAX_NUM_CHAINS; j++) {
 			dat_snr = rssi_stats.rssi_avg_data[j];
 			bcn_snr = rssi_stats.rssi_avg_beacon[j];
-			cp_stats_err("Chain %d SNR bcn: %d data: %d", j,
-				     bcn_snr, dat_snr);
+			cp_stats_nofl_debug("Chain %d SNR bcn: %d data: %d", j,
+					    bcn_snr, dat_snr);
 			if (TGT_IS_VALID_SNR(bcn_snr))
 				ev->vdev_chain_rssi[i].chain_rssi[j] = bcn_snr;
 			else if (TGT_IS_VALID_SNR(dat_snr))
@@ -333,17 +337,17 @@ static QDF_STATUS target_if_cp_stats_extract_event(struct wmi_unified *wmi_hdl,
 		cp_stats_err("stats param extract failed: %d", status);
 		return status;
 	}
-	cp_stats_debug("num: pdev: %d, pdev_extd: %d, vdev: %d, peer: %d,"
-		       "rssi: %d, bcnflt: %d, channel: %d, bcn: %d, peer_extd2: %d, last_event: %x",
-		       stats_param.num_pdev_stats,
-		       stats_param.num_pdev_ext_stats,
-		       stats_param.num_vdev_stats,
-		       stats_param.num_peer_stats,
-		       stats_param.num_rssi_stats,
-		       stats_param.num_bcnflt_stats,
-		       stats_param.num_chan_stats,
-		       stats_param.num_bcn_stats,
-		       stats_param.num_peer_adv_stats, stats_param.last_event);
+	cp_stats_nofl_debug("num: pdev: %d, pdev_extd: %d, vdev: %d, peer: %d,"
+			    "rssi: %d, bcnflt: %d, channel: %d, bcn: %d, peer_extd2: %d, last_event: %x",
+			    stats_param.num_pdev_stats,
+			    stats_param.num_pdev_ext_stats,
+			    stats_param.num_vdev_stats,
+			    stats_param.num_peer_stats,
+			    stats_param.num_rssi_stats,
+			    stats_param.num_bcnflt_stats,
+			    stats_param.num_chan_stats,
+			    stats_param.num_bcn_stats,
+			    stats_param.num_peer_adv_stats, stats_param.last_event);
 
 	ev->last_event = stats_param.last_event;
 	status = target_if_cp_stats_extract_pdev_stats(wmi_hdl, &stats_param,

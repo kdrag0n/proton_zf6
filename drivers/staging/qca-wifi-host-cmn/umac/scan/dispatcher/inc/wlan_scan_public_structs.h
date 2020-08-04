@@ -40,6 +40,7 @@ typedef uint32_t wlan_scan_id;
 #define SCM_CANCEL_SCAN_WAIT_ITERATION 600
 
 #define INVAL_SCAN_ID        0xFFFFFFFF
+#define CANCEL_HOST_SCAN_ID  0xFFFFFFFE
 #define INVAL_VDEV_ID        0xFFFFFFFF
 #define INVAL_PDEV_ID        0xFFFFFFFF
 
@@ -158,6 +159,7 @@ struct element_info {
  * @esp: pointer to ESP indication ie
  * @mbo_oce: pointer to mbo/oce indication ie
  * @adaptive_11r: pointer to adaptive 11r IE
+ * @single_pmk: Pionter to sae single pmk IE
  */
 struct ie_list {
 	uint8_t *tim;
@@ -205,6 +207,7 @@ struct ie_list {
 	uint8_t *mbo_oce;
 	uint8_t *muedca;
 	uint8_t *adaptive_11r;
+	uint8_t *single_pmk;
 };
 
 enum scan_entry_connection_state {
@@ -556,7 +559,7 @@ struct fils_filter_info {
 struct scan_filter {
 	bool bss_scoring_required;
 	bool enable_adaptive_11r;
-	uint32_t age_threshold;
+	qdf_time_t age_threshold;
 	uint32_t p2p_results;
 	uint32_t rrm_measurement_filter;
 	uint32_t num_of_bssid;
@@ -957,12 +960,15 @@ struct scan_start_request {
  * enum scan_cancel_type - type specifiers for cancel scan request
  * @WLAN_SCAN_CANCEL_SINGLE: cancel particular scan specified by scan_id
  * @WLAN_SCAN_CANCEL_VAP_ALL: cancel all scans running on a particular vdevid
- * WLAN_SCAN_CANCEL_PDEV_ALL: cancel all scans running on parent pdev of vdevid
+ * @WLAN_SCAN_CANCEL_PDEV_ALL: cancel all scans running on parent pdev of vdevid
+ * @WLAN_SCAN_CANCEL_HOST_VDEV_ALL: Cancel all host triggered scans alone on
+ * vdev
  */
 enum scan_cancel_req_type {
 	WLAN_SCAN_CANCEL_SINGLE = 1,
 	WLAN_SCAN_CANCEL_VDEV_ALL,
 	WLAN_SCAN_CANCEL_PDEV_ALL,
+	WLAN_SCAN_CANCEL_HOST_VDEV_ALL,
 };
 
 /**

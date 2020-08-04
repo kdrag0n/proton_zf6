@@ -191,12 +191,12 @@ QDF_STATUS ucfg_scan_pno_stop(struct wlan_objmgr_vdev *vdev)
 	}
 	if (!scan_vdev_obj->pno_in_progress) {
 		scm_debug("pno already stopped");
-		return QDF_STATUS_E_ALREADY;
+		return QDF_STATUS_SUCCESS;
 	}
 
 	status = tgt_scan_pno_stop(vdev, wlan_vdev_get_id(vdev));
 	if (QDF_IS_STATUS_ERROR(status))
-		scm_err("pno start failed");
+		scm_err("pno stop failed");
 	else
 		scan_vdev_obj->pno_in_progress = false;
 
@@ -632,6 +632,7 @@ static void ucfg_scan_req_update_concurrency_params(
 		go_peer_count =
 		wlan_util_get_peer_count_for_mode(pdev, QDF_P2P_GO_MODE);
 	if (policy_mgr_get_connection_count(psoc)) {
+		scm_debug("update dwell time with concurrency dwell time");
 		if (req->scan_req.scan_f_passive)
 			req->scan_req.dwell_time_passive =
 				scan_obj->scan_def.conc_passive_dwell;
@@ -1284,11 +1285,10 @@ ucfg_scan_cancel_sync(struct scan_cancel_request *req)
 		return QDF_STATUS_E_NULL_VALUE;
 	}
 
-	if (req->cancel_req.req_type ==
-	   WLAN_SCAN_CANCEL_PDEV_ALL)
+	if (req->cancel_req.req_type == WLAN_SCAN_CANCEL_PDEV_ALL)
 		cancel_pdev = true;
-	else if (req->cancel_req.req_type ==
-	   WLAN_SCAN_CANCEL_VDEV_ALL)
+	else if (req->cancel_req.req_type == WLAN_SCAN_CANCEL_VDEV_ALL ||
+		 req->cancel_req.req_type == WLAN_SCAN_CANCEL_HOST_VDEV_ALL)
 		cancel_vdev = true;
 
 	vdev = req->vdev;
@@ -2530,4 +2530,84 @@ ucfg_scan_get_global_config(struct wlan_objmgr_psoc *psoc,
 uint32_t ucfg_scan_get_max_cmd_allowed(void)
 {
 	return MAX_SCAN_COMMANDS;
+}
+
+qdf_time_t ucfg_scan_get_aging_time(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return SCAN_CACHE_AGING_TIME;
+
+	return scan_obj->scan_def.scan_cache_aging_time;
+}
+
+void ucfg_scan_cfg_set_passive_dwelltime(struct wlan_objmgr_psoc *psoc,
+					 uint32_t dwell_time)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return;
+	scan_obj->scan_def.passive_dwell = dwell_time;
+}
+
+void ucfg_scan_cfg_set_active_dwelltime(struct wlan_objmgr_psoc *psoc,
+					uint32_t dwell_time)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return;
+	scan_obj->scan_def.active_dwell = dwell_time;
+}
+
+void ucfg_scan_cfg_set_conc_active_dwelltime(struct wlan_objmgr_psoc *psoc,
+					     uint32_t dwell_time)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return;
+
+	scan_obj->scan_def.conc_active_dwell = dwell_time;
+}
+
+void ucfg_scan_cfg_set_conc_passive_dwelltime(struct wlan_objmgr_psoc *psoc,
+					      uint32_t dwell_time)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return;
+
+	scan_obj->scan_def.conc_passive_dwell = dwell_time;
+}
+
+void ucfg_scan_cfg_get_active_2g_dwelltime(struct wlan_objmgr_psoc *psoc,
+					   uint32_t *dwell_time)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return;
+
+	*dwell_time = scan_obj->scan_def.active_dwell_2g;
+}
+
+void ucfg_scan_cfg_set_active_2g_dwelltime(struct wlan_objmgr_psoc *psoc,
+					   uint32_t dwell_time)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj)
+		return;
+	scan_obj->scan_def.active_dwell_2g = dwell_time;
 }
