@@ -172,6 +172,10 @@ struct wma_txrx_node *wma_get_interface_by_vdev_id(uint8_t vdev_id);
 QDF_STATUS wma_get_connection_info(uint8_t vdev_id,
 		struct policy_mgr_vdev_entry_info *conn_table_entry);
 
+#ifdef WLAN_FEATURE_PKT_CAPTURE
+int wma_get_rmf_status(uint8_t vdev_id);
+#endif
+
 bool wma_is_vdev_up(uint8_t vdev_id);
 
 void *wma_get_beacon_buffer_by_vdev_id(uint8_t vdev_id, uint32_t *buffer_size);
@@ -411,4 +415,12 @@ void wma_wmi_stop(void);
  */
 uint8_t wma_get_mcs_idx(uint16_t max_rate, uint8_t rate_flags,
 			uint8_t *nss, uint8_t *mcs_rate_flag);
+
+/**
+ * wma_get_vdev_chan_roam_enabled() -get roam enabled vdev channel.
+ * @wma_handle:	pointer to wma handle.
+ *
+ * Return: roam enabled vdev channel
+ */
+uint8_t wma_get_vdev_chan_roam_enabled(WMA_HANDLE wma_handle);
 #endif

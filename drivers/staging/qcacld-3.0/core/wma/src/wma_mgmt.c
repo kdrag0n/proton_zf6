@@ -1911,8 +1911,14 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 			key_params->vdev_id);
 		return QDF_STATUS_E_INVAL;
 	}
+
 	if (key_params->vdev_id >= wma_handle->max_bssid) {
 		WMA_LOGE(FL("Invalid vdev_id: %d"), key_params->vdev_id);
+		return QDF_STATUS_E_INVAL;
+	}
+
+	if (!wma_is_vdev_up(key_params->vdev_id)) {
+		WMA_LOGE(FL("vdev : %d not up"), key_params->vdev_id);
 		return QDF_STATUS_E_INVAL;
 	}
 
@@ -3261,8 +3267,8 @@ int wma_mgmt_tx_completion_handler(void *handle, uint8_t *cmpl_event_params,
 	}
 	cmpl_params = param_buf->fixed_param;
 
-	if (ucfg_pkt_capture_get_pktcap_mode() &
-	    PKT_CAPTURE_MODE_MGMT_ONLY) {
+	if ((ucfg_pkt_capture_get_pktcap_mode() &
+	    PKT_CAPTURE_MODE_MGMT_ONLY) && param_buf->mgmt_hdr) {
 		struct mgmt_offload_event_params params = {0};
 
 		wma_extract_mgmt_offload_event_params(
@@ -3336,8 +3342,8 @@ int wma_mgmt_tx_bundle_completion_handler(void *handle, uint8_t *buf,
 	}
 
 	for (i = 0; i < num_reports; i++) {
-		if (ucfg_pkt_capture_get_pktcap_mode() &
-		    PKT_CAPTURE_MODE_MGMT_ONLY) {
+		if ((ucfg_pkt_capture_get_pktcap_mode() &
+		    PKT_CAPTURE_MODE_MGMT_ONLY) && param_buf->mgmt_hdr) {
 			struct mgmt_offload_event_params params = {0};
 
 			wma_extract_mgmt_offload_event_params(

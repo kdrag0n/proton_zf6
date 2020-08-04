@@ -359,6 +359,7 @@ typedef struct tagCsrScanResultFilter {
 	bool realm_check;
 	uint8_t fils_realm[2];
 	bool force_rsne_override;
+	qdf_time_t age_threshold;
 } tCsrScanResultFilter;
 
 typedef struct sCsrChnPower_ {
@@ -817,6 +818,7 @@ struct csr_roam_profile {
 	eCsrRoamBssType BSSType;
 	tCsrAuthList AuthType;
 	eCsrAuthType negotiatedAuthType;
+	tCsrAuthList akm_list;
 	tCsrEncryptionList EncryptionType;
 	/* This field is for output only, not for input */
 	eCsrEncryptionType negotiatedUCEncryptionType;
@@ -932,6 +934,7 @@ typedef struct tagCsrRoamConnectedProfile {
 	eCsrRoamBssType BSSType;
 	eCsrAuthType AuthType;
 	tCsrAuthList AuthInfo;
+	tCsrAuthList akm_list;
 	eCsrEncryptionType EncryptionType;
 	tCsrEncryptionList EncryptionInfo;
 	eCsrEncryptionType mcEncryptionType;
@@ -1215,6 +1218,7 @@ typedef struct tagCsrConfigParam {
 	uint32_t roam_preauth_retry_count;
 	uint32_t roam_preauth_no_ack_timeout;
 	bool isRoamOffloadEnabled;
+	uint32_t roam_triggers;
 	bool enable_disconnect_roam_offload;
 	bool enable_idle_roam;
 	uint32_t idle_roam_rssi_delta;
@@ -1345,8 +1349,12 @@ typedef struct tagCsrConfigParam {
 #ifdef WLAN_ADAPTIVE_11R
 	bool enable_adaptive_11r;
 #endif
+#if defined(WLAN_SAE_SINGLE_PMK) && defined(WLAN_FEATURE_ROAM_OFFLOAD)
+	bool sae_single_pmk_feature_enabled;
+#endif
 	bool enable_pending_list_req;
 	bool disable_4way_hs_offload;
+	uint32_t sta_disable_roam;
 } tCsrConfigParam;
 
 /* Tush */
@@ -1506,6 +1514,7 @@ struct csr_roam_info {
 #endif
 	uint16_t roam_reason;
 	struct wlan_ies *disconnect_ies;
+	tSirSmeAssocInd *owe_pending_assoc_ind;
 };
 
 typedef struct tagCsrFreqScanInfo {
@@ -1789,6 +1798,9 @@ typedef QDF_STATUS (*csr_session_close_cb)(uint8_t session_id);
 #define CSR_IS_FW_FT_FILS_SUPPORTED(fw_akm_bitmap) \
 	(((fw_akm_bitmap) & (1 << AKM_FT_FILS))  ? true : false)
 
+#define CSR_IS_FW_SUITEB_ROAM_SUPPORTED(fw_akm_bitmap) \
+	(((fw_akm_bitmap) & (1 << AKM_SUITEB))  ? true : false)
+
 QDF_STATUS csr_set_channels(tpAniSirGlobal pMac, tCsrConfigParam *pParam);
 
 /* enum to string conversion for debug output */
@@ -1884,4 +1896,14 @@ csr_update_pmf_cap_from_connected_profile(tCsrRoamConnectedProfile *profile,
 					  struct scan_filter *filter)
 {}
 #endif
+
+/**
+ * csr_update_owe_info() - Update OWE info
+ * @mac: mac context
+ * @assoc_ind: assoc ind
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS csr_update_owe_info(tpAniSirGlobal mac,
+			       tSirSmeAssocInd *assoc_ind);
 #endif

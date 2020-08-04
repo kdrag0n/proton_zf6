@@ -50,6 +50,9 @@ typedef struct sAniSirGlobal *tpAniSirGlobal;
 #include <dot11f.h>
 #include "wlan_policy_mgr_api.h"
 
+#define LFR3_STA_ROAM_DISABLE_BY_P2P BIT(0)
+#define LFR3_STA_ROAM_DISABLE_BY_NAN BIT(1)
+
 #define SIR_MAX_SUPPORTED_BSS 5
 
 #define OFFSET_OF(structType, fldName)   (&((structType *)0)->fldName)
@@ -139,7 +142,7 @@ typedef uint8_t tSirVersionString[SIR_VERSION_STRING_LEN];
 /* Roam debugging related macro defines */
 #define MAX_ROAM_DEBUG_BUF_SIZE    250
 #define MAX_ROAM_EVENTS_SUPPORTED  5
-#define ROAM_FAILURE_BUF_SIZE      40
+#define ROAM_FAILURE_BUF_SIZE      60
 #define TIME_STRING_LEN            24
 
 #define ROAM_CHANNEL_BUF_SIZE      300
@@ -168,6 +171,7 @@ struct mlme_roam_debug_info {
 #define AKM_FT_FILS          2
 #define AKM_SAE              3
 #define AKM_OWE              4
+#define AKM_SUITEB           5
 
 /**
  * enum sir_roam_op_code - Operation to be done by the callback.
@@ -177,6 +181,7 @@ struct mlme_roam_debug_info {
  * @SIR_ROAMING_ABORT: Firmware aborted roaming operation, still connected.
  * @SIR_ROAM_SYNCH_COMPLETE: Roam sync propagation is complete.
  * @SIR_ROAMING_INVOKE_FAIL: Firmware roaming failed.
+ * @SIR_ROAMING_DEAUTH: Firmware indicates deauth.
  */
 enum sir_roam_op_code {
 	SIR_ROAM_SYNCH_PROPAGATION = 1,
@@ -186,6 +191,7 @@ enum sir_roam_op_code {
 	SIR_ROAM_SYNCH_COMPLETE,
 	SIR_ROAM_SYNCH_NAPI_OFF,
 	SIR_ROAMING_INVOKE_FAIL,
+	SIR_ROAMING_DEAUTH,
 };
 /**
  * Module ID definitions.
@@ -764,6 +770,9 @@ struct fils_ind_elements {
 };
 #endif
 
+/* struct bss_description: bss information as per beacon/probe resp
+ * @sae_single_pmk_ap: flag to check if AP supports sae roaming with single pmk
+ */
 struct bss_description {
 	/* offset of the ieFields from bssId. */
 	uint16_t length;
@@ -805,6 +814,11 @@ struct bss_description {
 	uint8_t reservedPadding4;
 	uint32_t tsf_delta;
 	uint32_t adaptive_11r_ap;
+	uint32_t mbo_oce_enabled_ap;
+#if defined(WLAN_SAE_SINGLE_PMK) && defined(WLAN_FEATURE_ROAM_OFFLOAD)
+	bool sae_single_pmk_ap;
+#endif
+
 #ifdef WLAN_FEATURE_FILS_SK
 	struct fils_ind_elements fils_info_element;
 #endif
@@ -1272,6 +1286,7 @@ typedef struct sSirSmeAssocInd {
 	tSirMacAddr bssId;      /* Self BSSID */
 	uint16_t staId;         /* Station ID for peer */
 	tAniAuthType authType;
+	enum ani_akm_type akm_type;
 	tAniSSID ssId;          /* SSID used by STA to associate */
 	tSirWAPIie wapiIE;      /* WAPI IE received from peer */
 	tSirRSNie rsnIE;        /* RSN IE received from peer */
@@ -1313,7 +1328,21 @@ typedef struct sSirSmeAssocInd {
 	tDot11fIEVHTCaps VHTCaps;
 	bool he_caps_present;
 	tSirMacCapabilityInfo capability_info;
+	bool is_sae_authenticated;
+	const uint8_t *owe_ie;
+	uint32_t owe_ie_len;
+	uint16_t owe_status;
 } tSirSmeAssocInd, *tpSirSmeAssocInd;
+
+/**
+ * struct owe_assoc_ind - owe association indication
+ * @node : List entry element
+ * @assoc_ind: pointer to assoc ind
+ */
+struct owe_assoc_ind {
+	qdf_list_node_t node;
+	tSirSmeAssocInd *assoc_ind;
+};
 
 /* / Definition for Association confirm */
 /* / ---> MAC */
@@ -1326,6 +1355,9 @@ typedef struct sSirSmeAssocCnf {
 	uint16_t aid;
 	struct qdf_mac_addr alternate_bssid;
 	uint8_t alternateChannelId;
+	tSirMacStatusCodes mac_status_code;
+	uint8_t *owe_ie;
+	uint32_t owe_ie_len;
 } tSirSmeAssocCnf, *tpSirSmeAssocCnf;
 
 /* / Enum definition for  Wireless medium status change codes */
@@ -2577,12 +2609,24 @@ typedef struct sSirKeepAliveReq {
 	uint8_t sessionId;
 } tSirKeepAliveReq, *tpSirKeepAliveReq;
 
+/**
+ * enum rxmgmt_flags - flags for received management frame.
+ * @RXMGMT_FLAG_NONE: Default value to indicate no flags are set.
+ * @RXMGMT_FLAG_EXTERNAL_AUTH: frame can be used for external authentication
+ *			       by upper layers.
+ */
+enum rxmgmt_flags {
+	RXMGMT_FLAG_NONE,
+	RXMGMT_FLAG_EXTERNAL_AUTH = 1 << 1,
+};
+
 typedef struct sSirSmeMgmtFrameInd {
 	uint16_t frame_len;
 	uint32_t rxChan;
 	uint8_t sessionId;
 	uint8_t frameType;
 	int8_t rxRssi;
+	enum rxmgmt_flags rx_flags;
 	uint8_t frameBuf[1];    /* variable */
 } tSirSmeMgmtFrameInd, *tpSirSmeMgmtFrameInd;
 
@@ -3013,6 +3057,7 @@ typedef struct sSirRoamOffloadScanReq {
 	uint8_t RoamBeaconRssiWeight;
 	eSirDFSRoamScanMode allowDFSChannelRoam;
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
+	struct roam_triggers roam_triggers;
 	uint8_t RoamOffloadEnabled;
 	uint8_t PSK_PMK[SIR_ROAM_SCAN_PSK_SIZE];
 	uint32_t pmk_len;
@@ -3029,6 +3074,7 @@ typedef struct sSirRoamOffloadScanReq {
 	struct pmkid_mode_bits pmkid_modes;
 	uint32_t roam_preauth_retry_count;
 	uint32_t roam_preauth_no_ack_timeout;
+	bool is_sae_single_pmk;
 
 	/* Idle/Disconnect roam parameters */
 	struct wmi_idle_roam_params idle_roam_params;
@@ -7276,12 +7322,14 @@ struct sir_sae_info {
  * @length: message length
  * @session_id: SME session id
  * @sae_status: SAE status, 0: Success, Non-zero: Failure.
+ * @peer_mac_addr: peer MAC address
  */
 struct sir_sae_msg {
 	uint16_t message_type;
 	uint16_t length;
 	uint16_t session_id;
 	uint8_t sae_status;
+	tSirMacAddr peer_mac_addr;
 };
 
 /**
@@ -7305,4 +7353,12 @@ struct sir_get_mws_coex_info {
 	uint32_t cmd_id;
 };
 #endif /* WLAN_MWS_INFO_DEBUGFS */
+
+/**
+ * struct sir_gen_req - Generic request to carry vdev id
+ * @vdev_id: vdev id
+ */
+struct sir_gen_req {
+	uint32_t vdev_id;
+};
 #endif /* __SIR_API_H */

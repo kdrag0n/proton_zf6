@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -80,6 +80,10 @@
 #include <htt_internal.h>
 #include <ol_txrx_ipa.h>
 #include "wlan_roam_debug.h"
+#ifdef DP_SUPPORT_RECOVERY_NOTIFY
+#include <qdf_notifier.h>
+#include <qdf_hang_event_notifier.h>
+#endif
 
 #define DPT_DEBUGFS_PERMS	(QDF_FILE_USR_READ |	\
 				QDF_FILE_USR_WRITE |	\
@@ -125,6 +129,78 @@ extern void ol_txrx_get_pn_info(void *ppeer, uint8_t **last_pn_valid,
 
 /* thresh for peer's cached buf queue beyond which the elements are dropped */
 #define OL_TXRX_CACHED_BUFQ_THRESH 128
+
+#ifdef DP_SUPPORT_RECOVERY_NOTIFY
+static
+int ol_peer_recovery_notifier_cb(struct notifier_block *block,
+				 unsigned long state, void *data)
+{
+	struct qdf_notifer_data *notif_data = data;
+	qdf_notif_block *notif_block;
+	struct ol_txrx_peer_t *peer;
+	struct peer_hang_data hang_data;
+	enum peer_debug_id_type dbg_id;
+
+	if (!data || !block)
+		return -EINVAL;
+
+	notif_block = qdf_container_of(block, qdf_notif_block, notif_block);
+
+	peer = notif_block->priv_data;
+	if (!peer)
+		return -EINVAL;
+
+	if (notif_data->offset >= QDF_WLAN_MAX_HOST_OFFSET)
+		return NOTIFY_STOP_MASK;
+
+	QDF_HANG_EVT_SET_HDR(&hang_data.tlv_header,
+			     HANG_EVT_TAG_DP_PEER_INFO,
+			     QDF_HANG_GET_STRUCT_TLVLEN(struct peer_hang_data));
+
+	qdf_mem_copy(&hang_data.peer_mac_addr, &peer->mac_addr.raw,
+		     QDF_MAC_ADDR_SIZE);
+
+	for (dbg_id = 0; dbg_id < PEER_DEBUG_ID_MAX; dbg_id++)
+		if (qdf_atomic_read(&peer->access_list[dbg_id]))
+			hang_data.peer_timeout_bitmask |= (1 << dbg_id);
+
+	qdf_mem_copy(notif_data->hang_data + notif_data->offset,
+		     &hang_data, sizeof(struct peer_hang_data));
+	notif_data->offset += sizeof(struct peer_hang_data);
+
+	return 0;
+}
+
+static qdf_notif_block ol_peer_recovery_notifier = {
+	.notif_block.notifier_call = ol_peer_recovery_notifier_cb,
+};
+
+static
+QDF_STATUS ol_register_peer_recovery_notifier(struct ol_txrx_peer_t *peer)
+{
+	ol_peer_recovery_notifier.priv_data = peer;
+
+	return qdf_hang_event_register_notifier(&ol_peer_recovery_notifier);
+}
+
+static
+QDF_STATUS ol_unregister_peer_recovery_notifier(void)
+{
+	return qdf_hang_event_unregister_notifier(&ol_peer_recovery_notifier);
+}
+#else
+static inline
+QDF_STATUS ol_register_peer_recovery_notifier(struct ol_txrx_peer_t *peer)
+{
+	return QDF_STATUS_SUCCESS;
+}
+
+static
+QDF_STATUS ol_unregister_peer_recovery_notifier(void)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif
 
 #if defined(CONFIG_HL_SUPPORT) && defined(FEATURE_WLAN_TDLS)
 
@@ -2389,6 +2465,7 @@ static void ol_txrx_pdev_detach(struct cdp_pdev *ppdev, int force)
 	ol_txrx_pdev_grp_stat_destroy(pdev);
 
 	ol_txrx_debugfs_exit(pdev);
+	ol_unregister_peer_recovery_notifier();
 
 	qdf_mem_free(pdev);
 }
@@ -3078,8 +3155,7 @@ ol_txrx_peer_attach(struct cdp_vdev *pvdev, uint8_t *peer_mac_addr)
 #ifdef QCA_SUPPORT_PEER_DATA_RX_RSSI
 	peer->rssi_dbm = HTT_RSSI_INVALID;
 #endif
-	if ((QDF_GLOBAL_MONITOR_MODE == cds_get_conparam()) &&
-	    !pdev->self_peer) {
+	if (QDF_GLOBAL_MONITOR_MODE == cds_get_conparam()) {
 		pdev->self_peer = peer;
 		/*
 		 * No Tx in monitor mode, otherwise results in target assert.
@@ -3685,6 +3761,22 @@ static inline void ol_txrx_peer_free_tids(ol_txrx_peer_handle peer)
 }
 
 /**
+ * ol_txrx_peer_drop_pending_frames() - drop pending frames in the RX queue
+ * @peer: peer handle
+ *
+ * Drop pending packets pertaining to the peer from the RX thread queue.
+ *
+ * Return: None
+ */
+static void ol_txrx_peer_drop_pending_frames(struct ol_txrx_peer_t *peer)
+{
+	p_cds_sched_context sched_ctx = get_cds_sched_ctxt();
+
+	if (sched_ctx)
+		cds_drop_rxpkt_by_staid(sched_ctx, peer->local_id);
+}
+
+/**
  * ol_txrx_peer_release_ref() - release peer reference
  * @peer: peer handle
  *
@@ -3786,6 +3878,10 @@ int ol_txrx_peer_release_ref(ol_txrx_peer_handle peer,
 				    &peer->mac_addr.raw, peer, 0,
 				    qdf_atomic_read(&peer->ref_cnt));
 		peer_id = peer->local_id;
+
+		/* Drop all pending frames in the rx thread queue */
+		ol_txrx_peer_drop_pending_frames(peer);
+
 		/* remove the reference to the peer from the hash table */
 		ol_txrx_peer_find_hash_remove(pdev, peer);
 
@@ -3984,6 +4080,7 @@ void peer_unmap_timer_handler(void *data)
 		    peer->mac_addr.raw[0], peer->mac_addr.raw[1],
 		    peer->mac_addr.raw[2], peer->mac_addr.raw[3],
 		    peer->mac_addr.raw[4], peer->mac_addr.raw[5]);
+	ol_register_peer_recovery_notifier(peer);
 
 	cds_trigger_recovery(QDF_PEER_UNMAP_TIMEDOUT);
 }
@@ -6665,6 +6762,35 @@ static struct cdp_raw_ops ol_ops_raw = {
 	/* EMPTY FOR MCL */
 };
 
+#ifdef WLAN_FEATURE_PKT_CAPTURE
+/**
+ * ol_txrx_pktcapture_record_channel() - Update Channel Information
+ * for packet capture mode
+ * @soc: pointer to cdp_soc_t
+ * @pdev_id: pdev id
+ * @mon_ch: channel
+ *
+ * Return: None
+ */
+static void
+ol_txrx_pktcapture_record_channel(struct cdp_soc_t *soc,
+				  uint8_t pdev_id, int mon_ch)
+{
+	struct ol_txrx_pdev_t *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+
+	if (!pdev) {
+		qdf_print("%s: pdev is NULL\n", __func__);
+		return;
+	}
+
+	htt_rx_mon_note_capture_channel(pdev->htt_pdev, mon_ch);
+}
+
+static struct cdp_pktcapture_ops ol_ops_pkt_capture = {
+	.txrx_pktcapture_record_channel = ol_txrx_pktcapture_record_channel,
+};
+#endif /* #ifdef WLAN_FEATURE_PKT_CAPTURE */
+
 static struct cdp_ops ol_txrx_ops = {
 	.cmn_drv_ops = &ol_ops_cmn,
 	.ctrl_ops = &ol_ops_ctrl,
@@ -6689,7 +6815,10 @@ static struct cdp_ops ol_txrx_ops = {
 	.throttle_ops = &ol_ops_throttle,
 	.mob_stats_ops = &ol_ops_mob_stats,
 	.delay_ops = &ol_ops_delay,
-	.pmf_ops = &ol_ops_pmf
+	.pmf_ops = &ol_ops_pmf,
+#ifdef WLAN_FEATURE_PKT_CAPTURE
+	.pktcapture_ops = &ol_ops_pkt_capture,
+#endif
 };
 
 /*

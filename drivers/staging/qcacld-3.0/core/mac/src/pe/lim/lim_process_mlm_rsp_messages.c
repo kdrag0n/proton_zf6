@@ -42,6 +42,7 @@
 #include "wlan_policy_mgr_api.h"
 #include "nan_datapath.h"
 #include "wlan_reg_services_api.h"
+#include "wlan_pkt_capture_ucfg_api.h"
 
 #define MAX_SUPPORTED_PEERS_WEP 16
 
@@ -711,6 +712,8 @@ lim_fill_assoc_ind_params(tpAniSirGlobal mac_ctx,
 		sizeof(tSirMacAddr));
 	/* Fill in authType */
 	sme_assoc_ind->authType = assoc_ind->authType;
+	/* Fill in rsn_akm_type */
+	sme_assoc_ind->akm_type = assoc_ind->akm_type;
 	/* Fill in ssId */
 	qdf_mem_copy((uint8_t *) &sme_assoc_ind->ssId,
 		(uint8_t *) &(assoc_ind->ssId), assoc_ind->ssId.length + 1);
@@ -767,6 +770,7 @@ lim_fill_assoc_ind_params(tpAniSirGlobal mac_ctx,
 		sme_assoc_ind->VHTCaps = assoc_ind->vht_caps;
 	sme_assoc_ind->capability_info = assoc_ind->capabilityInfo;
 	sme_assoc_ind->he_caps_present = assoc_ind->he_caps_present;
+	sme_assoc_ind->is_sae_authenticated = assoc_ind->is_sae_authenticated;
 }
 
 /**
@@ -3159,6 +3163,9 @@ void lim_process_switch_channel_rsp(tpAniSirGlobal pMac, void *body)
 			pe_debug("Send p2p operating channel change conf action frame once first beacon is received on new channel");
 			psessionEntry->send_p2p_conf_frame = true;
 		}
+
+		if (ucfg_pkt_capture_get_pktcap_mode())
+			ucfg_pkt_capture_record_channel();
 		break;
 	case LIM_SWITCH_CHANNEL_SAP_DFS:
 	{
