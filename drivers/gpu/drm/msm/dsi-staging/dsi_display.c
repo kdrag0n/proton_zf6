@@ -92,7 +92,7 @@ char asus_lcd_cabc_mode[2] = {0x55, 0};
 int  asus_lcd_cabc_user_req_mode = 0;
 bool asus_lcd_cabc_locked_off = false;
 
-int asus_lcd_dimming_on = 1; //default resume with dimming
+int asus_lcd_dimming_on = 0; //default resume with dimming
 int asus_lcd_dimming_conf = 4;
 bool asus_lcd_procfs_registered = false;
 
