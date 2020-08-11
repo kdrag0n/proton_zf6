@@ -106,7 +106,7 @@ struct sde_plane {
 	struct mutex lock;
 
 	enum sde_sspp pipe;
-	unsigned long features;      /* capabilities from catalog */
+	uint32_t features;      /* capabilities from catalog */
 	uint32_t nformats;
 	uint32_t formats[64];
 
