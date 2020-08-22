@@ -32,31 +32,7 @@ dtbo-$(CONFIG_ARCH_SM8150) += ZS630KL-MP-overlay.dtbo
 
 ZS630KL-MP-overlay.dtbo-base := sm8150-v2.dtb
 else
-dtb-$(CONFIG_ARCH_SM8150)	+= sm8150-rumi.dtb \
-	sm8150-mtp.dtb \
-	sm8150-cdp.dtb \
-	sm8150-qrd.dtb \
-	sa8155-adp-star.dtb \
-	sa8155p-adp-star.dtb \
-	sa8155-v2-adp-star.dtb \
-	sa8155p-v2-adp-star.dtb \
-	sa8155-v2-adp-air.dtb \
-	sa8155p-v2-adp-air.dtb \
-	sa8155-adp-alcor.dtb \
-	sa8155p-adp-alcor.dtb \
-	sm8150-v2-rumi.dtb \
-	sm8150-v2-mtp.dtb \
-	sm8150-v2-cdp.dtb \
-	sm8150-v2-qrd.dtb \
-	sm8150-v2-qrd-dvt.dtb \
-	sm8150p-mtp.dtb \
-	sm8150p-cdp.dtb \
-	sm8150p-qrd.dtb \
-	sm8150p-v2-mtp.dtb \
-	sm8150p-v2-cdp.dtb \
-	sm8150p-v2-qrd.dtb \
-	sm8150-hdk.dtb \
-	sm8150p-hdk.dtb
+dtb-$(CONFIG_ARCH_SM8150) += ZS630KL-MP.dtb
 endif
 
 dtb-$(CONFIG_QTI_GVM) += sa8155-vm.dtb \
