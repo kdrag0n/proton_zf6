@@ -1,0 +1,216 @@
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/clock/qcom,gcc-sm8150.h>
+#include <dt-bindings/clock/qcom,camcc-sm8150.h>
+#include <dt-bindings/clock/qcom,rpmh.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+#include "sm8150-v2.dtsi"
+#include "sm8150-cdp.dtsi"
+#include "sm8150-cdp-audio-overlay.dtsi"
+
+/ {
+	model = "KIRIN MP";
+	compatible = "qcom,sm8150-cdp", "qcom,sm8150", "qcom,cdp";
+	qcom,pmic-name = "PM8150";
+	qcom,board-id = <50 0>;
+};
+
+/*
+ * EVB
+ */
+&dsi_auo_2k_vid_display {
+	qcom,dsi-display-active;
+};
+
+&dsi_boe_2k_vid_display {
+	qcom,dsi-display-active;
+};
+
+/*
+ * EVB3
+ */
+&dsi_auo_2k_vid {
+	qcom,platform-reset-gpio = <&tlmm 53 0>;
+};
+
+&dsi_boe_2k_vid {
+	qcom,platform-reset-gpio = <&tlmm 53 0>;
+};
+
+&sde_dsi_active {
+         mux {
+                pins = "gpio53";
+         };
+
+         config {
+                pins = "gpio53";
+         };
+};
+
+&sde_dsi_suspend {
+         mux {
+                pins = "gpio53";
+         };
+
+         config {
+                pins = "gpio53";
+         };
+};
+
+&qupv3_se1_i2c {
+        status = "ok";
+                vcnl36863@60 {
+			compatible = "qcom,vcnl36863";
+			reg = <0x60>;
+			pinctrl-names = "alsps_gpio_high","alsps_gpio_low";
+			pinctrl-0 = <&vcnl36863_default>;
+			pinctrl-1 = <&vcnl36863_sleep>;
+			qcom,alsps-gpio = <&tlmm 119 0x0>;
+			qcom,alsps-enable-gpio = <&tlmm 36 0x0>;
+			vcc_psensor-supply = <&pm8150l_l7>;
+			vcc_alsps_i2c-supply = <&pm8150l_l8>;
+		};
+
+        MSP430FR2311@48 {
+			compatible = "MCU,MSP430FR2311";
+			reg = <0x48>;
+			vcc_l8c_1p8-supply = <&pm8150l_l8>;
+			vcc_s4a_1p8-supply = <&pm8150_s4>;
+			pinctrl-names = "mcu_active", "mcu_suspend";
+			pinctrl-0 = <&mcu_pin_active &mcu_pin_test_enable &mcu5V_boost_pin_enable &mcu_pin_wakeup_enable>;
+			pinctrl-1 = <&mcu_pin_suspend &mcu_pin_test_disable &mcu5V_boost_pin_disable &mcu_pin_wakeup_disable>;
+			gpios = <&tlmm 6 0>,<&tlmm 35 0>, <&tlmm 79 0>, <&tlmm 10 0>;
+
+			MCU,mcureset-gpios = <&tlmm 6 0x00>;
+			MCU,mcutest-gpios = <&tlmm 35 0x00>;
+			MCU,mcu5V_boost_enable-gpios = <&tlmm 79 0x00>;
+			MCU,mcuwakeup-gpios = <&tlmm 10 0x00>;
+			MCU,slave_address = <0x48>;
+        };
+
+};
+
+/*
+ * SR
+ */
+&qupv3_se9_i2c {
+	status = "ok";
+	nq@28 {
+		compatible = "qcom,nq-nci";
+		reg = <0x29>;
+		qcom,nq-irq = <&tlmm 47 0x00>;
+		qcom,nq-ven = <&tlmm 41 0x00>;
+		qcom,nq-firm = <&tlmm 48 0x00>;
+		qcom,nq-clkreq = <&tlmm 113 0x00>;
+		qcom,nq-esepwr = <&tlmm 90 0x00>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <47 0>;
+		interrupt-names = "nfc_irq";
+		pinctrl-names = "nfc_active", "nfc_suspend";
+		pinctrl-0 = <&nfc_int_active &nfc_enable_active
+					&nfc_clk_req_active>;
+		pinctrl-1 = <&nfc_int_suspend &nfc_enable_suspend
+					&nfc_clk_req_suspend>;
+	};
+};
+
+/*
+ * PR2
+ */
+&cam_cci0 {
+	qcom,cam-sensor@0 {
+		cell-index = <0>;
+		compatible = "qcom,cam-sensor";
+		reg = <0x0>;
+		csiphy-sd-index = <0>;
+		sensor-position-roll = <90>;
+		sensor-position-pitch = <0>;
+		sensor-position-yaw = <180>;
+		led-flash-src = <&led_flash_rear>;
+		actuator-src = <&actuator_rear1>;
+		eeprom-src = <&eeprom_rear0>;
+		cam_vio-supply = <&pm8150l_l1>;
+		cam_vana-supply = <&camera_rear0_vana_ldo>;
+		cam_vdig-supply = <&cam_dvdd_w_f_1p2>;
+		cam_vaf-supply = <&camera_vcm_en_ldo>;
+		cam_v_custom1-supply = <&pm8150l_l7>;
+		cam_clk-supply = <&titan_top_gdsc>;
+		regulator-names = "cam_vio", "cam_vana", "cam_vdig", "cam_vaf", "cam_v_custom1", "cam_clk";
+		rgltr-cntrl-support;
+		rgltr-min-voltage = <1800000 2800000 1200000 2800000 3000000 0>;
+		rgltr-max-voltage = <1800000 2800000 1200000 2800000 3000000 0>;
+		rgltr-load-current = <0 80000 1200000 0 0 0>;
+		gpio-no-mux = <0>;
+		pinctrl-names = "cam_default", "cam_suspend";
+		pinctrl-0 = <&cam_sensor_mclk0_active>;
+		pinctrl-1 = <&cam_sensor_mclk0_suspend>;
+		gpios = <&tlmm 13 0>,
+			<&tlmm 28 0>;
+		gpio-reset = <1>;
+		gpio-req-tbl-num = <0 1>;
+		gpio-req-tbl-flags = <1 0>;
+		gpio-req-tbl-label = "CAMIF_MCLK0",
+					"CAM_RESET0";
+		sensor-mode = <0>;
+		cci-master = <0>;
+		status = "ok";
+		clocks = <&clock_camcc CAM_CC_MCLK0_CLK>;
+		clock-names = "cam_clk";
+		clock-cntl-level = "turbo";
+		clock-rates = <19200000>;
+	};
+	qcom,cam-sensor@1 {
+		cell-index = <1>;
+		compatible = "qcom,cam-sensor";
+		reg = <0x1>;
+		csiphy-sd-index = <0>;
+		sensor-position-roll = <270>;
+		sensor-position-pitch = <0>;
+		sensor-position-yaw = <0>;
+		led-flash-src = <&led_flash_front>;
+		actuator-src = <&actuator_rear1>;
+		eeprom-src = <&eeprom_rear1>;
+		cam_vio-supply = <&pm8150l_l1>;
+		cam_vana-supply = <&camera_rear0_vana_ldo>;
+		cam_vdig-supply = <&cam_dvdd_w_f_1p2>;
+		cam_vaf-supply = <&camera_vcm_en_ldo>;
+		cam_v_custom1-supply = <&pm8150l_l7>;
+		cam_clk-supply = <&titan_top_gdsc>;
+		regulator-names = "cam_vio", "cam_vana", "cam_vdig", "cam_vaf", "cam_v_custom1", "cam_clk";
+		rgltr-cntrl-support;
+		rgltr-min-voltage = <1800000 2800000 1200000 2800000 3000000 0>;
+		rgltr-max-voltage = <1800000 2800000 1200000 2800000 3000000 0>;
+		rgltr-load-current = <0 80000 1200000 0 0 0>;
+		gpio-no-mux = <0>;
+		pinctrl-names = "cam_default", "cam_suspend";
+		pinctrl-0 = <&cam_sensor_mclk0_active>;
+		pinctrl-1 = <&cam_sensor_mclk0_suspend>;
+		gpios = <&tlmm 13 0>,
+			<&tlmm 28 0>;
+		gpio-reset = <1>;
+		gpio-req-tbl-num = <0 1>;
+		gpio-req-tbl-flags = <1 0>;
+		gpio-req-tbl-label = "CAMIF_MCLK0",
+					"CAM_RESET0";
+		sensor-mode = <0>;
+		cci-master = <0>;
+		status = "ok";
+		clocks = <&clock_camcc CAM_CC_MCLK0_CLK>;
+		clock-names = "cam_clk";
+		clock-cntl-level = "turbo";
+		clock-rates = <19200000>;
+	};
+};
