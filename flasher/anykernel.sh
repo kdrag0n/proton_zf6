@@ -33,6 +33,18 @@ ramdisk_compression=auto;
 ## AnyKernel install
 split_boot;
 
+# Set display timing mode based on ZIP file name
+case "$ZIPFILE" in
+  *72fps*|*72hz*)
+    ui_print "  • Setting 72 Hz refresh rate"
+    patch_cmdline "msm_drm.timing_override" "msm_drm.timing_override=1"
+    ;;
+  *)
+    ui_print "  • Setting 60 Hz refresh rate"
+    patch_cmdline "msm_drm.timing_override" ""
+    ;;
+esac
+
 flash_boot;
 flash_dtbo;
 ## end install
