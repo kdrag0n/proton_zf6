@@ -263,13 +263,10 @@ static ssize_t vibrator_on_store(struct device *dev,
 	//struct qti_hap_chip *chip_dev = input_get_drvdata(qti_hap_chip *dev);
 	tmp = buf[0] - 48;
 
-	printk("[vibrator] %s \n",__func__);
 	if (tmp == 0) {
-		printk("[vibrator] %s : vibrator_off !!! \n",__func__);
 		rc = qti_haptics_playback(qti_data->input_dev, 0, 0);
 		rc =  qti_haptics_erase(qti_data->input_dev, 0);
 	} else if (tmp == 1) {
-		printk("[vibrator] %s : vibrator_on !!! \n",__func__);
 		rc = qti_haptics_playback(qti_data->input_dev, 0, 1);
 	}
 	return count;
@@ -311,7 +308,6 @@ static ssize_t qpnp_haptics_store_duration(struct device *dev,
 	s64 time_us;
 	s16 level;
 
-	printk("[vibrator] %s \n",__func__);
 	rc = kstrtouint(buf, 0, &val);
 	if (rc < 0)
 		return rc;
@@ -337,8 +333,6 @@ static ssize_t qpnp_haptics_store_duration(struct device *dev,
 	qti_data->config.play_rate_us = 4166;
 	tmp = level * qti_data->config.vmax_mv;
 	qti_data->play.vmax_mv = tmp / 0x7fff;
-	printk("[vibrator] %s :  length = %dus, vmax_mv=%d \n",__func__,
-		qti_data->play.length_us, qti_data->play.vmax_mv);
 
 	rc = qti_haptics_load_constant_waveform(qti_data);
 	if (rc < 0) {
@@ -347,7 +341,6 @@ static ssize_t qpnp_haptics_store_duration(struct device *dev,
 	}
 	mutex_unlock(&qti_data->param_lock);
 
-	printk("[vibrator] %s : vibrator_on !!! \n",__func__);
 	rc = qti_haptics_playback(qti_data->input_dev, 0, 1);
 	rc = qti_haptics_config_vmax(qti_data, qti_data->play.vmax_mv);
 
@@ -962,8 +955,6 @@ static inline void get_play_length(struct qti_hap_play_info *play,
 	struct qti_hap_effect *effect = play->effect;
 	int tmp;
 
-	printk("[vibrator] %s : pattern_length=%d, wf_s_repeat_n=%d, wf_repeat_n=%d, brake_pattern_length=%d\n",
-		__func__, effect->pattern_length, effect->wf_s_repeat_n, effect->wf_repeat_n, effect->brake_pattern_length);
 	tmp = effect->pattern_length * effect->play_rate_us;
 	tmp *= wf_s_repeat[effect->wf_s_repeat_n];
 	tmp *= wf_repeat[effect->wf_repeat_n];
@@ -1000,8 +991,6 @@ static int qti_haptics_upload_effect(struct input_dev *dev,
 		play->vmax_mv = tmp / 0x7fff;
 		dev_dbg(chip->dev, "upload constant effect, length = %dus, vmax_mv=%d\n",
 				play->length_us, play->vmax_mv);
-                printk("[vibrator] %s - FF_CONSTANT : time = %d us, level=%d(%d%%), vmax_mv=%d\n",
-				__func__, play->length_us, level, level*100/0x7fff, play->vmax_mv);
 		rc = qti_haptics_load_constant_waveform(chip);
 		if (rc < 0) {
 			dev_err(chip->dev, "Play constant waveform failed, rc=%d\n",
@@ -1040,8 +1029,6 @@ static int qti_haptics_upload_effect(struct input_dev *dev,
 
 		dev_dbg(chip->dev, "upload effect %d, vmax_mv=%d\n",
 				chip->predefined[i].id, play->vmax_mv);
-		printk("[vibrator] %s - FF_PERIODIC : effect=%d, level=%d(%d%%), vmax_mv=%d \n",
-				__func__, chip->predefined[i].id, level, level*100/0x7fff, play->vmax_mv);
 
 		rc = qti_haptics_load_predefined_effect(chip, i);
 		if (rc < 0) {
@@ -1051,7 +1038,6 @@ static int qti_haptics_upload_effect(struct input_dev *dev,
 		}
 
 		get_play_length(play, &play->length_us);
-		printk("[vibrator] %s - FF_PERIODIC : length = %dus\n", __func__, play->length_us);
 		data[CUSTOM_DATA_TIMEOUT_SEC_IDX] =
 			play->length_us / USEC_PER_SEC;
 		data[CUSTOM_DATA_TIMEOUT_MSEC_IDX] =
@@ -1191,7 +1177,6 @@ static int qti_haptics_hw_init(struct qti_hap_chip *chip)
 	u8 addr, val, mask;
 	int rc = 0;
 
-	printk("[vibrator] %s \n",__func__);
 	/* Config actuator type */
 	addr = REG_HAP_CFG1;
 	val = config->act_type;
@@ -1348,7 +1333,6 @@ static int qti_haptics_parse_dt(struct qti_hap_chip *chip)
 	const char *str;
 	int rc = 0, tmp, i = 0, j, m;
 
-	printk("[vibrator] %s \n",__func__);
 	rc = of_property_read_u32(node, "reg", &tmp);
 	if (rc < 0) {
 		dev_err(chip->dev, "Failed to reg base, rc=%d\n", rc);
@@ -2027,7 +2011,6 @@ static int qti_haptics_add_debugfs(struct qti_hap_chip *chip)
 	char str[12] = {0};
 	int i, rc = 0;
 
-	printk("[vibrator] %s start\n",__func__);
 	hap_dir = debugfs_create_dir("haptics", NULL);
 	if (!hap_dir) {
 		pr_err("create haptics debugfs directory failed\n");
@@ -2098,7 +2081,6 @@ static int qti_haptics_probe(struct platform_device *pdev)
 	struct ff_device *ff;
 	int rc = 0, effect_count_max, i;
 
-	printk("[vibrator] %s : start !!!\n",__func__);
 	chip = devm_kzalloc(&pdev->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
@@ -2201,14 +2183,12 @@ static int qti_haptics_probe(struct platform_device *pdev)
 			goto sysfs_fail;
 		}
 	}
-	printk("[vibrator] %s : create sysfs ok\n", __func__);
 
 //#ifdef CONFIG_DEBUG_FS
 	rc = qti_haptics_add_debugfs(chip);
 	if (rc < 0)
 		dev_dbg(chip->dev, "create debugfs failed, rc=%d\n", rc);
 //#endif
-	printk("[vibrator] %s : end !!!\n",__func__);
 	return 0;
 
 sysfs_fail:
