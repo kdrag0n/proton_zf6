@@ -2040,8 +2040,7 @@ static int qti_haptics_add_debugfs(struct qti_hap_chip *chip)
 	struct qti_hap_config *config = &chip->config;
 	struct dentry *file;
 
-		snprintf(str, ARRAY_SIZE(str), "constant", i);
-		effect_dir = debugfs_create_dir(str, hap_dir);
+		effect_dir = debugfs_create_dir("constant", hap_dir);
 
 		effect=constant_effect;
 		file = debugfs_create_file("brake", 0644, effect_dir,
