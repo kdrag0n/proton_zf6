@@ -7510,8 +7510,10 @@ static int print_battery_status(void) {
 		return 0;
 }
 void qpnp_smbcharger_polling_data_worker(int time) {
+	/*
 		cancel_delayed_work(&update_gauge_status_work);
 		schedule_delayed_work(&update_gauge_status_work, time * HZ);
+	*/
 }
 void static update_gauge_status_worker(struct work_struct *dat)
 {
@@ -7762,12 +7764,12 @@ static int fg_gen4_probe(struct platform_device *pdev)
 	//init_batt_cycle_count_data();
 	create_batt_cycle_count_proc_file();
 	register_reboot_notifier(&reboot_blk);
-	schedule_delayed_work(&battery_safety_work, 30 * HZ);
+	//schedule_delayed_work(&battery_safety_work, 30 * HZ);
 	//ASUS_BSP battery safety upgrade ---
 
 	//ASUS_BSP battery health upgrade +++
 	battery_health_data_reset();
-	schedule_delayed_work(&battery_health_work, 30 * HZ); //battery_health_work
+	//schedule_delayed_work(&battery_health_work, 30 * HZ); //battery_health_work
 	//schedule_delayed_work(&battery_metadata_work, BATTERY_METADATA_UPGRADE_TIME * HZ); //battery_metadata_work
 	//ASUS_BSP battery health upgrade ---
 
