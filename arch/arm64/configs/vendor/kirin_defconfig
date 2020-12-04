@@ -582,7 +582,7 @@ CONFIG_RANDOMIZE_MODULE_REGION_FULL=y
 #
 # Boot options
 #
-CONFIG_CMDLINE="console=tty0 loglevel=2"
+CONFIG_CMDLINE="console=tty0 loglevel=2 isolcpus=1-7"
 # CONFIG_CMDLINE_FROM_BOOTLOADER is not set
 CONFIG_CMDLINE_EXTEND=y
 # CONFIG_CMDLINE_FORCE is not set
