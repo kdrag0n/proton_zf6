@@ -565,7 +565,22 @@
 	};
 
 	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		stdout-path = "framebuffer0";
 		bootargs = "rcu_nocbs=0-7 cgroup.memory=nokmem,nosocket noirqdebug printk.devkmsg=on";
+
+		framebuffer0: framebuffer@9d400000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x9c000000 0x0 0x02400000>;
+			width = <1080>;
+			height = <2340>;
+			stride = <(1080 * 4)>;
+			format = "a8r8g8b8";
+			status = "okay";
+		};
 	};
 
 	soc: soc { };
@@ -707,6 +722,8 @@
 		};
 
 		cont_splash_memory: cont_splash_region {
+			compatible = "removed-dma-pool";
+			no-map;
 			reg = <0x0 0x9c000000 0x0 0x02400000>;
 			label = "cont_splash_region";
 		};
