@@ -1636,7 +1636,7 @@ pr_err("Randy MCU probe\n");
 			ret = -ENOMEM;
 			goto err_create_singlethread_workqueue;
 		}
-		queue_delayed_work(mcu_info->mcu_wq, &report_work, mcu_info->mcu_polling_delay);		 
+		//queue_delayed_work(mcu_info->mcu_wq, &report_work, mcu_info->mcu_polling_delay);		 
 //	}
 
 //	ret = MSP430FR2311_setup();
